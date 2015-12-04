@@ -21,13 +21,13 @@ Just an excerpt of the available functions and procedures:
 GPIO Functions:
 - procedure gpio_set_pin (pin:longword;highlevel:boolean); // Set RPi GPIO pin to high or low level
 - function  gpio_get_PIN (pin:longword):boolean; // Get RPi GPIO pin Level is true when Pin level is '1'; false when '0'
-- procedure gpio_set_input (pin:longword); // Set RPi GPIO pin to input direction 
-- procedure gpio_set_output(pin:longword); // Set RPi GPIO pin to output direction 
-- procedure gpio_set_alt (pin,altfunc:longword); // Set RPi GPIO pin to alternate function nr. 0..5 
-- procedure gpio_set_gppud (mask:longword); // set RPi GPIO Pull-up/down Register (GPPUD) with mask 
+- procedure gpio_set_input (pin:longword); // Set RPi GPIO pin to input direction
+- procedure gpio_set_output(pin:longword); // Set RPi GPIO pin to output direction
+- procedure gpio_set_alt (pin,altfunc:longword); // Set RPi GPIO pin to alternate function nr. 0..5
+- procedure gpio_set_gppud (mask:longword); // set RPi GPIO Pull-up/down Register (GPPUD) with mask
 
-- function rpi_snr:string; // delivers SNR: 0000000012345678 
-- function rpi_hw:string;  // delivers Processor Type: BCM2708 or BCM2709 
+- function rpi_snr:string; // delivers SNR: 0000000012345678
+- function rpi_hw:string;  // delivers Processor Type: BCM2708 or BCM2709
 
 I2C Functions:
 - function i2c_bus_write(baseadr,reg:word; var data:databuf_t; lgt:byte; testnr:integer) : integer;
