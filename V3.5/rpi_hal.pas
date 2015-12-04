@@ -72,8 +72,6 @@ const
   CR=#$0d; LF=#$0a;
   gpiomax_reg_c			=54; // max. gpio count (GPIO0-53) pls. see (BCM2709) 2012 Datasheet page 102ff 
   pfio_devnum_default	= 1; // SPI Devicenumber for PiFace Board1 (Default)
-  GPIO_StatusLED		=16; // GPIO16 -> Status LED on RPi PCB
-  GPIO_P2B_StatusLED	=47; // GPIO47 -> Status LED on RPi2B PCB
   GPIO_PWM0	   			=18; // GPIO18 PWM0 on Connector Pin12
   GPIO_PWM1				=19; // GPIO19 PWM1 on Connector Pin35 (RPI2)
   gpio_path_c='/sys/class/gpio';
@@ -530,6 +528,8 @@ procedure ENC_Test; 	// Encoder Test HWPins:15,16,18
 procedure SERVO_Test;	// Servo   Test HWPins:15,16,18 
 procedure SPI_Test; 	
 procedure i2c_test; 
+
+procedure MEM_SpeedTest;
 	 
 function  RPI_Piggyback_board_available  : boolean;  
 function  RPI_PiFace_board_available(devadr:byte) : boolean;  
@@ -754,7 +754,7 @@ var OldExitProc : Pointer;
 	HighPrecisionMicrosecondFactor : Int64 = 1; 
 	BB_pin	: longint;
 	morse_dit_lgt:word;
-
+	
 procedure delay_msec (Milliseconds:longword);  begin if Milliseconds>0 then sysutils.sleep(Milliseconds); end;
 function  CRC8(s:string):byte; var i,crc:byte; begin crc:=$00; for i := 1 to Length(s) do crc:=crc xor ord(s[i]); CRC8:=crc; end;
 procedure SetTimeOut (var EndTime:TDateTime; TimeOut_ms:Int64);     begin EndTime :=IncMilliSecond(now,TimeOut_ms); end;
@@ -1219,33 +1219,23 @@ end;
 {$ENDIF}
 
 procedure Get_CPU_INFO_Init;   
-{cat /proc/cpuinfo
-Code: Select all
-    revision        : 100000f
-Ignore the top 8 bits (which includes warranty bit). You want:
-if ((revision & 0xffffff) >= 4) then rev2 else rev1.
-Also:
-if ((revision & 0xffffff) >= 10) then 512M else 256M.
-
-												sudo cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq
-minimum CPU frequence (when your CPU is idle): 	sudo cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_min_freq
-current CPU frequence:							sudo cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_cur_freq
-
-}  
 const proc1_c='cat /proc/cpuinfo';  proc2_c='cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo';  
-var ts:TStringlist; sh:string; lw:longword; code:integer;
-
+var ts:TStringlist; lw:longword; code:integer;
   function cpuinfo_unix(infoline:string):string;
   var s:string; i:integer;
   begin
     s:=''; i:=1; while i<=ts.count do begin if Pos(Upper(infoline),Upper(ts[i-1]))=1 then begin s:=ts[i-1]; i:=ts.count+1 end; inc(i); end;
 	cpuinfo_unix:=copy(s,Pos(':',s)+2,Length(s));
   end;
-
+  function RPI_SetInfo(cpurevs,desc:string; cpurev,i2cbusnr,gpioidx,slednr,pincnt:byte):string;
+  begin
+    connector_pin_count:=pincnt; cpu_rev_num:=cpurev; i2c_busnum:=i2cbusnr; 
+    gpio_map_idx:=gpioidx; 	status_led_GPIO:=slednr; 
+    RPI_SetInfo:=desc+';'+cpurevs+';'+Num2Str(connector_pin_count,0);	//	  rev2;512MB;B;000d;26	
+  end;
 begin 
    cpu_snr:='';  cpu_hw:='';   cpu_proc:=''; cpu_rev:=''; cpu_mips:=''; cpu_feat:=''; cpu_rev_num:=0;
-   cpu_fmin:=''; cpu_fcur:=''; cpu_fmax:=''; i2c_busnum:=0; status_led_GPIO:=0;   
-   connector_pin_count:=26;
+   cpu_fmin:=''; cpu_fcur:=''; cpu_fmax:=''; i2c_busnum:=0; status_led_GPIO:=0; connector_pin_count:=40;
   {$IFDEF UNIX}  
 	ts:=TStringList.Create;
 	if call_external_prog(proc2_c+'_min_freq',ts)=0 then begin if ts.count>0 then cpu_fmin:=ts[0]; end; ts.clear;
@@ -1259,28 +1249,26 @@ begin
 	  cpu_proc:=cpuinfo_unix('Processor');
 	  cpu_mips:=cpuinfo_unix('BogoMIPS');
 	  cpu_feat:=cpuinfo_unix('Features');
-	  
 	  cpu_rev:= cpuinfo_unix('Revision');
-	  i2c_busnum:=1; status_led_GPIO:=GPIO_StatusLED;	  
-      cpu_rev_num:=0; gpio_map_idx:=cpu_rev_num; sh:=''; val('$'+cpu_rev,lw,code); if code<>0 then lw:=0; 
+	  i2c_busnum:=1; status_led_GPIO:=47;   
+      cpu_rev_num:=0; gpio_map_idx:=cpu_rev_num; val('$'+cpu_rev,lw,code); if code<>0 then lw:=0; 
 //writeln('cpuinfo ',hex(lw,8));
-//40 PINs on Models: A+, B+ and B2
 //http://elinux.org/RPi_HardwareHistory
 //http://www.raspberrypi-spy.co.uk/2012/09/checking-your-raspberry-pi-board-version/
       case (lw and $7fffff) of // mask out overvoltage bit
-        $00..$03 : begin sh:='rev1;256MB;B';  	cpu_rev_num:=1; i2c_busnum:=0; gpio_map_idx:=1; end;
-	    $04..$06 : begin sh:='rev2;256MB;B';  	cpu_rev_num:=2; i2c_busnum:=1; gpio_map_idx:=2; end;
-		$07..$09 : begin sh:='rev2;256MB;A';  	cpu_rev_num:=2; i2c_busnum:=1; gpio_map_idx:=2; end;
-		$0d..$0f : begin sh:='rev2;512MB;B';  	cpu_rev_num:=2; i2c_busnum:=1; gpio_map_idx:=2; end;
-		$10      : begin sh:='rev1;512MB;B+';	cpu_rev_num:=1; i2c_busnum:=0; gpio_map_idx:=2; connector_pin_count:=40; end;
-		$11      : begin sh:='rev1;512MB;CM'; 	cpu_rev_num:=1; i2c_busnum:=0; gpio_map_idx:=2; connector_pin_count:=0;  end; // computemodule
-		$12      : begin sh:='rev1;256MB;A+'; 	cpu_rev_num:=1; i2c_busnum:=0; gpio_map_idx:=2; connector_pin_count:=40; end;
-		$100092	 : begin sh:='rev1;512MB;Zero'; cpu_rev_num:=1; i2c_busnum:=0; gpio_map_idx:=2; connector_pin_count:=40; end; // Pi Zero
+        $00..$03 : cpu_rev:=RPI_SetInfo(cpu_rev,'rev1;256MB;B', 1,0,1,16,26);
+	    $04..$06 : cpu_rev:=RPI_SetInfo(cpu_rev,'rev2;256MB;B', 2,1,2,16,26);
+		$07..$09 : cpu_rev:=RPI_SetInfo(cpu_rev,'rev2;256MB;A', 2,1,2,16,26);
+		$0d..$0f : cpu_rev:=RPI_SetInfo(cpu_rev,'rev2;512MB;B', 2,1,2,16,26);
+		$10      : cpu_rev:=RPI_SetInfo(cpu_rev,'rev1;512MB;B+',1,0,2,47,40);
+		$11      : cpu_rev:=RPI_SetInfo(cpu_rev,'rev1;512MB;CM',1,0,2,47, 0); // computemodule
+		$12      : cpu_rev:=RPI_SetInfo(cpu_rev,'rev1;256MB;A+',1,0,2,47,40);
+		$100092	 : cpu_rev:=RPI_SetInfo(cpu_rev,'rev1;512MB;Z', 1,0,2,47,40); // Pi Zero
 		$221041,	// a21041 or a01041 (overvoltage bit was masked out)  
-		$201041	 : begin sh:='rev3;1GB;PI2B'; 	cpu_rev_num:=3; i2c_busnum:=1; gpio_map_idx:=2; connector_pin_count:=40; status_led_GPIO:=GPIO_P2B_StatusLED; end;
-      end;	  
-      cpu_rev :=sh+';'+cpu_rev;  
-//writeln(sh,' ',cpu_rev_num);	  
+		$201041	 : cpu_rev:=RPI_SetInfo(cpu_rev,'rev3;1GB;PI2B',3,1,2,47,40);
+		else LOG_Writeln(LOG_ERROR,'Get_CPU_INFO_Init: (0x'+Hex(lw,8)+') unknown rev:'+cpu_rev+': RPI not supported');
+      end;	   
+//    writeln(cpu_rev_num);	  
     end;	
 	ts.free;   
   {$ENDIF}
@@ -1330,14 +1318,14 @@ function RPI_PiFace_board_available(devadr:byte): boolean; 	begin RPI_PiFace_boa
 function rpi_run_on_known_hw:boolean;     					begin rpi_run_on_known_hw := (rpi_mmap_get_info(7)=1); end;
 function rpi_platform_ok:boolean; 							begin rpi_platform_ok:= ((rpi_run_on_known_hw)) end;
 
-function  gpio_get_Mask(gpio:longword; altfunc:t_port_dir):longword;
+function  gpio_get_ALTMask(gpio:longword; altfunc:t_port_dir):longword;
 //INPUT=0; OUTPUT=1; ALT0=4; ALT1=5; ALT2=6; ALT3=7; ALT4=3; ALT5=2;
 var msk,afkt:longword;
 begin
   afkt:=ord(altfunc) and $7; 
   if (altfunc=INPUT) then afkt:=7; // Reset Mask
   msk:=(afkt shl ((gpio mod 10)*3));
-  gpio_get_Mask:=msk;
+  gpio_get_ALTMask:=msk;
 end;
 
 procedure gpio_get_mask_and_idxOfs(regidx,gpio:longword; var idxofs:longint; var mask:longword);
@@ -1388,6 +1376,20 @@ var lw:longword;
 begin 
   if valid_gpio_regidx(regidx) then lw:=mmap_arr_gpio^[regidx] else lw:=0;
   gpio_get_reg:=lw;
+end;
+
+procedure MEM_SpeedTest; // just for investigations
+// tests access speed to RPI Registers vs. regular memory.  
+// result: access to register is around 6 times slower than access to memory !!!
+const loops=10000000;
+var i,lw,lw1:longword; dt1,dt2,dt3:TDateTime;
+begin
+  lw:=1234; lw1:=lw; if lw1>0 then ;
+  dt1:=now; for i:=1 to loops do lw1:=lw;
+  dt2:=now; for i:=1 to loops do lw1:=mmap_arr_gpio^[GPTEST]; 
+  dt3:=now; 
+  writeln('mem:  ',MilliSecondsBetween(dt2,dt1),'ms');
+  writeln('mmap: ',MilliSecondsBetween(dt3,dt2),'ms');
 end;
 
 procedure gpio_set_reg(regidx,mask:longword; and_mask,readmodifywrite:boolean);
@@ -1774,7 +1776,7 @@ procedure gpio_set_RESET(gpio:longword);
 var idx,mask:longword;
 begin // RESET 3Bits @ according gpio location within register GPFSELn
   gpio_get_mask_and_idx(GPFSEL,gpio,idx,mask);
-  gpio_set_reg(idx,(not gpio_get_Mask(gpio,INPUT)),true,true); 
+  gpio_set_reg(idx,(not gpio_get_ALTMask(gpio,INPUT)),true,true); 
 end;
   
 procedure gpio_set_INPUT (gpio:longword); 
@@ -1789,7 +1791,7 @@ begin
   Log_Writeln(LOG_DEBUG,'gpio_set_OUTPUT: GPIO'+Num2Str(gpio,0)); 
   gpio_get_mask_and_idx(GPFSEL,gpio,idx,mask);
   gpio_set_RESET(gpio); // Always use gpio_set_RESET(x) before using gpio_set_OUTPUT(x), to reset Bits
-  gpio_set_reg(idx,gpio_get_Mask(gpio,OUTPUT),false,true); 
+  gpio_set_reg(idx,gpio_get_ALTMask(gpio,OUTPUT),false,true); 
 end; 
 
 procedure gpio_set_ALT(gpio:longword; altfunc:t_port_dir);
@@ -1798,7 +1800,7 @@ begin
   Log_Writeln(LOG_DEBUG,'gpio_set_ALT: GPIO'+Num2Str(gpio,0)+' AltFunc:'+Num2Str(ord(altfunc),0)); 
   gpio_get_mask_and_idx(GPFSEL,gpio,idx,mask);
   gpio_set_RESET(gpio); // Always use gpio_set_RESET(x) before using gpio_set_ALT(x,y), to reset Bits
-  gpio_set_reg(idx,gpio_get_Mask(gpio,altfunc),false,true);
+  gpio_set_reg(idx,gpio_get_ALTMask(gpio,altfunc),false,true);
 end;
 
 function  pwm_SW_Thread(ptr:pointer):ptrint;
@@ -2040,7 +2042,7 @@ begin
 	if (ReversePOLARITY IN portflags) then polarity:=1 else polarity:=0;
     port_dir:=portdir; 
 	if (port_dir=PWMHW) and (not ((gpio=GPIO_PWM0) or (gpio=GPIO_PWM1))) then port_dir:=PWMSW;		
-	initok:=(gpio>=0); 
+	initok:=((gpio>=0) and (gpio<64)); 
 	if initok then 
 	begin
 	  gpio_get_mask_and_idxOfs(GPFSEL,gpio,idxofs_3Bit,mask_3Bit);
@@ -2088,7 +2090,6 @@ begin
 		  gpio_set_edge_falling(gpio,(FallingEDGE IN portflags)); 		// enable/disable FallingEdge		  
 		  gpio_set_PULLUP      (gpio,(PullUP      IN portflags)); 		// enable/disable PullUP
 		  gpio_set_PULLDOWN    (gpio,(PullDOWN    IN portflags)); 		// enable/disable PulDOWN *)
-		  
 //		  writeln('GPIO_Setup: ',ord(port_dir));
 	      case port_dir of
 		    INPUT:  begin gpio_set_PINMODE (gpio,INPUT);  end; 
@@ -2250,16 +2251,6 @@ begin
   if GPIO_Setup   (GPIO_struct) then
   begin
     gpio_ShowConnector; GPIO_ShowStruct(GPIO_struct); 		
-	(*if not HWPWM then
-	begin
-	  GPIO_struct.TermThread:=true;
-	  for i:= 1 to 10 do
-	  begin
-	    writeln('High:'); gpio_set_PIN(GPIO_struct.gpio,true);  sleep(10000);
-		writeln('LOW: '); gpio_set_PIN(GPIO_struct.gpio,false); sleep(10000);
-	  end;
-	  halt;
-	end;*)
 	i:=0; cnt:=1;
 	repeat
 	  if (i>(maxval-1)) then 
@@ -2530,7 +2521,7 @@ function  ENC_Device(ptr:pointer):ptrint;
 	3	1	0		1			3	1 step counter clockwise *)
 const SwitchDebounceTime_ms=100;	// Switch has to be pressed for a minimum time to be recognized
 	  SwitchRepeatTime_ms= 1000;	// inc count every xx ms
-var   hdl:longint; dt:TDateTime;
+var   hdl:longint; regval:longword; dt:TDateTime;
 begin 
   hdl:=longint(ptr);
   if (hdl>=1) and (hdl<=ENC_cnt) then
@@ -2544,14 +2535,17 @@ begin
 	      SetTimeOut(SyncTime,ENC_SyncTime_c); // next allowed read time
 //        writeln('ThreadStart ',TermThread,' ',sleeptime_ms); 
 		  begin
-			EnterCriticalSection(ENC_CS); 			  
-              if (mmap_arr_gpio^[A_Sig.regget] and A_Sig.mask_1Bit)>0 then a:=1 else a:=0;
-	          if (mmap_arr_gpio^[B_Sig.regget] and B_Sig.mask_1Bit)>0 then b:=1 else b:=0;
+			EnterCriticalSection(ENC_CS); 		
+              regval:=mmap_arr_gpio^[A_Sig.regget];
+              if (regval and A_Sig.mask_1Bit)>0 then a:=1 else a:=0;
+			  if A_Sig.regget<>B_Sig.regget then regval:=mmap_arr_gpio^[B_Sig.regget];
+	          if (regval and B_Sig.mask_1Bit)>0 then b:=1 else b:=0;
 			  a:=(a xor A_Sig.polarity); b:=(b xor B_Sig.polarity);
 			  seq:=(a xor b) or (b shl 1);
 			  if SW_Sig.gpio>=0 then 
 			  begin 
-			    if (mmap_arr_gpio^[SW_Sig.regget] and SW_Sig.mask_1Bit)>0 then sw:=1 else sw:=0;
+			    if A_Sig.regget<>SW_Sig.regget then regval:=mmap_arr_gpio^[SW_Sig.regget];
+			    if (regval and SW_Sig.mask_1Bit)>0 then sw:=1 else sw:=0;
 				if ((sw xor SW_Sig.polarity)=0)
 					then SetTimeOut     (dt,SwitchDebounceTime_ms) // Retrigger press time
 					else if TimeDebounce(dt,SwitchRepeatTime_ms) then inc(switchcounter);
