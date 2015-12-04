@@ -1,4 +1,4 @@
-unit rpi_hal; // V3.5 // xx.xx.201x
+unit rpi_hal; // V3.5 // 04.12.2015
 {$MODE OBJFPC}
 { rpi_hal:
 * Free Pascal Hardware abstraction library for the Raspberry Pi
@@ -19,15 +19,14 @@ unit rpi_hal; // V3.5 // xx.xx.201x
 * along with rpi_hal. If not, see <http://www.gnu.org/licenses/>.
 *
 *********************************************************************** 
-// support for the following RPI-Models: A,B,A+,B+,Pi2B,Zero 
+//support for the following RPI-Models: A,B,A+,B+,Pi2B,Zero 
 //in complexer programs with multiple units, try e.g. following uses sequence, otherwise at
 //program termination you will get EAccessViolation : Access violation 
 //uses  rpi_hal,cthreads,BaseUnix,Unix,classes,sysutils,strings,strutils,<your units>
 //Info:  http://wiki.freepascal.org/Lazarus_on_Raspberry_Pi
 //pls. report bugs and discuss code enhancements here:
 //Forum: http://www.lazarus.freepascal.org/index.php/topic,20991.0.html 
-//If you use Lazarus and if you get Runtime error 211,
-//then modify the Lazarus IDE compiler options:
+//If you use Lazarus, then modify the Lazarus IDE compiler options:
 //Project -> Project Options ... -> Compiler Options -> Other and add: -dUseCThreads    
 //pls. see http://forum.lazarus.freepascal.org/index.php/topic,20991.30.html, post from katonacs73
 //
@@ -71,18 +70,15 @@ uses {$IFDEF UNIX}    cthreads,cmem,BaseUnix,Unix,unixutil, {$ENDIF}
 const
   AN=true; AUS=false;
   CR=#$0d; LF=#$0a;
+  gpiomax_reg_c			=54; // max. gpio count (GPIO0-53) pls. see (BCM2709) 2012 Datasheet page 102ff 
   pfio_devnum_default	= 1; // SPI Devicenumber for PiFace Board1 (Default)
-  rpi_status_led_GPIO	=16; // GPIO16 -> Status LED on RPi PCB
+  GPIO_StatusLED		=16; // GPIO16 -> Status LED on RPi PCB
+  GPIO_P2B_StatusLED	=47; // GPIO47 -> Status LED on RPi2B PCB
   GPIO_PWM0	   			=18; // GPIO18 PWM0 on Connector Pin12
   GPIO_PWM1				=19; // GPIO19 PWM1 on Connector Pin35 (RPI2)
   gpio_path_c='/sys/class/gpio';
-  gpio_INPUT=0;
-  gpio_OUTPUT=1;
-  gpio_ALT=2;
-  gpio_PWMOUT=3;
   mdl=9;
   gpiomax_map_idx_c=2;
-  gpiomax_reg_c=53;	// gpio count. processors capability (GPIO0-53) see (BCM2709) Datasheet page 102ff 
   max_pins_c = 40;
 //Map Pin-Nr on HW Header P1 to GPIO-Nr. (http://elinux.org/RPi_Low-level_peripherals)  
   UKN=-99; WRONGPIN=UKN-1; V5=-98; V33=-97; GND=-96; DNC=-95; IDSC=-94; IDSD=-93;
@@ -103,7 +99,7 @@ const
   W1__Pin_on_RPI_Header=07; // =GPIO4  -> 1Wire BitBang
   Int_SPI_01_RPI_Header=18; // =GPIO24 -> Int Pin SPI1 on JP1 Pin5
 
- { Physical addresses range from 0x20000000 to 0x20FFFFFF for peripherals. 
+ {  BCM2708: Physical addresses range from 0x20000000 to 0x20FFFFFF for peripherals. 
     The bus addresses for peripherals are set up to map onto the peripheral 
 	bus address range starting at 0x7E000000. 
 	Thus a peripheral advertised here at bus address 0x7Ennnnnn is available 
@@ -111,7 +107,7 @@ const
 	
   PAGE_SIZE				= 4096;	
   BCM2708_PBASE_pag		= $20000; 	// Peripheral Base in pages 
-  BCM2709_PBASE_pag		= $3F000; 	// Peripheral Base in pages 
+  BCM2709_PBASE_pag		= $3F000; 	// Peripheral Base in pages (RPI2B Processor)
   
   TIMR_BASE_OFS_in_pages= $00B;
   PADS_BASE_OFS_in_pages= $100; 
@@ -135,7 +131,9 @@ const
   GPAFEN			= GPIO_BASE+$22; // Pin Async. FallingEdge Detection 
   GPPUD				= GPIO_BASE+$25; // Pin Pull-up/down Enable 
   GPPUDCLK			= GPIO_BASE+$26; // Pin Pull-up/down Enable Clock 
-  GPIO_BASE_LAST	= GPPUDCLK;
+  GPTEST			= GPIO_BASE+$29;
+  GPIO_BASE_LAST	= GPTEST;
+  GPIOONLYREAD		= GPLEV;		 // 2x 32Bit Register, which are ReadOnly
 
   PWM_BASE			= 0;
   PWMCTL 			= PWM_BASE+$00;	//  0
@@ -220,7 +218,7 @@ const
   I2C_PEC            = $0708;  { != 0 for SMBus PEC                     }
   I2C_SMBUS          = $0720;  { SMBus-level access                     }
     
-  I2C_CTRL_REG		 =  0; { Register Indexes } 
+  I2C_CTRL_REG		 =  0; 	{ Register Index } 
   I2C_STATUS_REG	 =  1;
   I2C_DLEN_REG		 =  2;
   I2C_A_REG			 =  3;
@@ -251,7 +249,9 @@ const
   I2C_FUNC_SMBUS_BYTE_DATA        = I2C_FUNC_SMBUS_READ_BYTE_DATA  or I2C_FUNC_SMBUS_WRITE_BYTE_DATA;
   I2C_FUNC_SMBUS_WORD_DATA        = I2C_FUNC_SMBUS_READ_WORD_DATA  or I2C_FUNC_SMBUS_WRITE_WORD_DATA;
   I2C_FUNC_SMBUS_BLOCK_DATA       = I2C_FUNC_SMBUS_READ_BLOCK_DATA or I2C_FUNC_SMBUS_WRITE_BLOCK_DATA;
-  I2C_FUNC_SMBUS_I2C_BLOCK        = I2C_FUNC_SMBUS_READ_I2C_BLOCK  or I2C_FUNC_SMBUS_WRITE_I2C_BLOCK;   
+  I2C_FUNC_SMBUS_I2C_BLOCK        = I2C_FUNC_SMBUS_READ_I2C_BLOCK  or I2C_FUNC_SMBUS_WRITE_I2C_BLOCK;  
+
+  rpi_i2c_general_purpose_bus_c=1;  
     
   USB_IOC_MAGIC     = 'U';
   SPI_IOC_MAGIC     = 'k';
@@ -274,9 +274,6 @@ const
   _IOC_DIRSHIFT  	= (_IOC_SIZESHIFT+_IOC_SIZEBITS);
   
   c_max_Buffer   	= 128;  { was 024  }
-  
-  rpi_i2c_general_purpose_bus_c=1;
-  
   NO_TEST        	= 0;
   
   RTC_RD_TIME 		= -2145095671;
@@ -322,15 +319,21 @@ const
   
 type
   t_ErrorLevel=(LOG_All,LOG_DEBUG,LOG_INFO,Log_NOTICE,Log_WARNING,Log_ERROR,Log_URGENT,LOG_NONE); 
-  t_port_dir   	= (input,output,pwmhw,pwmsw,control);
+//t_port_dir order is important, do not change. Ord(t_port_dir) will be used to set ALT-Bits in GPFSELx Registers.
+// ORD:				   0,     1,   2,   3,   4,   5,   6,   7,    8,    9      10
+  t_port_dir   	= (INPUT,OUTPUT,ALT5,ALT4,ALT0,ALT1,ALT2,ALT3,PWMHW,PWMSW,control); 
+  t_port_flags  = (Simulation,PullUP,PullDOWN,RisingEDGE,FallingEDGE,ReversePOLARITY);  
+  s_port_flags  = Set of t_port_flags;
   T_PowerSwitch	= (ELRO,Sartano,Nexa,Intertechno,FS20);
   t_MemoryMapPtr= ^t_MemoryMap;
-  t_MemoryMap=array[0..(PAGE_SIZE div SizeOf(Longword))-1] of Longword; { for 32 Bit access }  
+  t_MemoryMap	= array[0..(PAGE_SIZE div SizeOf(Longword))-1] of Longword; { for 32 Bit access }  
+  buftype 		= array[0..c_max_Buffer-1] of byte;
   
-  buftype = array[0..c_max_Buffer-1] of byte;
+  cint = longint; cuint= longword;
   
-  cint = longint;
-  cuint= longword;
+  rtc_time_t = record
+    tm_sec,tm_min,tm_hour,tm_mday,tm_mon,tm_year,tm_wday,tm_yday,tm_isdst : longint;
+  end;
 	
   databuf_t = record
     lgt : longword;
@@ -339,55 +342,9 @@ type
     reg : byte;
     buf : array[0..c_max_Buffer-1] of byte;
   end;  
-
-  rtc_time_t = record
-    tm_sec,tm_min,tm_hour,tm_mday,tm_mon,tm_year,tm_wday,tm_yday,tm_isdst : longint;
-  end;
   
-  GPIO_ptr	   = ^GPIO_struct_t;
-  GPIO_struct_t = record
-    description		: string[25];
-    gpio,HWPin,nr	: longint;
-	idx,mask		: longword;
-	initok,
-	TermThread,
-	ein,simulation	: boolean;
-	port_dir		: t_port_dir;
-	pwm_mode		: byte;
-	pwm_dutycycle_us,
-	pwm_period_us,
-	pwm_dutyrange,
-	pwm_value		: longword;	
-	pwm_freq_hz		: real;
-  end;
-  
-  SERVO_struct_t = record
-    HWAccess		: GPIO_struct_t;
-	angle_current	: longint;
-	min_dutycycle,						// -180 Degree	(max left turn)
-	mid_dutycycle,						//    0 Degree	(mid/neutral position)
-	max_dutycycle	: longword;			//  180 Degree	(max right turn)	
-  end;
-  
-  ENC_ptr	   = ^ENC_struct_t;
-  ENC_struct_t = record	// Encoder data structure
-    ENC_CS : TRTLCriticalSection;
-	SyncTime: TDateTime;									// for syncing max. device queries
-//  ENCptr:ENC_ptr; 
-    Handle:integer;
-	seq,seqold,deltaold,delta,
-    A_gpio,B_gpio,SW_gpio,IDX_gpio:longint;
-	idxcounter,counter,counterold,cycles,
-	switchcounter,countermax,sleeptime_ms:longword;
-	A_HdrPin,B_HdrPin,SW_HdrPin:longint;
-	TermThread,ok,
-	pullup,s2minmax:boolean;
-	a,b,steps_per_cycle:byte; 
-  end;
-    
   TProcedureOneArgCall = procedure(i:integer);
   TFunctionOneArgCall  = function (i:integer):integer;
-  
   isr_t = record
     devnum					: byte;
     enter_isr_routine,
@@ -405,7 +362,56 @@ type
 	last_isr_servicetime	: int64;
   end;
   
-   spi_databuf_t = record
+  PWM_struct_t = record
+  	pwm_mode		: byte;
+	pwm_dutycycle_us,
+	pwm_period_us,
+	pwm_dutyrange,
+	pwm_value		: longword;	
+	pwm_freq_hz		: real;
+  end;
+  
+  GPIO_ptr	   = ^GPIO_struct_t;
+  GPIO_struct_t = record
+    description		: string[25];
+    gpio,HWPin,
+	idxofs_1Bit,
+	idxofs_3Bit,nr	: longint;
+	regget,
+	regset,regclr,
+	mask_3Bit,
+	mask_1Bit		: longword;
+	polarity		: byte;
+	initok,
+	TermThread,ein	: boolean;
+	port_dir		: t_port_dir;
+	PWM				: PWM_struct_t;
+	portflags		: s_port_flags;
+  end;
+  
+  SERVO_struct_t = record
+    HWAccess		: GPIO_struct_t;
+	angle_current	: longint;
+	min_dutycycle,						// -180 Degree	(max left turn)
+	mid_dutycycle,						//    0 Degree	(mid/neutral position)
+	max_dutycycle	: longword;			//  180 Degree	(max right turn)	
+  end;
+  
+  ENC_ptr	   = ^ENC_struct_t;
+  ENC_struct_t = record					// Encoder data structure
+    ENC_CS : TRTLCriticalSection;
+	SyncTime: TDateTime;				// for syncing max. device queries
+//  ENCptr:ENC_ptr; 
+    Handle:integer;
+	A_Sig,B_Sig,SW_Sig:GPIO_struct_t;
+	seq,seqold,deltaold,delta:longint;
+	idxcounter,counter,counterold,cycles,
+	switchcounter,countermax,sleeptime_ms:longword;
+	TermThread,ok,s2minmax:boolean;
+	a,b,sw,steps_per_cycle:byte; 
+  end;
+      
+  spi_databuf_t = record
     reg			: byte;
     buf			: array[0..SPI_BUF_SIZE_c-1] of byte;
 	posidx,
@@ -499,7 +505,7 @@ type
        PID_PrevAbsError: PID_float_t;
   end;
   	       
-var 
+var
   testnr,mem_fd : integer; _TZLocal:longint; _TZOffsetString:string[10];
   mmap_arr_gpio,mmap_arr_pwm,mmap_arr_clk : t_MemoryMapPtr; 
 
@@ -520,7 +526,7 @@ var
 procedure GPIO_PIN_TOGGLE_TEST;                 { just for demo reasons, call it from your own program. Be careful, it toggles GPIO pin 16 -> StatusLED }
 procedure GPIO_TestAll;
 procedure GPIO_PWM_Test;// Test with GPIO18 PWM0 on Connector Pin12
-procedure ENC_Test; 	// Encoder Test HWPin:11 and HWPin:12 
+procedure ENC_Test; 	// Encoder Test HWPins:15,16,18 
 procedure SERVO_Test;	// Servo   Test HWPins:15,16,18 
 procedure SPI_Test; 	
 procedure i2c_test; 
@@ -535,9 +541,9 @@ function  rpi_mmap_get_info (modus:longint)  : longword;
 procedure rpi_show_all_info;
 procedure rpi_show_SBC_info;
 
-procedure Toggle_GPIO16_very_fast;
+procedure Toggle_STATUSLED_very_fast;
 
-procedure LED_Status     (ein:boolean); 		 { Switch Status-LED on or off }
+procedure LED_Status    (ein:boolean); 		 // Switch Status-LED on or off
 
 procedure pwm_SetStruct (var GPIO_struct:GPIO_struct_t);  // set default values
 procedure pwm_SetStruct (var GPIO_struct:GPIO_struct_t; mode:byte; freq_Hz:real; dutyrange,startval:longword);
@@ -547,31 +553,30 @@ procedure pwm_SetClock  (var GPIO_struct:GPIO_struct_t); // same clock for PWM0 
 
 procedure GPIO_ShowStruct(var GPIO_struct:GPIO_struct_t);
 procedure GPIO_SetStruct(var GPIO_struct:GPIO_struct_t); // set default values
-procedure GPIO_SetStruct(var GPIO_struct:GPIO_struct_t; portdir:t_port_dir; num,HdrPin:longint; desc:string; simul:boolean);
+procedure GPIO_SetStruct(var GPIO_struct:GPIO_struct_t; portdir:t_port_dir; num,gpionum:longint; desc:string; flags:s_port_flags);
 procedure GPIO_Switch   (var GPIO_struct:GPIO_struct_t; switchon:boolean);
 function  GPIO_Setup    (var GPIO_struct:GPIO_struct_t):boolean;
 
-function  gpio_MAP_GPIO_NUM_2_HDR_PIN(pin:longword; mapidx:byte):longint; { Maps GPIO Number to the HDR_PIN }
-function  gpio_MAP_GPIO_NUM_2_HDR_PIN(pin:longword):longint;
+function  gpio_MAP_GPIO_NUM_2_HDR_PIN(gpio:longword; mapidx:byte):longint; { Maps GPIO Number to the HDR_PIN }
+function  gpio_MAP_GPIO_NUM_2_HDR_PIN(gpio:longword):longint;
 function  gpio_MAP_HDR_PIN_2_GPIO_NUM(hdr_pin_number:longword; mapidx:byte):longint; { Maps HDR_PIN to the GPIO Number }
 function  gpio_MAP_HDR_PIN_2_GPIO_NUM(hdr_pin_number:longword):longint;
 
 procedure gpio_set_HDR_PIN(hw_pin_number:longword;highlevel:boolean); { Maps PIN to the GPIO Header }
 function  gpio_get_HDR_PIN(hw_pin_number:longword):boolean; { Maps PIN to the GPIO Header }
 
-procedure gpio_set_pin   (pin:longword;highlevel:boolean); { Set RPi GPIO pin to high or low level; Speed @ 700MHz ->  0.65MHz }
-function  gpio_get_PIN   (pin:longword):boolean; { Get RPi GPIO pin Level is true when Pin level is '1'; false when '0'; Speed @ 700MHz ->  1.17MHz }  
-function  gpio_get_PIN	 (pin,idx,mask:longword):boolean;
+procedure gpio_set_pin     (gpio:longword;highlevel:boolean); // Set RPi GPIO pin to high or low level; Speed @ 700MHz ->  0.65MHz
+function  gpio_get_PIN     (gpio:longword):boolean; // Get RPi GPIO pin Level is true when Pin level is '1'; false when '0'; Speed @ 700MHz ->  1.17MHz 
 
-procedure gpio_set_input (pin:longword);         { Set RPi GPIO pin to input  direction }
-procedure gpio_set_output(pin:longword);         { Set RPi GPIO pin to output direction }
-procedure gpio_set_alt   (pin,altfunc:longword); { Set RPi GPIO pin to alternate function nr. 0..5 }
-procedure gpio_set_PINMODE(pin,mode:longword);
-procedure gpio_set_gppud (mask:longword);        { set RPi GPIO Pull-up/down Register (GPPUD) with mask }
-procedure gpio_get_mask_and_idx(pin:longword; var idx,mask:longword);
-procedure gpio_set_PULLUP (pin:longword; enable:boolean); 
-procedure gpio_set_edge_rising (pin:longword; enable:boolean); { Pin RisingEdge  Detection Register (GPREN) }
-procedure gpio_set_edge_falling(pin:longword; enable:boolean); { Pin FallingEdge Detection Register (GPFEN) }
+procedure gpio_set_input   (gpio:longword);         // Set RPi GPIO pin to input  direction 
+procedure gpio_set_output  (gpio:longword);         // Set RPi GPIO pin to output direction 
+procedure gpio_set_ALT     (gpio:longword; altfunc:t_port_dir); // Set RPi GPIO pin to ALT0..ALT5 
+procedure gpio_set_PINMODE (gpio:longword; portfkt:t_port_dir);
+procedure gpio_set_PULLUP  (gpio:longword; enable:boolean); // enable/disable PullUp
+procedure gpio_set_PULLDOWN(gpio:longword; enable:boolean); // enable/disable PullDown
+procedure gpio_set_edge_rising (gpio:longword; enable:boolean); // Pin RisingEdge  Detection Register (GPREN)
+procedure gpio_set_edge_falling(gpio:longword; enable:boolean); // Pin FallingEdge Detection Register (GPFEN)
+procedure gpio_get_mask_and_idx(regidx,gpio:longword; var idxabs,mask:longword);
 {$IFDEF UNIX} 
 function  gpio_set_int    (var isr:isr_t; gpio_num:longint; isr_proc:TFunctionOneArgCall; rising_edge:boolean) : integer; // set up isr routine, gpio_number, int_routine which have to be executed, rising or falling_edge
 function  gpio_int_release(var isr:isr_t) : integer;
@@ -584,7 +589,8 @@ procedure pwm_show_regs;
 function  gpio_get_desc(regidx,regcontent:longword) : string;  
 procedure gpio_ShowConnector;
 
-function  ENC_Setup (hdl:integer; AHdrPin,BHdrPin,SWHdrPin:longint; pup,stick2minmax:boolean; ctrpreset,ctrmax,stepspercycle:longword):boolean;
+function  ENC_Setup(hdl:integer; var A_Signal,B_Signal:GPIO_struct_t;stick2minmax:boolean; ctrpreset,ctrmax,stepspercycle:longword):boolean;
+function  ENC_Setup(hdl:integer; var A_Signal,B_Signal,SW_Signal:GPIO_struct_t;stick2minmax:boolean; ctrpreset,ctrmax,stepspercycle:longword):boolean;
 function  ENC_GetVal       (hdl:byte; ctrsel:integer):real; 
 function  ENC_GetVal       (hdl:byte):real; 
 function  ENC_GetValPercent(hdl:byte):real; 
@@ -603,6 +609,7 @@ function  rpi_rev :string; { rev1;256MB;1000002 }
 function  rpi_freq :string;{ 700000;700000;900000;Hz }
 function  rpi_revnum:byte; { 1:rev1; 2:rev2; 0:error }
 function  rpi_gpiomapidx:byte; { 1:rev1; 2:rev2; 3:B+; 0:error }
+function  rpi_status_led_GPIO:byte;	
 function  rpi_i2c_busnum(func:byte):byte; { get the i2c busnumber, where e.g. the geneneral purpose devices are connected. This depends on rev1 or rev2 board . e.g. rpi_i2c_busnum(rpi_i2c_general_purpose_bus_c) }
 function  rpi_hdrpincount:byte; // connector_pin_count on HW Header
 procedure rpi_show_cpu_info;
@@ -672,9 +679,6 @@ procedure LOG_Save_Level;
 procedure Log_Set_Level(level:T_ErrorLevel); 
 procedure LOG_Restore_Level; 
 
-function  ReadBits (in_byte,bitStart,lgt:byte):byte;  { bitnum 8..1 }
-function  WriteBits(in_byte,bitStart,lgt,inplant:byte) : byte; { bitnum 8..1 }
-function  BitSet(q:qword;nr:byte) : Boolean; {.c checks if Bit 'nr' is set. (nr: 1 to 64) }
 function  Upper(const s : string) : String; 
 function  Lower(const s : string) : String;
 function  Bool2Str(b:boolean) : string; 
@@ -685,12 +689,10 @@ function  Str2Num(s:string; var num : longword) : boolean;
 function  Hex   (nr:qword;lgt:byte) : string; 
 function  HexStr(s:string):string;
 procedure ShowStringList(StrList:TStringList); 
-procedure MemCopy(src, dest:pointer; size:longint);
-procedure MemCopy2(src, dest : pointer; size,src_offs,dest_offs : longint);
+procedure MemCopy(src,dst:pointer; size:longint); 
+procedure MemCopy(src,dst:pointer; size,srcofs,dstofs:longint);
 function  DeltaTime_in_ms(dt1,dt2:TDateTime):int64;
 function  CRC8(s:string):byte;
-function  Bit_Set_OR_Mask(BitNr:byte) : byte;
-function  Bit_Reset_AND_Mask(BitNr:byte) : byte;
 procedure Set_stty_speed(ttyandspeed:string); // e.g. /dev/ttyAMA0@9600
 procedure SetUTCOffset; // time Offset in minutes form GMT to localTime
 function  GetUTCOffsetString(offset_Minutes:longint):string; { e.g. '+02:00' } 
@@ -747,7 +749,7 @@ implementation
 const int_filn_c='/tmp/gpio_int_setup.sh'; 
 var OldExitProc : Pointer;
     LOG_Level,LOG_OLD_Level:T_ErrorLevel;
-    cpu_rev_num,gpio_map_idx,connector_pin_count:byte;
+    cpu_rev_num,gpio_map_idx,i2c_busnum,connector_pin_count,status_led_GPIO:byte;
     cpu_snr,cpu_hw,cpu_proc,cpu_rev,cpu_mips,cpu_feat,cpu_fmin,cpu_fcur,cpu_fmax:string;
 	HighPrecisionMicrosecondFactor : Int64 = 1; 
 	BB_pin	: longint;
@@ -969,16 +971,14 @@ begin
   Anz_Item := anz;
 end;
 
-procedure MemCopy(src, dest:pointer; size:longint);  begin if size > 0 then Move(src^, dest^, size); end; 
-
-procedure MemCopy2(src, dest : pointer; size,src_offs,dest_offs : longint);
-var psrc,pdest:pointer;
+procedure MemCopy(src,dst:pointer; size:longint); begin if size>0 then Move(src^, dst^, size); end; 
+procedure MemCopy(src,dst:pointer; size,srcofs,dstofs:longint);
 begin
-  if size > 0 then
+  if size>0 then
   begin
-    psrc:=src; pdest:=dest;
-    inc(longint(psrc),src_offs); inc(longint(pdest),dest_offs); // !! ?? !!
-    Move(psrc^, pdest^, size);
+    {$warnings off} 
+      Move(pointer(longword(src)+srcofs)^, pointer(longword(dst)+dstofs)^, size);
+	{$warnings on} 
   end;
 end;
 
@@ -1244,7 +1244,7 @@ var ts:TStringlist; sh:string; lw:longword; code:integer;
 
 begin 
    cpu_snr:='';  cpu_hw:='';   cpu_proc:=''; cpu_rev:=''; cpu_mips:=''; cpu_feat:=''; cpu_rev_num:=0;
-   cpu_fmin:=''; cpu_fcur:=''; cpu_fmax:='';
+   cpu_fmin:=''; cpu_fcur:=''; cpu_fmax:=''; i2c_busnum:=0; status_led_GPIO:=0;   
    connector_pin_count:=26;
   {$IFDEF UNIX}  
 	ts:=TStringList.Create;
@@ -1261,23 +1261,24 @@ begin
 	  cpu_feat:=cpuinfo_unix('Features');
 	  
 	  cpu_rev:= cpuinfo_unix('Revision');
+	  i2c_busnum:=1; status_led_GPIO:=GPIO_StatusLED;	  
       cpu_rev_num:=0; gpio_map_idx:=cpu_rev_num; sh:=''; val('$'+cpu_rev,lw,code); if code<>0 then lw:=0; 
 //writeln('cpuinfo ',hex(lw,8));
 //40 PINs on Models: A+, B+ and B2
 //http://elinux.org/RPi_HardwareHistory
 //http://www.raspberrypi-spy.co.uk/2012/09/checking-your-raspberry-pi-board-version/
       case (lw and $7fffff) of // mask out overvoltage bit
-        $00..$03 : begin sh:='rev1;256MB;B';  	cpu_rev_num:=1; gpio_map_idx:=1; end;
-	    $04..$06 : begin sh:='rev2;256MB;B';  	cpu_rev_num:=2; gpio_map_idx:=2; end;
-		$07..$09 : begin sh:='rev2;256MB;A';  	cpu_rev_num:=2; gpio_map_idx:=2; end;
-		$0d..$0f : begin sh:='rev2;512MB;B';  	cpu_rev_num:=2; gpio_map_idx:=2; end;
-		$10      : begin sh:='rev1;512MB;B+';	cpu_rev_num:=1; gpio_map_idx:=2; connector_pin_count:=40; end;
-		$11      : begin sh:='rev1;512MB;CM'; 	cpu_rev_num:=1; gpio_map_idx:=2; connector_pin_count:=0;  end; // computemodule
-		$12      : begin sh:='rev1;256MB;A+'; 	cpu_rev_num:=1; gpio_map_idx:=2; connector_pin_count:=40; end;
-		$100092	 : begin sh:='rev1;512MB;Zero'; cpu_rev_num:=1; gpio_map_idx:=2; connector_pin_count:=40; end; // Pi Zero
+        $00..$03 : begin sh:='rev1;256MB;B';  	cpu_rev_num:=1; i2c_busnum:=0; gpio_map_idx:=1; end;
+	    $04..$06 : begin sh:='rev2;256MB;B';  	cpu_rev_num:=2; i2c_busnum:=1; gpio_map_idx:=2; end;
+		$07..$09 : begin sh:='rev2;256MB;A';  	cpu_rev_num:=2; i2c_busnum:=1; gpio_map_idx:=2; end;
+		$0d..$0f : begin sh:='rev2;512MB;B';  	cpu_rev_num:=2; i2c_busnum:=1; gpio_map_idx:=2; end;
+		$10      : begin sh:='rev1;512MB;B+';	cpu_rev_num:=1; i2c_busnum:=0; gpio_map_idx:=2; connector_pin_count:=40; end;
+		$11      : begin sh:='rev1;512MB;CM'; 	cpu_rev_num:=1; i2c_busnum:=0; gpio_map_idx:=2; connector_pin_count:=0;  end; // computemodule
+		$12      : begin sh:='rev1;256MB;A+'; 	cpu_rev_num:=1; i2c_busnum:=0; gpio_map_idx:=2; connector_pin_count:=40; end;
+		$100092	 : begin sh:='rev1;512MB;Zero'; cpu_rev_num:=1; i2c_busnum:=0; gpio_map_idx:=2; connector_pin_count:=40; end; // Pi Zero
 		$221041,	// a21041 or a01041 (overvoltage bit was masked out)  
-		$201041	 : begin sh:='rev3;1GB;PI2B'; 	cpu_rev_num:=3; gpio_map_idx:=2; connector_pin_count:=40; end;
-      end;
+		$201041	 : begin sh:='rev3;1GB;PI2B'; 	cpu_rev_num:=3; i2c_busnum:=1; gpio_map_idx:=2; connector_pin_count:=40; status_led_GPIO:=GPIO_P2B_StatusLED; end;
+      end;	  
       cpu_rev :=sh+';'+cpu_rev;  
 //writeln(sh,' ',cpu_rev_num);	  
     end;	
@@ -1285,107 +1286,18 @@ begin
   {$ENDIF}
 end;
 
-function Bit_Set_OR_Mask(BitNr:byte) : byte;
-{.c gibt Maske zurueck, um Bit an Stelle 'BitNr' [1..8] zu setzen }
-var b:byte;
-begin
-  if (BitNr>=1) and (BitNr<=8) then b:=(1 shl (BitNr-1)) else b:=0;
-  Bit_Set_OR_Mask:=b;
-end; { Bit_Set_OR_Mask }
-
-function Bit_Reset_AND_Mask(BitNr:byte) : byte;
-{.c gibt Maske zurueck, um Bit an Stelle 'BitNr' zurueckzusetzen }
-begin
-  Bit_Reset_AND_Mask := not Bit_Set_OR_Mask(BitNr);
-end; { Bit_Reset_AND_Mask }
-
-function  Bit_Set_OR_Mask32(BitNr:byte) : longword;
-{.c return Mask, to set Bit on position 'BitNr' [1..32] }
-var lw:longword;
-begin
-  if (BitNr>=1) and (BitNr<=32) then lw:=(1 shl (BitNr-1)) else lw:=0;
-  Bit_Set_OR_Mask32:=lw;
-end; { Bit_Set_OR_Mask32 }
-
-function  BitSlice32(data:longword; bitstartpos,slicelgt:byte) : longword;  
-{.c returns Bit slice area (Bit Nr. from  1 to 32) 
-i.e. data(bin) = 00101100; startpos=6; slicelgt=4; rslt:= 00001011 }
-var rslt,msk : longword; i:longint;
-begin
-  rslt := 0; msk:=0;
-  for i:= bitstartpos downto (bitstartpos-slicelgt+1) do msk := msk or Bit_Set_OR_Mask32(i);
-  rslt:= data and msk;
-  rslt:=rslt shr (bitstartpos-slicelgt);
-  BitSlice32 := rslt;
-end;
-
-function  BitMsk(bitstartpos,slicelgt:byte):longword;
-var msk:longword;
-begin
-  if slicelgt>bitstartpos then msk:=0 else msk:=($ffffffff shr ((SizeOf(msk)*8)-slicelgt)) shl (bitstartpos-slicelgt);
-  BitMsk:=msk;
-end;
-
-function  BitSet(q:qword;nr:byte):Boolean; {.c checks if Bit 'nr' is set. (nr: 1 to 64) } begin BitSet:=((q and (1 shl (nr-1)))>0); end; { BitSet }
-
 function  Bin(q:qword;lgt:Byte) : string;
 {.c shows q in binary representation: bbbb bbbb ... }
 var h : string; i : Byte;
 begin
-  h := '';
+  h:='';
   for i := (lgt-1) downto 0 do
   begin
-    if BitSet(q,i+1) then h:=h+'1' else h:=h+'0';
+    if ((q and (1 shl i))>0)   then h:=h+'1' else h:=h+'0';
 	if ((i mod 4)=0) and (i>0) then h:=h+' ';
   end;
   Bin:=h;
 end; { Bin }
-
-function  WriteBits(in_byte,bitStart,lgt,inplant:byte) : byte; { bitnum 8..1 }
-var b,mask,data:byte;
-begin
-    // 87654321 bit numbers
-    //      010 value to inplant in given in_byte
-    //    xxx   args: bitStart=5, lgt=3
-    // 00011100 mask
-    // 10101111 original value (in_byte)
-    // 10100011 original & ~mask
-    // 10101011 masked | value -> return value
-  b:=in_byte; data:=inplant;
-  if (bitStart<=8) and (lgt<=8) then 
-  begin
-	if lgt>0 then
-	begin
-      mask := ((1 shl lgt) - 1) shl (bitStart - lgt);
-      data := data shl (bitStart - lgt); // shift data into correct position
-      data := data and mask; // zero all non-important bits in data
-      b:=     b and (not mask); // zero all important bits in existing byte
-      b:=     b or data; // combine data with existing byte
-    end;
-  end;
-  WriteBits:=b;
-end;
-
-function  ReadBits(in_byte,bitStart,lgt:byte):byte;  { bitnum 8..1 }
-var b,mask:byte;
-begin                  
-  // 87654321 bit numbers                       
-  // 01101001 in_byte
-  //    xxx   args: bitStart=5, length=3
-  //    010   masked
-  //   -> 010 shifted -> return value
-  b:=0;
-  if (bitStart<=8) and (lgt<=8) then 
-  begin
-    if (in_byte <> 0) then 
-    begin
-      mask := ((1 shl lgt) - 1) shl (bitStart - lgt);
-      b := b and mask;
-      b := b shr (bitStart - lgt);
-    end;
-  end;
-  ReadBits:=b;
-end;
 
 procedure i2c_Fill_Test_Buffer(var data:databuf_t; testnr:integer; baseadr,reg,busnumber:byte); begin i2c_CleanBuffer(busnumber); end;
 
@@ -1416,66 +1328,122 @@ function rpi_run_on_ARM:boolean;       						begin rpi_run_on_ARM :=     (rpi_mm
 function RPI_Piggyback_board_available  : boolean; 			begin RPI_Piggyback_board_available:=(rpi_mmap_get_info(6)=1); end;
 function RPI_PiFace_board_available(devadr:byte): boolean; 	begin RPI_PiFace_board_available:=   (rpi_mmap_get_info(8)=1); end;
 function rpi_run_on_known_hw:boolean;     					begin rpi_run_on_known_hw := (rpi_mmap_get_info(7)=1); end;
-function rpi_platform_ok:boolean; 							begin rpi_platform_ok:= ((rpi_revnum<>0) and (rpi_run_on_known_hw)) end;
+function rpi_platform_ok:boolean; 							begin rpi_platform_ok:= ((rpi_run_on_known_hw)) end;
 
-function  rpi_mmap_gpio_reg_read (adr:longword) : longword; 
-var lw:longword;
-begin 
-  if mmap_arr_gpio<>nil then lw:=mmap_arr_gpio^[adr] else lw:=0;
-  rpi_mmap_gpio_reg_read:=lw;
+function  gpio_get_Mask(gpio:longword; altfunc:t_port_dir):longword;
+//INPUT=0; OUTPUT=1; ALT0=4; ALT1=5; ALT2=6; ALT3=7; ALT4=3; ALT5=2;
+var msk,afkt:longword;
+begin
+  afkt:=ord(altfunc) and $7; 
+  if (altfunc=INPUT) then afkt:=7; // Reset Mask
+  msk:=(afkt shl ((gpio mod 10)*3));
+  gpio_get_Mask:=msk;
 end;
 
-function  rpi_mmap_pwm_reg_read (adr:longword) : longword; 
-var lw:longword;
-begin 
-  if mmap_arr_pwm<>nil then lw:=mmap_arr_pwm^[adr] else lw:=0;
-  rpi_mmap_pwm_reg_read:=lw;
+procedure gpio_get_mask_and_idxOfs(regidx,gpio:longword; var idxofs:longint; var mask:longword);
+begin
+  idxofs:=0; mask:=0;
+  case regidx of  
+	GPFSEL : begin idxofs:=((gpio mod gpiomax_reg_c) div 10); mask:=(7 shl ((gpio mod 10)*3)); end;
+	else     begin idxofs:=((gpio mod gpiomax_reg_c) div 32); mask:=(1 shl ( gpio mod 32));    end;
+  end; // case
 end;
 
-function  rpi_mmap_clk_reg_read (adr:longword) : longword; 
-var lw:longword;
-begin 
-  if mmap_arr_clk<>nil then lw:=mmap_arr_clk^[adr] else lw:=0;
-  rpi_mmap_clk_reg_read:=lw;
+procedure gpio_get_mask_and_idx(regidx,gpio:longword; var idxabs,mask:longword);
+// out:idxabs gives absolute index
+var iofs:longint;
+begin
+  gpio_get_mask_and_idxOfs(regidx,gpio,iofs,mask); idxabs:=regidx+iofs; 
 end;
 
-function  rpi_mmap_gpio_reg_write(adr,value: longword) : longword;
+function  valid_gpio_regidx(regidx:longword):boolean;
+var ok:boolean;
+begin
+ ok:=((mmap_arr_gpio<>nil) and (regidx<=GPIO_BASE_LAST));
+ if not ok then
+   LOG_WRITELN(LOG_ERROR,'valid_gpio_regidx: not initialized or regidx not valid: '+num2Str(regidx,0));
+ valid_gpio_regidx:=ok;
+end;
+
+function  valid_pwm_regidx(regidx:longword):boolean;
+var ok:boolean;
+begin
+ ok:=((mmap_arr_pwm<>nil) and (regidx<=PWM_BASE_LAST));
+ if not ok then
+   LOG_WRITELN(LOG_ERROR,'valid_pwm_regidx: not initialized or regidx not valid: '+num2Str(regidx,0));
+ valid_pwm_regidx:=ok;
+end;
+
+function  valid_clk_regidx(regidx:longword):boolean;
+var ok:boolean;
+begin
+ ok:=((mmap_arr_clk<>nil) and (regidx<=PWMCLK_BASE_LAST));
+ if not ok then
+   LOG_WRITELN(LOG_ERROR,'valid_clk_regidx: not initialized or regidx not valid: '+num2Str(regidx,0));
+ valid_clk_regidx:=ok;
+end;
+
+function  gpio_get_reg (regidx:longword) : longword; 
+var lw:longword;
+begin 
+  if valid_gpio_regidx(regidx) then lw:=mmap_arr_gpio^[regidx] else lw:=0;
+  gpio_get_reg:=lw;
+end;
+
+procedure gpio_set_reg(regidx,mask:longword; and_mask,readmodifywrite:boolean);
+var value:longword;
+begin
+  if valid_gpio_regidx(regidx) then
+  begin
+    value:=mask;
+    if readmodifywrite then
+    begin
+	  if and_mask then value:=gpio_get_reg(regidx) and mask 
+				  else value:=gpio_get_reg(regidx) or  mask;
+    end;
+	mmap_arr_gpio^[regidx]:=value; 
+  end;
+end;
+
+function  pwm_get_reg (regidx:longword) : longword; 
+var lw:longword;
+begin 
+  if valid_pwm_regidx(regidx) then lw:=mmap_arr_pwm^[regidx] else lw:=0;
+  pwm_get_reg:=lw;
+end;
+
+function  pwm_set_reg(regidx,value: longword) : longword;
 var rslt:longword; 
 begin 
   rslt:=0;
-  if mmap_arr_gpio<>nil then
+  if valid_pwm_regidx(regidx) then
   begin
-    mmap_arr_gpio^[adr]:=value; //if mmap_arr_gpio^[adr]=value then rslt:=0;
-  //writeln('rpi_mmap_gpio_reg_write (get adr and mask)',adr,' ',Hex(value,8)); 
+    mmap_arr_pwm^[regidx]:=value; //if mmap_arr_pwm^[regidx]=value then rslt:=0;
+  //writeln('pwm_set_reg (get adr and mask)',regidx,' ',Hex(value,8)); 
   end;
-  rpi_mmap_gpio_reg_write:=rslt; 
+  pwm_set_reg:=rslt; 
 end;
 
-function  rpi_mmap_pwm_reg_write(adr,value: longword) : longword;
+function  clk_get_reg(regidx:longword) : longword; 
+var lw:longword;
+begin 
+  if valid_clk_regidx(regidx) then lw:=mmap_arr_clk^[regidx] else lw:=0;
+  clk_get_reg:=lw;
+end;
+
+function  clk_set_reg(regidx,value: longword) : longword;
 var rslt:longword; 
 begin 
   rslt:=0;
-  if mmap_arr_pwm<>nil then
+  if valid_clk_regidx(regidx) then
   begin
-    mmap_arr_pwm^[adr]:=value; //if mmap_arr_pwm^[adr]=value then rslt:=0;
-  //writeln('rpi_mmap_pwm_reg_write (get adr and mask)',adr,' ',Hex(value,8)); 
+    mmap_arr_clk^[regidx]:=value; //if mmap_arr_clk^[regidx]=value then rslt:=0;
+  //writeln('clk_set_reg (get adr and mask)',regidx,' ',Hex(value,8)); 
   end;
-  rpi_mmap_pwm_reg_write:=rslt; 
+  clk_set_reg:=rslt; 
 end;
 
-function  rpi_mmap_clk_reg_write(adr,value: longword) : longword;
-var rslt:longword; 
-begin 
-  rslt:=0;
-  if mmap_arr_clk<>nil then
-  begin
-    mmap_arr_clk^[adr]:=value; //if mmap_arr_clk^[adr]=value then rslt:=0;
-  //writeln('rpi_mmap_clk_reg_write (get adr and mask)',adr,' ',Hex(value,8)); 
-  end;
-  rpi_mmap_clk_reg_write:=rslt; 
-end;
-
-procedure gpio_start;
+function  gpio_start:integer;
 { Set up a memory region to access GPIO }
 var rslt,errno:longint; BCM270x_PBASE_pag:longword;
 begin
@@ -1506,6 +1474,7 @@ begin
 	else Log_writeln(Log_ERROR,'rpi_mmap_init, unknown error, result: '+Num2Str(rslt,0));
   end;
   if rslt<>0 then begin mmap_arr_gpio:=nil;	mmap_arr_pwm:=nil; mmap_arr_clk:=nil; end;
+  gpio_start:=rslt;
 end;
 
 procedure gpio_end;
@@ -1528,8 +1497,8 @@ end;
 
 function gpio_get_AltDesc(gpio:longint; altpin:byte; dfltifempty:string):string;
 // datasheet page 102 
-const maxidx_c=53; maxalt_c=5; res=''; intrnl='<intrnl>';
-      Alt_hdr_dsc_c   : array[0..maxalt_c] of array[0..maxidx_c] of string[mdl] = 
+const maxalt_c=5; res=''; intrnl='<intrnl>';
+      Alt_hdr_dsc_c   : array[0..maxalt_c] of array[0..gpiomax_reg_c-1] of string[mdl] = 
   (	// ALT0
     ( ('I2C SDA0'),		('I2C SCL0'),	('I2C SDA1'),	('I2C SCL1'),	('GPCLK0'),
 	  ('GPCLK1'),		('GPCLK2'),		('SPI0 CE1/'),	('SPI0 CE0/'),	('SPI0 MISO'),
@@ -1606,7 +1575,7 @@ const maxidx_c=53; maxalt_c=5; res=''; intrnl='<intrnl>';
 var sh:string;
 begin
   if (altpin>=0) and (altpin<=maxalt_c) and 
-	 (gpio>=0)   and (gpio<=maxidx_c)   then sh:=Alt_hdr_dsc_c[altpin,gpio] else sh:='';
+	 (gpio>=0)   and (gpio<gpiomax_reg_c)    then sh:=Alt_hdr_dsc_c[altpin,gpio] else sh:='';
   if sh='' then sh:=dfltifempty;
   gpio_get_AltDesc:=sh;
 end; //gpio_get_AltDesc
@@ -1623,20 +1592,32 @@ begin
   gpio_get_altval:=b;
 end;
 
-function gpiofkt(gpio:longint; ALTval:byte; desclong:boolean):string;
+function gpiofkt(gpio:longint; gpiofunc:byte; desclong:boolean):string;
 var s:string; av:byte;
 begin
-  case ALTval of
+  case (gpiofunc and $7) of
 	$00 : 		s:='IN '; 
 	$01 : 		s:='OUT'; 
 	$02..$07: 	begin 
-				  av:=gpio_get_altval(ALTval);
+				  av:=gpio_get_altval(gpiofunc);
 				  s:='A'+Num2Str(av,0)+' '; 
 				  if desclong then s:=gpio_get_AltDesc(gpio,av,s); 
 				end; 
 	else  s:='';
   end;
  gpiofkt:=s;
+end;
+
+function  gpio_get_fkt_value(gpio:longint):byte;
+var regidx,mask:longword; altval:byte;
+begin
+  altval:=$00;
+  if (gpio>=0) and (gpio<gpiomax_reg_c) then
+  begin
+    gpio_get_mask_and_idx(GPFSEL,gpio,regidx,mask);
+	altval:=Byte(((gpio_get_reg(regidx) and mask) shr ((gpio mod 10)*3)) and $7);
+  end;  
+  gpio_get_fkt_value:=altval;
 end;
 
 function  gpio_get_desc(regidx,regcontent:longword) : string; 
@@ -1664,30 +1645,17 @@ function  gpio_get_desc(regidx,regcontent:longword) : string;
   end;
 var s:string; pin:integer;
 begin
-  s:=Get_FixedStringLen(get_reg_desc(regidx),9,false)+': '+Bin(regcontent,32)+' ';
+  s:=Get_FixedStringLen(get_reg_desc(regidx),9,false)+': '+Bin(regcontent,32)+' ';  
   case regidx of
     GPFSEL..GPFSEL+5 : begin
                          for pin:= 9 downto 0 do
 						   s:=s+'P'+LeadingZero(pin+(regidx-GPFSEL)*10)+':'+
-						            gpiofkt(   (pin+(regidx-GPFSEL)*10),Byte(BitSlice32(regcontent,(pin*3)+3,3)),false)+' ';					 
+						      gpiofkt((pin+(regidx-GPFSEL)*10),
+							           gpio_get_fkt_value((pin+(regidx-GPFSEL)*10)),false)+' ';					 
 	                   end;
 				 else  s:=s+'0x'+Hex(regcontent,8);
   end;
   gpio_get_desc:=s;
-end;
-
-function  gpio_get_fkt_value(gpio:longint; var altval:byte):boolean;
-var ok:boolean; regidx,regpos:longint; regcontent:longword;
-begin
-  ok:=false; altval:=$00;
-  if (gpio>=0) and (gpio<=gpiomax_reg_c) then
-  begin
-    regidx:=(gpio div 10)+GPFSEL; regpos:=(gpio mod 10);
-	regcontent:=rpi_mmap_gpio_reg_read(regidx);
-	altval:=(Byte(BitSlice32(regcontent,(regpos*3)+3,3)) and $07);
-	ok:=true;
-  end;  
-  gpio_get_fkt_value:=ok;
 end;
   
 procedure DESC_HWPIN(pin:longint; var desc,dir,pegel:string);
@@ -1707,19 +1675,17 @@ begin
 	else		begin
 				  gpio:=abs(gpio);
                   desc:='GPIO'+LeadingZero(gpio);
-				  if gpio_get_fkt_value(gpio,altval) then 
-				  begin
-				    dir:=gpiofkt(gpio,altval,false);
-					case altval of
-					  $00: begin pegel:=Bool2LVL(gpio_get_PIN(gpio)); end; // IN 
-					  $01: begin pegel:=Bool2LVL(gpio_get_PIN(gpio)); end; // OUT
-					  else begin 
-						     av:=gpio_get_altval(altval); 
-							 desc:=gpio_get_AltDesc(gpio,av,desc); 
-//							 sh:='A0'+Num2Str(av,1);
-							end;
-					end; // case
-				  end;
+				  altval:=gpio_get_fkt_value(gpio);
+				  dir:=gpiofkt(gpio,altval,false);
+				  case altval of
+					$00: begin pegel:=Bool2LVL(gpio_get_PIN(gpio)); end; // IN 
+					$01: begin pegel:=Bool2LVL(gpio_get_PIN(gpio)); end; // OUT
+					else begin 
+						   av:=gpio_get_altval(altval); 
+						   desc:=gpio_get_AltDesc(gpio,av,desc); 
+//						   sh:='A0'+Num2Str(av,1);
+						 end;
+				  end; // case
 				end;
   end; //case
 end;
@@ -1804,92 +1770,35 @@ begin
   pwm_get_desc:=s;
 end;
 
-function get_regidx(regidx,pin:longint):longint;
-var idx:longword;
-begin
-  idx:=maxint;
-  case regidx of
-	GPFSEL : idx:=regidx+((pin mod 54) div 10);
-    GPPUD  : idx:=regidx;
-    else     idx:=regidx+((pin mod 54) div 32);
-  end;
-  get_regidx:=idx;
-end;
-
-procedure gpio_get_mask_and_idx(pin:longword; var idx,mask:longword);
-begin
-  idx :=get_regidx(GPLEV,pin);
-  mask:=(1 shl (pin mod 32));
-end;
-
-function  gpio_get_reg(regidx:longword) : longword;       begin gpio_get_reg:=rpi_mmap_gpio_reg_read (regidx);       end;
-function  gpio_set_reg(regidx,value:longword) : longword; begin gpio_set_reg:=rpi_mmap_gpio_reg_write(regidx,value); end;
-function  clk_get_reg(regidx:longword) : longword;        begin clk_get_reg:= rpi_mmap_clk_reg_read  (regidx);       end;
-function  clk_set_reg(regidx,value:longword) : longword;  begin clk_set_reg:= rpi_mmap_clk_reg_write (regidx,value); end;
-function  pwm_get_reg(regidx:longword) : longword;        begin pwm_get_reg:= rpi_mmap_pwm_reg_read  (regidx);       end;
-function  pwm_set_reg(regidx,value:longword) : longword;  begin pwm_set_reg:= rpi_mmap_pwm_reg_write (regidx,value); end;
-
-procedure gpio_set_register(regidx,pin,mask:longword;and_mask,readmodifywrite:boolean);
-var idx,value:longword;
-begin
-  if (pin>=0) and (pin<=53) then
-  begin
-    idx:=get_regidx(regidx,pin);
-	value:=mask;
-	if (idx<>maxint) and (mmap_arr_gpio<>nil) then
-	begin
-	  value:=mask;
-      if readmodifywrite then
-	  begin
-	    if and_mask then value:=rpi_mmap_gpio_reg_read(idx) and mask else value:=rpi_mmap_gpio_reg_read(idx) or  mask;
-      end;
-	  if rpi_mmap_gpio_reg_write(idx,value) <> 0 then Log_Writeln(LOG_ERROR,'gpio_set_register mmap_reg_write error');
-	                                       {else Log_Writeln(LOG_INFO, 'gpio_set_register mmap_reg_write success'); }
-    end
-	else
-	begin
-	  Log_Writeln(LOG_ERROR,  'gpio_set_register['+LeadingZero(idx)+']:=0x'+hex(value,8)+'  '+Bin(value,32));
-	end;
-  end
-  else
-  begin
-    Log_Writeln(LOG_ERROR,  'gpio_set_register Pin does not exist: '+Num2Str(pin,0)); 
-  end;
-end;
-
-function  gpio_get_Mask(pin,altfunc,mode:longword):longword;
-var res:longword;
-begin
-  case mode of
-    gpio_INPUT: 	 res:=(not (7 shl ((pin mod 10)*3)));
-	gpio_OUTPUT:	 res:=(1 shl ((pin mod 10)*3));
-    gpio_ALT: 		 begin
-	                   res:=2; if altfunc<=3 then res:=altfunc+4 else if altfunc=4 then res:=3;
-                       res:=(res shl ((pin mod 10)*3));
-	                 end;
-	else res:=0;
-  end;
-  gpio_get_Mask:=res;
+procedure gpio_set_RESET(gpio:longword); 
+var idx,mask:longword;
+begin // RESET 3Bits @ according gpio location within register GPFSELn
+  gpio_get_mask_and_idx(GPFSEL,gpio,idx,mask);
+  gpio_set_reg(idx,(not gpio_get_Mask(gpio,INPUT)),true,true); 
 end;
   
-procedure gpio_set_INPUT (pin:longword); 
+procedure gpio_set_INPUT (gpio:longword); 
 begin 
-  Log_Writeln(LOG_DEBUG,'gpio_set_INPUT: GPIO'+Num2Str(pin,0)); 
-  gpio_set_register(GPFSEL,pin,gpio_get_Mask(pin,0,gpio_INPUT),true,true); 
+  Log_Writeln(LOG_DEBUG,'gpio_set_INPUT: GPIO'+Num2Str(gpio,0)); 
+  gpio_set_RESET(gpio);
 end;
 
-procedure gpio_set_OUTPUT(pin:longword); 
+procedure gpio_set_OUTPUT(gpio:longword); 
+var idx,mask:longword;
 begin 
-  Log_Writeln(LOG_DEBUG,'gpio_set_OUTPUT: GPIO'+Num2Str(pin,0)); 
-  gpio_set_INPUT (pin); { Always use gpio_set_INPUT(x) before using gpio_set_OUTPUT(x) or gpio_set_ALT(x,y)  }  
-  gpio_set_register(GPFSEL,pin,gpio_get_Mask(pin,0,gpio_OUTPUT),false,true); 
+  Log_Writeln(LOG_DEBUG,'gpio_set_OUTPUT: GPIO'+Num2Str(gpio,0)); 
+  gpio_get_mask_and_idx(GPFSEL,gpio,idx,mask);
+  gpio_set_RESET(gpio); // Always use gpio_set_RESET(x) before using gpio_set_OUTPUT(x), to reset Bits
+  gpio_set_reg(idx,gpio_get_Mask(gpio,OUTPUT),false,true); 
 end; 
 
-procedure gpio_set_ALT(pin,altfunc:longword);
+procedure gpio_set_ALT(gpio:longword; altfunc:t_port_dir);
+var idx,mask:longword;
 begin
-  Log_Writeln(LOG_DEBUG,'gpio_set_ALT: GPIO'+Num2Str(pin,0)+' AltFunc:'+Num2Str(altfunc,0)); 
-  gpio_set_INPUT (pin); 
-  gpio_set_register(GPFSEL,pin,gpio_get_Mask(pin,altfunc,gpio_ALT),false,true);
+  Log_Writeln(LOG_DEBUG,'gpio_set_ALT: GPIO'+Num2Str(gpio,0)+' AltFunc:'+Num2Str(ord(altfunc),0)); 
+  gpio_get_mask_and_idx(GPFSEL,gpio,idx,mask);
+  gpio_set_RESET(gpio); // Always use gpio_set_RESET(x) before using gpio_set_ALT(x,y), to reset Bits
+  gpio_set_reg(idx,gpio_get_Mask(gpio,altfunc),false,true);
 end;
 
 function  pwm_SW_Thread(ptr:pointer):ptrint;
@@ -1902,9 +1811,9 @@ begin
 writeln('pwm_SW_Thread: Start of ',description);
       while not TermThread do
 	  begin
-	    lw:=pwm_period_us-pwm_dutycycle_us;
-	    if pwm_dutycycle_us>0 then begin gpio_set_PIN(gpio,true);  delay_us(pwm_dutycycle_us); end;
-	    if lw>0               then begin gpio_set_PIN(gpio,false); delay_us(lw); end;
+	    lw:=PWM.pwm_period_us-PWM.pwm_dutycycle_us;
+	    if PWM.pwm_dutycycle_us>0 	then begin gpio_set_PIN(gpio,true);  delay_us(PWM.pwm_dutycycle_us); end;
+	    if lw>0               		then begin gpio_set_PIN(gpio,false); delay_us(lw); end;
 	  end; 
 	  gpio_set_PIN(gpio,false); 
 	end
@@ -1931,23 +1840,18 @@ begin
   pwm_GetMODVal:=res;
 end;
 
-function  GPIO_HWPWM_capable(pin:longint):boolean;
-begin
-  GPIO_HWPWM_capable:=((pin=GPIO_PWM0) or (pin=GPIO_PWM1));
-end;
-
 procedure pwm_Write(var GPIO_struct:GPIO_struct_t; value:longword); // value: 0-(pwm_dutyrange-1)
 begin
   with GPIO_struct do
   begin
-    pwm_value:=pwm_GetMODVal(value,pwm_dutyrange); 
-	pwm_dutycycle_us:=pwm_GetDCSWVal(pwm_period_us,pwm_value,pwm_dutyrange);
+    PWM.pwm_value:=pwm_GetMODVal(value,PWM.pwm_dutyrange); 
+	PWM.pwm_dutycycle_us:=pwm_GetDCSWVal(PWM.pwm_period_us,PWM.pwm_value,PWM.pwm_dutyrange);
 //  writeln('pwm_Write: GPIO'+Num2Str(gpio,0)+' '+Num2Str(pwm_value,0));
     if (port_dir=PWMHW) then
 	begin
       case gpio of
-         GPIO_PWM0: pwm_set_reg(PWM0DAT,pwm_value); // HW PWM
-	     GPIO_PWM1: pwm_set_reg(PWM1DAT,pwm_value); // HW PWM
+         GPIO_PWM0: pwm_set_reg(PWM0DAT,PWM.pwm_value); // HW PWM
+	     GPIO_PWM1: pwm_set_reg(PWM1DAT,PWM.pwm_value); // HW PWM
       end; // case
 	end;
   end; // with  
@@ -1962,7 +1866,7 @@ begin
     if (port_dir=PWMHW) then
 	begin
       n:=0; divi:=32;  // default
-      if pwm_freq_Hz<>0 then divi:=round((19.2*1000000)/pwm_freq_Hz);
+      if PWM.pwm_freq_Hz<>0 then divi:=round((19.2*1000000)/PWM.pwm_freq_Hz);
 	  if divi<32 then divi:=32; if divi>divimax then divi:=divimax;
 //    Writeln('pwm_SetHWClock: '+Num2Str(divi,0));
       pwm_control:=pwm_get_reg(PWMCTL);	// save register content 
@@ -1983,11 +1887,12 @@ end;
 procedure GPIO_ShowStruct(var GPIO_struct:GPIO_struct_t);
 begin
   with GPIO_struct do
-  begin
-    writeln('GPIO_ShowStruct: ',description,' Port_Dir:',ord(port_dir),' initok:',initok);
-	writeln('HWPin:',HWPin,' GPIO',gpio:0,' idx:',Hex(idx,2),' mask:0x',Hex(mask,4),' nr:',nr:0,' State:',ein,' Simulation:',simulation);
-	writeln('pwm_mode:',pwm_mode,' pwm_freq:',pwm_freq_hz:0:2,' pwm_dutyrange:',pwm_dutyrange,' value:',pwm_value);
-	writeln('pwm_dutycycle_us:',pwm_dutycycle_us,' pwm_period_us:',pwm_period_us);
+  begin 
+    writeln('GPIO_ShowStruct: ',description,' Port_Dir:',port_dir,' initok:',initok,' Simulation:',simulation);
+	writeln('HWPin:',HWPin,' GPIO',gpio:0,' nr:',nr:0,' State:',ein);
+	writeln('idxofs_1Bit:0x',Hex(idxofs_1Bit,2),' mask_1Bit:0x',Hex(mask_1Bit,8),' idxofs_3Bit:0x',Hex(idxofs_3Bit,2),' mask_3Bit:0x',Hex(mask_3Bit,8));
+	writeln('pwm_mode:',PWM.pwm_mode,' pwm_freq:',PWM.pwm_freq_hz:0:2,' pwm_dutyrange:',PWM.pwm_dutyrange,' value:',PWM.pwm_value,
+	       ' pwm_dutycycle_us:',PWM.pwm_dutycycle_us,' pwm_period_us:',PWM.pwm_period_us);
   end;
 end;
 
@@ -1995,10 +1900,10 @@ procedure pwm_SetStruct(var GPIO_struct:GPIO_struct_t; mode:byte; freq_Hz:real; 
 begin
   with GPIO_struct do
   begin
-  	pwm_mode:=mode; pwm_freq_hz:=freq_Hz; TermThread:=true;
-	pwm_dutyrange:=dutyrange; pwm_value:=startval; 
-	if (pwm_freq_hz<>0) then pwm_period_us:=round(1000000/pwm_freq_hz) else pwm_period_us:=0; 
-	pwm_dutycycle_us:=pwm_GetDCSWVal(pwm_period_us,pwm_value,pwm_dutyrange);
+  	PWM.pwm_mode:=mode; PWM.pwm_freq_hz:=freq_Hz; TermThread:=true;
+	PWM.pwm_dutyrange:=dutyrange; PWM.pwm_value:=startval; 
+	if (PWM.pwm_freq_hz<>0) then PWM.pwm_period_us:=round(1000000/PWM.pwm_freq_hz) else PWM.pwm_period_us:=0; 
+	PWM.pwm_dutycycle_us:=pwm_GetDCSWVal(PWM.pwm_period_us,PWM.pwm_value,PWM.pwm_dutyrange);
   end;
 end;
 
@@ -2024,31 +1929,31 @@ begin
 	  if (port_dir=PWMHW) then
 	  begin // HW PWM	  
 	    case gpio of
-	      GPIO_PWM0,
+	      GPIO_PWM0,  
 		  GPIO_PWM1 : begin // PWM0:Pin12:GPIO18 PWM1:Pin35:GPIO19 
 					    initok:=true; 
 //					    writeln('pwm_Setup (HW):'); GPIO_ShowStruct(GPIO_struct);
-					    gpio_set_PINMODE(gpio,gpio_PWMOUT);
+					    gpio_set_PINMODE(gpio,PWMHW);
 //					    pwm_SetClock    (GPIO_struct); 	// set clock external before pwm_Setup
 						regsav:=pwm_get_reg(PWMCTL);	// save ctl register
 //                      writeln('pwm_Setup: PWMCTL 0x',hex(regsav,4));			
 //                      writeln('pwm_Setup: pwm_dutyrange ',pwm_dutyrange);
 						if gpio=GPIO_PWM0 then
 						begin
-						  pwm_set_reg(PWM0RNG,pwm_dutyrange); delay_us(10); // set max value for duty cycle	
+						  pwm_set_reg(PWM0RNG,PWM.pwm_dutyrange); delay_us(10); // set max value for duty cycle	
 						  regsav:=regsav and $fffffff0;	// maskout Bits for channel1
 						  regsav:=regsav or PWM0_ENABLE; 
-						  if pwm_mode=PWM_MODE_MS then regsav:=regsav or PWM0_MS_MODE;	
+						  if PWM.pwm_mode=PWM_MODE_MS then regsav:=regsav or PWM0_MS_MODE;	
 						end
 						else
 						begin
-						  pwm_set_reg(PWM1RNG,pwm_dutyrange); delay_us(10);
+						  pwm_set_reg(PWM1RNG,PWM.pwm_dutyrange); delay_us(10);
 						  regsav:=regsav and $ffffff0f; // maskout Bits for channel2
 						  regsav:=regsav or PWM1_ENABLE; 
-						  if pwm_mode=PWM_MODE_MS then regsav:=regsav or PWM1_MS_MODE;	
+						  if PWM.pwm_mode=PWM_MODE_MS then regsav:=regsav or PWM1_MS_MODE;	
 						end;
-//                      writeln('pwm_Setup: pwm_value ',pwm_value);
-						pwm_Write  (GPIO_struct,pwm_value);	// set start value
+//                      writeln('pwm_Setup: pwm_value ',PWM.pwm_value);
+						pwm_Write  (GPIO_struct,PWM.pwm_value);	// set start value
 //                      writeln('pwm_Setup: PWMCTL 0x',hex(regsav,4));			// 					
 					    pwm_set_reg(PWMCTL,regsav);		// Enable channel PWM
 					  end;
@@ -2063,8 +1968,8 @@ begin
 		              if (gpio>=0) and (port_dir=PWMSW) then
 					  begin
 					    initok:=true;
+						gpio_set_PINMODE(gpio,OUTPUT); port_dir:=OUTPUT;
 //                      writeln('pwm_Setup (SW):'); GPIO_ShowStruct(GPIO_struct);
-					    gpio_set_PINMODE(gpio,gpio_OUTPUT);
 					    TermThread:=false;
 					    BeginThread(@pwm_SW_Thread,addr(GPIO_struct)); // Start SW PWM Thread
 					  end
@@ -2078,39 +1983,44 @@ begin
   pwm_Setup:=GPIO_struct.initok;
 end;
 
-procedure gpio_set_PINMODE(pin,mode:longword);
+procedure gpio_set_PINMODE(gpio:longword; portfkt:t_port_dir);
 //http://wiki.freepascal.org/Lazarus_on_Raspberry_Pi#5._PiGpio_Low-level_native_pascal_unit_.28GPIO_control_instead_of_wiringPi_c_library.29
-var alt:byte;
+var akft:t_port_dir;
 begin
-//LOG_Writeln(LOG_DEBUG,'gpio_set_PINMODE: GPIO'+Num2Str(pin,0)+' Mode: '+Num2Str(mode,0)); 
-  case mode of
-    gpio_INPUT : gpio_set_INPUT (pin);
-    gpio_OUTPUT: gpio_set_OUTPUT(pin); 	
-	gpio_PWMOUT: begin
-				   alt:=$ff; 
-				   case pin of
-					 12,13,40,41,45 : alt:=0;
-					 18,19          : alt:=5;
-					 52,53          : alt:=1;
-				   end; // case
-				   if (alt<>$ff) 
-					 then begin gpio_set_ALT(pin,alt); end
-					 else Log_Writeln(LOG_ERROR,'gpio_set_PINMODE: Pin: '+Num2Str(pin,0)+' Mode: '+Num2Str(mode,0)+' cannot be set to PWM'); 		
-				 end;
-    else Log_Writeln(LOG_ERROR,'gpio_set_PINMODE: Pin: '+Num2Str(pin,0)+' Mode: '+Num2Str(mode,0)+' mode not defined'); 
+//LOG_Writeln(LOG_DEBUG,'gpio_set_PINMODE: GPIO'+Num2Str(gpio,0)+' Mode: '+Num2Str(ord(portfkt),0)); 
+  case portfkt of
+    INPUT : gpio_set_INPUT (gpio);
+    OUTPUT: gpio_set_OUTPUT(gpio);
+	ALT0,ALT1,ALT2,ALT3,ALT4,
+    ALT5  : gpio_set_ALT   (gpio,portfkt); 	
+	PWMHW : begin
+			  akft:=INPUT; 
+			  case gpio of
+					 12,13,40,41,45 : akft:=ALT0;
+					 18,19          : akft:=ALT5;
+					 52,53          : akft:=ALT1;
+			  end; // case
+			  if (akft<>INPUT) then begin gpio_set_ALT(gpio,akft); end
+			    else Log_Writeln(LOG_ERROR,'gpio_set_PINMODE: GPIO'+Num2Str(gpio,0)+' portfkt:'+Num2Str(ord(portfkt),0)+' cannot be set to PWM'); 		
+		    end;
+    else Log_Writeln(LOG_ERROR,'gpio_set_PINMODE: GPIO'+Num2Str(gpio,0)+' portfkt:'+Num2Str(ord(portfkt),0)+' mode not defined'); 
   end; // case
 end;
 
-procedure GPIO_Switch(var GPIO_struct:GPIO_struct_t; switchon:boolean);
+procedure GPIO_Switch(var GPIO_struct:GPIO_struct_t; switchon:boolean); // switch GPIOx on/off
 begin
   with GPIO_struct do
   begin
-    if gpio>=0 then
+    if initok then
     begin 
       if switchon<>ein then 
 	  begin
-	    if simulation then writeln(description,' Switch(nr',nr,'/GPIO#',gpio,'/HWPin#',HWPin,'): ',switchon);
-		if not simulation then gpio_set_PIN(gpio,switchon);
+		if not (simulation IN portflags) then 
+		begin // only on level change
+		  if switchon then mmap_arr_gpio^[regset]:=mask_1Bit
+					  else mmap_arr_gpio^[regclr]:=mask_1Bit;
+		end
+		else writeln(description,' Switch(nr',nr,'/GPIO#',gpio,'/HWPin#',HWPin,'): ',switchon);
 	  end;
 	  ein:=switchon;
     end
@@ -2118,23 +2028,34 @@ begin
   end;
 end;
 
-procedure GPIO_SetStruct(var GPIO_struct:GPIO_struct_t; portdir:t_port_dir; num,HdrPin:longint; desc:string; simul:boolean);
+procedure GPIO_SetStruct(var GPIO_struct:GPIO_struct_t; portdir:t_port_dir; num,gpionum:longint; desc:string; flags:s_port_flags);
 begin
   with GPIO_struct do
   begin	
-	nr:=num; HWPin:=HdrPin; description:=desc; simulation:=simul; idx:=0; mask:=$00;
+	gpio:=gpionum; HWPin:=gpio_MAP_GPIO_NUM_2_HDR_PIN(gpio); 
+	nr:=num; description:=desc; portflags:=flags; 
+	idxofs_1Bit:=0; idxofs_3Bit:=0; mask_1Bit:=0; mask_3Bit:=0; 
+	regget:=GPIOONLYREAD; regset:=GPIOONLYREAD; regclr:=GPIOONLYREAD;
 	ein:=false; TermThread:=true; 
-	gpio:=gpio_MAP_HDR_PIN_2_GPIO_NUM(HdrPin);
-    port_dir:=portdir; if (port_dir=PWMHW) and (not GPIO_HWPWM_capable(gpio)) then port_dir:=PWMSW;	
+	if (ReversePOLARITY IN portflags) then polarity:=1 else polarity:=0;
+    port_dir:=portdir; 
+	if (port_dir=PWMHW) and (not ((gpio=GPIO_PWM0) or (gpio=GPIO_PWM1))) then port_dir:=PWMSW;		
 	initok:=(gpio>=0); 
-	if initok then gpio_get_mask_and_idx(gpio,idx,mask);
+	if initok then 
+	begin
+	  gpio_get_mask_and_idxOfs(GPFSEL,gpio,idxofs_3Bit,mask_3Bit);
+	  gpio_get_mask_and_idxOfs(GPSET, gpio,idxofs_1Bit,mask_1Bit);
+	  regget:=GPLEV+idxofs_1Bit; 
+	  if polarity=0	then begin regset:=GPSET+idxofs_1Bit; regclr:=GPCLR+idxofs_1Bit; end
+					else begin regset:=GPCLR+idxofs_1Bit; regclr:=GPSET+idxofs_1Bit; end;
+	end;
     pwm_SetStruct(GPIO_struct); // set default values for pwm
   end;
 end;
 
 procedure GPIO_SetStruct(var GPIO_struct:GPIO_struct_t);
 begin
-  GPIO_SetStruct(GPIO_struct,input,0,0,'',true);
+  GPIO_SetStruct(GPIO_struct,input,0,-1,'',[Simulation]);
 end;
 
 function  GPIO_Setup(var GPIO_struct:GPIO_struct_t):boolean;
@@ -2150,14 +2071,30 @@ begin
 	  end
 	  else
 	  begin
-	    if not simulation then
+	    if not (simulation IN portflags)then
 	    begin	
+//		  plausability check and cleanup of portflags
+		  if (PullUP      IN portflags) and 
+		     (PullDOWN    IN portflags) then portflags:=portflags-[PullUP,PullDOWN]; // cannot be both		  
+		  if (RisingEDGE  IN portflags) and (port_dir<>INPUT) then portflags:=portflags-[RisingEDGE]; 
+		  if (FallingEDGE IN portflags) and (port_dir<>INPUT) then portflags:=portflags-[FallingEDGE]; 
+//		  setup of portflags
+		  if (ReversePOLARITY IN portflags) then polarity:=1 else polarity:=0;
+		  if (RisingEDGE      IN portflags) then gpio_set_edge_rising (gpio,true); 
+		  if (FallingEDGE     IN portflags) then gpio_set_edge_falling(gpio,true); 
+		  if (PullUP          IN portflags) then gpio_set_PULLUP      (gpio,true); 
+		  if (PullDOWN        IN portflags) then gpio_set_PULLDOWN    (gpio,true); 
+(*		  gpio_set_edge_rising (gpio,(RisingEDGE  IN portflags));  		// enable/disable RisingEdge
+		  gpio_set_edge_falling(gpio,(FallingEDGE IN portflags)); 		// enable/disable FallingEdge		  
+		  gpio_set_PULLUP      (gpio,(PullUP      IN portflags)); 		// enable/disable PullUP
+		  gpio_set_PULLDOWN    (gpio,(PullDOWN    IN portflags)); 		// enable/disable PulDOWN *)
+		  
 //		  writeln('GPIO_Setup: ',ord(port_dir));
 	      case port_dir of
-		    input:  begin gpio_set_PINMODE (gpio,gpio_INPUT);  end; 
-		    output: begin gpio_set_PINMODE (gpio,gpio_OUTPUT); GPIO_Switch(GPIO_struct,ein); end;
-		    pwmsw,
-			pwmhw:  begin initok:=pwm_Setup(GPIO_struct); end;
+		    INPUT:  begin gpio_set_PINMODE (gpio,INPUT);  end; 
+		    OUTPUT: begin gpio_set_PINMODE (gpio,OUTPUT); GPIO_Switch(GPIO_struct,ein); end;
+		    PWMSW,
+			PWMHW:  begin initok:=pwm_Setup(GPIO_struct); end;
 		    else LOG_Writeln(LOG_ERROR,'GPIO_Setup: unknown PortDir '+Num2Str(ord(port_dir),0));
 		  end; // case
         end;		
@@ -2167,105 +2104,130 @@ begin
   end; // with
   GPIO_Setup:=GPIO_struct.initok;
 end;
+
+procedure xx(reg1,reg2,mask:longword); begin mmap_arr_gpio^[reg1]:=mask; mmap_arr_gpio^[reg2]:=mask; end;
   
-procedure Toggle_Pin_very_fast(HWPinNr:longword; cnt:qword);
+procedure Toggle_Pin_very_fast(gpio:longword; cnt:qword);
 // just to show how fast (without overhead) we can toggle PINxx. 
-// with rpi1	Result:  5.88MHz @ 700Mhz rpi clock freq
-// with rpi2 B+ Result: 24.70Mhz @ 900MHz
-var i:qword; GPIO_struct:GPIO_struct_t; s,e:TDateTime;	
+// with rpi2 B+ @ 900MHz
+// Result(fastway=true): >20Mhz // Result(fastway=false): 2.4Mhz 
+const fastway=true;
+var i:qword; GPIO_struct:GPIO_struct_t; s,e:TDateTime; 
 begin
-  GPIO_SetStruct(GPIO_struct,Output,1,HWPinNr,'GPIO Toggle TEST',false);
+  i:=0;
+  GPIO_SetStruct(GPIO_struct,Output,1,gpio,'GPIO Toggle TEST',[]);
   if GPIO_Setup (GPIO_struct) then
   begin
     with GPIO_struct do
 	begin
-    {start measuring time} 
-      s:=now; writeln('Start: ',FormatDateTime('yyyy-mm-dd hh:nn:ss',s),' (',cnt:0,' samples, Pin: ',HWPinNr:0,' PinMask: 0x',Hex(mask,8),' RegIdx: ',idx:0,')');
-      repeat mmap_arr_gpio^[GPSET]:=mask; mmap_arr_gpio^[GPCLR]:=mask; inc(i); until (i>=cnt);
-      e:=now; writeln('End:   ',FormatDateTime('yyyy-mm-dd hh:nn:ss',e),' (',(cnt div MilliSecondsBetween(e,s)):0,' kHz)');
-    {end   measuring time} 
-	end;
-  end else writeln('Can not initialize HWPinNr: ',HWPinNr);
+//gpio_show_regs;	
+	  GPIO_ShowStruct(GPIO_struct);
+	  writeln('Start with ',cnt:0,' samples, GPIO',gpio:0,' Pin:',HWPin:0,' Mask:0x',Hex(mask_1Bit,8),' idxofs_1Bit:0x',Hex(idxofs_1Bit,2),')');
+      s:=now; // start measuring time 
+	  repeat 
+	    {$warnings off} 
+	      if fastway then
+		  begin // >20MHz
+//          xx(regset,regclr,mask_1Bit); // 15MHz, takes 30% times longer ??!!
+	        mmap_arr_gpio^[regset]:=mask_1Bit; (* High*) mmap_arr_gpio^[regclr]:=mask_1Bit; (* Low *)
+		  end
+		  else 
+		  begin // 2-3Mhz only ???!!!
+		    GPIO_Switch(GPIO_struct,true); GPIO_Switch(GPIO_struct,false);
+		  end;
+		{$warnings on} 
+		inc(i); 
+	  until (i>=cnt);
+      e:=now; // end measuring time
+	  writeln('End: ',FormatDateTime('yyyy-mm-dd hh:nn:ss',e),' (',(cnt/MilliSecondsBetween(e,s)/1000):0:3,'MHz)');
+	end; 
+  end else writeln('Can not initialize GPIO',gpio);
 end;
 
-procedure Toggle_GPIO16_very_fast; // Status LED
-begin Toggle_Pin_very_fast(gpio_MAP_GPIO_NUM_2_HDR_PIN(rpi_status_led_GPIO),100000000); end;	
+procedure Toggle_STATUSLED_very_fast; begin Toggle_Pin_very_fast(rpi_status_led_GPIO,100000000); end;	
 
 procedure LED_Status(ein:boolean); begin gpio_set_PIN(rpi_status_led_GPIO,ein); end;
 
 procedure GPIO_PIN_TOGGLE_TEST;
 { just for demo reasons }
-const looptimes=30; waittime_ms	= 500; { 1Hz; let Status LED blink, alternate signal level on GPIO pin 16 to +3.3V and 0V }  
+const looptimes=10; waittime_ms	= 1000; // 0.5Hz; let Status LED blink  
 var   lw:longword;
 begin
 //gpio_show_regs;
   writeln('Start of GPIO_PIN_TOGGLE_TEST (Let the Status-LED blink ',looptimes:0,' times)');
-  writeln('Set Pin',rpi_status_led_GPIO:0,' to OUTPUT'); 
+  writeln('Set GPIO',rpi_status_led_GPIO:0,' to OUTPUT'); 
   gpio_set_OUTPUT(rpi_status_led_GPIO);   
-  writeln(gpio_get_desc(2,rpi_mmap_gpio_reg_read(2)));
   for lw := 1 to looptimes do
   begin
-    writeln(looptimes-lw+1:3,'. Set StatusLED (Pin',rpi_status_led_GPIO,') to 1'); LED_Status(true);  sleep(waittime_ms);
-	writeln(looptimes-lw+1:3,'. Set StatusLED (Pin',rpi_status_led_GPIO,') to 0'); LED_Status(false); sleep(waittime_ms);
+    writeln(looptimes-lw+1:3,'. Set StatusLED (GPIO',rpi_status_led_GPIO,') to 1'); LED_Status(true);  sleep(waittime_ms);
+	writeln(looptimes-lw+1:3,'. Set StatusLED (GPIO',rpi_status_led_GPIO,') to 0'); LED_Status(false); sleep(waittime_ms);
 	writeln;
   end;
   writeln('End of GPIO_PIN_TOGGLE_TEST');
 end;
   
-procedure gpio_set_BIT   (gpioregpart,pin:longword;setbit:boolean); { set or reset pin in gpio register part }
+procedure gpio_set_BIT(regidx,gpio:longword;setbit,readmodifywrite:boolean); { set or reset pin in gpio register part }
 var idx,mask:longword;
 begin
-  gpio_get_mask_and_idx(pin,idx,mask);
-//Writeln('gpio_set_BIT: Pin: '+Num2Str(pin,0)+' level: '+Bool2Str(setbit)+' Reg: 0x'+Hex(gpioregpart,8)+' idx: 0x'+Hex(idx,8)+' mask: 0x'+Hex(mask,8));   
-  if setbit then gpio_set_register(gpioregpart,pin,    mask ,false,false)
-            else gpio_set_register(gpioregpart,pin,not(mask),true, false);
+  gpio_get_mask_and_idx(regidx,gpio,idx,mask);
+//Writeln('gpio_set_BIT: GPIO'+Num2Str(gpio,0)+' level: '+Bool2Str(setbit)+' Reg: 0x'+Hex(regidx,8)+' idx: 0x'+Hex(idx,8)+' mask: 0x'+Hex(mask,8));   
+  if setbit then gpio_set_reg(idx,    mask ,false,readmodifywrite)
+            else gpio_set_reg(idx,not(mask),true, readmodifywrite);
 end;
   
-procedure gpio_set_PIN   (pin:longword;highlevel:boolean);
-{ Set RPi GPIO pin to high or low level: Speed @ 700MHz ->  1.25MHz }
+procedure gpio_set_PIN(gpio:longword;highlevel:boolean);
+{ Set RPi GPIO to high or low level: Speed @ 700MHz ->  1.25MHz }
 begin
-//Log_Writeln(LOG_DEBUG,'gpio_set_PIN: '+Num2Str(pin,0)+' level '+Bool2Str(highlevel));
-//Writeln('gpio_set_PIN: '+Num2Str(pin,0)+' level '+Bool2Str(highlevel));
-  if highlevel then gpio_set_BIT(GPSET,pin,true) else gpio_set_BIT(GPCLR,pin,true);
+//Log_Writeln(LOG_DEBUG,'gpio_set_PIN: '+Num2Str(gpio,0)+' level '+Bool2Str(highlevel));
+//Writeln('gpio_set_PIN: '+Num2Str(gpio,0)+' level '+Bool2Str(highlevel));
+  if highlevel then gpio_set_BIT(GPSET,gpio,true,false) else gpio_set_BIT(GPCLR,gpio,true,false);
   { sleep(1); }
 end;
 
-function  gpio_get_PIN	 (pin,idx,mask:longword):boolean;
+function  gpio_get_PIN   (gpio:longword):boolean;
+// Get RPi GPIO pin Level is true when Pin level is '1'; false when '0'; Speed @ 700MHz ->  2.33MHz 
+var idx,mask:longword;
 begin
-  gpio_get_PIN:=((rpi_mmap_gpio_reg_read(idx) and mask)>0);
+  gpio_get_mask_and_idx(GPLEV,gpio,idx,mask);
+  gpio_get_PIN:=((gpio_get_reg(idx) and mask)>0);
 end;
 
-function  gpio_get_PIN   (pin:longword):boolean;
-{ Get RPi GPIO pin Level is true when Pin level is '1'; false when '0'; Speed @ 700MHz ->  2.33MHz }
-var {valu,}idx,mask:longword;
-begin
-  //idx:=get_regidx(GPLEV,pin);
-  //valu:=(gpio_get_reg(idx) and (1 shl (pin mod 32)));
-  gpio_get_mask_and_idx(pin,idx,mask);
-  //valu:=gpio_get_reg(idx) and mask;
-  {Log_Writeln(LOG_DEBUG,'gpio_get_PIN: '+Num2Str(pin,0)+' level '+Bool2Str((valu>0))); }
-  //gpio_get_PIN:=(valu>0);
-  gpio_get_PIN:=gpio_get_PIN(pin,idx,mask);
-end;
-
-procedure gpio_set_GPPUD(mask:longword); begin gpio_set_register(GPPUD,0,mask,true,true); end; { set GPIO Pull-up/down Register (GPPUD) } 
-
-procedure gpio_set_PULLUP (pin:longword; enable:boolean); 
+procedure gpio_set_GPPUD(enable,pullup:boolean); 
 begin 
-  Log_Writeln(LOG_DEBUG,'gpio_set_PULLUP: Pin '+Num2Str(pin,0)+' '+Bool2Str(enable)); 
-  gpio_set_BIT   (GPPUDCLK,pin,enable);
-end;
-  
-procedure gpio_set_edge_rising(pin:longword; enable:boolean);  { Pin RisingEdge  Detection Register (GPREN) }
+  if enable then
+  begin
+    if pullup then gpio_set_reg(GPPUD,$02,false,false) else gpio_set_reg(GPPUD,$01,false,false);
+  end
+  else gpio_set_reg(GPPUD,$00,false,false);
+  delay_msec(1);
+end; { set GPIO Pull-up/down Register (GPPUD) } 
+
+procedure gpio_set_PULLUPORDOWN(gpio:longword; enable,pullup:boolean); // pulldown: pullup=false;
+// approximately 50KΩ
+var idx,mask:longword;
 begin 
-  Log_Writeln(LOG_DEBUG,'gpio_set_edge_rising: Pin '+Num2Str(pin,0)+' enable: '+Bool2Str(enable)); 
-  gpio_set_BIT(GPREN,pin,enable);   { Pin RisingEdge  Detection }
+  LOG_Writeln(LOG_DEBUG,'gpio_set_PULLUPORDOWN: GPIO'+Num2Str(gpio,0)+' '+Bool2Str(enable)+' '+Bool2Str(pullup)); 
+  gpio_get_mask_and_idx(GPPUDCLK,gpio,idx,mask);
+  gpio_set_GPPUD(enable,pullup); 				// assert clock to GPPUDCLKn
+  gpio_set_reg  (idx,mask,false,false);
+  delay_msec(1);
+  gpio_set_GPPUD(false, pullup); 				// deassert clock from GPPUDCLKn
+  gpio_set_reg (idx,0,   false,false);  
+  delay_msec(1);
+end;
+procedure gpio_set_PULLUP  (gpio:longword; enable:boolean); begin gpio_set_PULLUPORDOWN(gpio,enable,true);  end;	// enable or disable PULLUP
+procedure gpio_set_PULLDOWN(gpio:longword; enable:boolean); begin gpio_set_PULLUPORDOWN(gpio,enable,false); end;	// enable or disable PULLDOWN
+
+procedure gpio_set_edge_rising(gpio:longword; enable:boolean);  { Pin RisingEdge  Detection Register (GPREN) }
+begin 
+  Log_Writeln(LOG_DEBUG,'gpio_set_edge_rising: GPIO'+Num2Str(gpio,0)+' enable: '+Bool2Str(enable)); 
+  gpio_set_BIT(GPREN,gpio,enable,true);   { Pin RisingEdge  Detection }
 end;
 
-procedure gpio_set_edge_falling(pin:longword; enable:boolean); { Pin FallingEdge  Detection Register (GPFEN) }
+procedure gpio_set_edge_falling(gpio:longword; enable:boolean); { Pin FallingEdge  Detection Register (GPFEN) }
 begin 
-  Log_Writeln(LOG_DEBUG,'gpio_set_edge_falling: Pin '+Num2Str(pin,0)+' enable: '+Bool2Str(enable)); 
-  gpio_set_BIT(GPFEN,pin,enable);  { Pin FallingEdge Detection }
+  Log_Writeln(LOG_DEBUG,'gpio_set_edge_falling: GPIO'+Num2Str(gpio,0)+' enable: '+Bool2Str(enable)); 
+  gpio_set_BIT(GPFEN,gpio,enable,true);  { Pin FallingEdge Detection }
 end;
 
 procedure GPIO_PWM_Test(HWPinNr:longword; HWPWM:boolean);
@@ -2275,13 +2237,13 @@ var i,cnt:longint; GPIO_struct:GPIO_struct_t;
 begin
   if HWPWM then
   begin
-    GPIO_SetStruct(GPIO_struct,PWMHW,1,HWPinNr,'HW PWM_TEST',false);
+    GPIO_SetStruct(GPIO_struct,PWMHW,1,HWPinNr,'HW PWM_TEST',[]);
     pwm_SetStruct (GPIO_struct,PWM_MODE_MS,50000,maxval,0);	// ca. 50Hz (50000/1000) -> divisor: 384
     pwm_SetClock  (GPIO_struct); 
   end
   else
   begin
-    GPIO_SetStruct(GPIO_struct,PWMSW,1,HWPinNr,'SW PWM_TEST',false);
+    GPIO_SetStruct(GPIO_struct,PWMSW,1,HWPinNr,'SW PWM_TEST',[]);
     pwm_SetStruct (GPIO_struct,PWM_MODE_MS,50,maxval,0);	
     pwm_SetClock  (GPIO_struct);
   end;
@@ -2318,40 +2280,41 @@ begin
 end;
 
 procedure GPIO_PWM_Test; // Test with GPIO18 PWM0 on Connector Pin12
-const gpio_nr=GPIO_PWM0; hwtest=true;
-var   hwpin:longint;
+const gpio=GPIO_PWM0; 
 begin
-  hwpin:=gpio_MAP_GPIO_NUM_2_HDR_PIN(gpio_nr);
-  writeln('GPIO_PWM_Test with GPIO',gpio_nr,' Connector Pin',hwpin);
-  GPIO_PWM_Test(hwpin,hwtest); // PWM Test
-//GPIO_PWM_Test(16,false);	// SW PWM Test on GPIO16
+  writeln('GPIO_PWM_Test with GPIO',gpio,' Connector Pin',gpio_MAP_GPIO_NUM_2_HDR_PIN(gpio),' SOFTWARE based');
+  GPIO_PWM_Test(gpio,false); // SW PWM Test
+  writeln('GPIO_PWM_Test with GPIO',gpio,' Connector Pin',gpio_MAP_GPIO_NUM_2_HDR_PIN(gpio),' HARDWARE based');
+  GPIO_PWM_Test(gpio,true);  // HW PWM Test
   writeln('GPIO_PWM_Test END');
 end;
 
 procedure GPIO_Test(HWPinNr:longword);
 const loopmax=2;
-var gpio,i:longint;
+var i:longint; GPIO_struct:GPIO_struct_t; 
 begin
-  gpio:=gpio_MAP_HDR_PIN_2_GPIO_NUM(HWPinNr); 
-  if gpio>=0 then  
+  GPIO_SetStruct(GPIO_struct,Output,1,gpio_MAP_HDR_PIN_2_GPIO_NUM(HWPinNr),'GPIO-Test',[]);
+  if GPIO_Setup (GPIO_struct) then
   begin
-    writeln('Test HWPinNr: '+Num2Str(HWPinNr,0)+'  GPIO: '+Num2Str(gpio,0));
-	writeln('  Set Pin as Output'); gpio_set_OUTPUT(gpio); //gpio_set_PULLUP(gpio,true); 
-	for i := 1 to loopmax do
+    with GPIO_struct do
 	begin
-	  writeln('  for setting Pin to HIGH, pls. push <any> button'); readln;
-	  gpio_set_PIN   (gpio,true);
-      writeln('  for setting Pin to LOW,  pls. push <any> button'); readln;
-	  gpio_set_PIN   (gpio,false);
-	end;
-	writeln('Test next PIN, pls. push <any> button'); readln
+      writeln('Test HWPin: '+Num2Str(HWPin,0)+'  GPIO: '+Num2Str(gpio,0)); 
+	  for i := 1 to loopmax do
+	  begin
+	    writeln('  for setting Pin to HIGH, pls. push <CR> button'); readln;
+        GPIO_Switch(GPIO_struct,true); 
+        writeln('  for setting Pin to LOW,  pls. push <CR> button'); readln;
+	    GPIO_Switch(GPIO_struct,false); 
+	  end;
+	  writeln('Test next PIN, pls. push <CR> button'); readln;
+    end;
   end
   else Writeln('GPIO_Test: can not Map HWPin:'+Num2Str(HWPinNr,0)+' to valid GPIO num');	
   writeln;
 end;
 
 procedure GPIO_TestAll;
-// for testing correct operation
+// for testing of correct operation
 begin
   begin // 26 Pin Hdr
     GPIO_Test(07); GPIO_Test(11); GPIO_Test(12); GPIO_Test(13); GPIO_Test(15); GPIO_Test(16);
@@ -2393,7 +2356,7 @@ end;
 procedure SERVO_Setup(var SERVO_struct:SERVO_struct_t; HWPinNr,nr,maxval,dcmin,dcmid,dcmax:longword; desc:string; freq:real);
 begin
   SERVO_SetStruct(SERVO_struct,dcmin,dcmid,dcmax);
-  GPIO_SetStruct (SERVO_struct.HWAccess,PWMSW,nr,HWPinNr,desc,  false);
+  GPIO_SetStruct (SERVO_struct.HWAccess,PWMSW,nr,gpio_MAP_HDR_PIN_2_GPIO_NUM(HWPinNr),desc,[]);
   pwm_SetStruct  (SERVO_struct.HWAccess,PWM_MODE_MS,freq,maxval,dcmid);
   pwm_SetClock   (SERVO_struct.HWAccess);
 end;
@@ -2431,7 +2394,7 @@ begin
   else LOG_Writeln(LOG_ERROR,'SERVO_Test: could not be initialized');
 end;
 
-function  gpio_get_reg_desc(idx:longword) : string; begin gpio_get_reg_desc:=(gpio_get_desc(idx,rpi_mmap_gpio_reg_read(idx))); end;
+function  gpio_get_reg_desc(idx:longword) : string; begin gpio_get_reg_desc:=(gpio_get_desc(idx,gpio_get_reg(idx))); end;
 
 procedure hdrhexshow;
 var idx:longword; 
@@ -2444,7 +2407,7 @@ var idx:longword;
 begin
   writeln('PWMBase  : ',Hex(rpi_get_GPIO_BASE_in_pages+PWM_BASE_OFS_in_Pages,8),'  PageSize: ',PAGE_SIZE,' PWM-Map-ptr:   0x',Hex(longword(mmap_arr_pwm),8));
   hdrhexshow;
-  for idx:= PWM_BASE to PWM_BASE_LAST  do writeln(pwm_get_desc(idx,rpi_mmap_pwm_reg_read(idx)));
+  for idx:= PWM_BASE to PWM_BASE_LAST  do writeln(pwm_get_desc(idx,pwm_get_reg(idx)));
 end;
 
 procedure clk_show_regs;
@@ -2452,7 +2415,7 @@ var idx:longword;
 begin
   writeln('CLKBase  : ',Hex(rpi_get_GPIO_BASE_in_pages+CLK_BASE_OFS_in_Pages,8),'  PageSize: ',PAGE_SIZE,' CLK-Map-ptr:   0x',Hex(longword(mmap_arr_clk),8));
   hdrhexshow;
-  for idx:= PWMCLK_CNTL to PWMCLK_DIV do writeln(pwm_get_desc(idx,rpi_mmap_clk_reg_read(idx)));
+  for idx:= PWMCLK_CNTL to PWMCLK_DIV do writeln(pwm_get_desc(idx,clk_get_reg(idx)));
 end;
 
 procedure gpio_show_regs;
@@ -2460,10 +2423,10 @@ var idx:longword;
 begin
   writeln('GPIOBase : ',Hex(rpi_get_GPIO_BASE_in_pages+GPIO_BASE_OFS_in_Pages,8),'  PageSize: ',PAGE_SIZE,' GPIO-Map-ptr:  0x',Hex(longword(mmap_arr_gpio),8));
   hdrhexshow;
-  for idx:= GPIO_BASE to GPIO_BASE_LAST do writeln(gpio_get_desc(idx,rpi_mmap_gpio_reg_read(idx)));
+  for idx:= GPIO_BASE to GPIO_BASE_LAST do writeln(gpio_get_desc(idx,gpio_get_reg(idx)));
 end;
   
-function  gpio_MAP_GPIO_NUM_2_HDR_PIN(pin:longword; mapidx:byte):longint; { Maps GPIO Number to the HDR_PIN, respecting rpi rev1 or rev2 board }
+function  gpio_MAP_GPIO_NUM_2_HDR_PIN(gpio:longword; mapidx:byte):longint; { Maps GPIO Number to the HDR_PIN, respecting rpi rev1 or rev2 board }
 var hwpin,cnt:longint; 
 begin
   hwpin:=-99; cnt:=1;
@@ -2471,23 +2434,23 @@ begin
   begin
     while cnt<=max_pins_c do
 	begin
-	  if abs(gpio_hdr_map_c[mapidx,cnt])=pin then begin hwpin:=cnt; cnt:=max_pins_c; end;
+	  if abs(gpio_hdr_map_c[mapidx,cnt])=gpio then begin hwpin:=cnt; cnt:=max_pins_c; end;
 	  inc(cnt);
 	end;
   end;
-//writeln('mapidx',mapidx:0,' HW-PIN: ',hwpin:2,' <- ',pin:2);
+//writeln('mapidx',mapidx:0,' HW-PIN: ',hwpin:2,' <- ',gpio:2);
   gpio_MAP_GPIO_NUM_2_HDR_PIN:=hwpin;
 end;  
 
-function  gpio_MAP_GPIO_NUM_2_HDR_PIN(pin:longword):longint;
+function  gpio_MAP_GPIO_NUM_2_HDR_PIN(gpio:longword):longint;
 begin
-  gpio_MAP_GPIO_NUM_2_HDR_PIN:=gpio_MAP_GPIO_NUM_2_HDR_PIN(pin,rpi_gpiomapidx);
+  gpio_MAP_GPIO_NUM_2_HDR_PIN:=gpio_MAP_GPIO_NUM_2_HDR_PIN(gpio,rpi_gpiomapidx);
 end;
   
 function  gpio_MAP_HDR_PIN_2_GPIO_NUM(hdr_pin_number:longword; mapidx:byte):longint; { Maps HDR_PIN to the GPIO Number, respecting rpi rev1 or rev2 board }
 var gpio_pin:longint;
 begin
-  if (hdr_pin_number >= 1) and (hdr_pin_number <=max_pins_c) and 
+  if (hdr_pin_number>=1) and (hdr_pin_number<=max_pins_c) and 
      ((mapidx>=1) and (mapidx<=gpiomax_map_idx_c)) then gpio_pin:=gpio_hdr_map_c[mapidx,hdr_pin_number] else gpio_pin:=WRONGPIN;
 //writeln('mapidx',mapidx:0,' HW-PIN: ',hdr_pin_number:2,' -> ',gpio_pin:2);
   gpio_MAP_HDR_PIN_2_GPIO_NUM:=gpio_pin;
@@ -2551,34 +2514,49 @@ begin
   end;
 end;
 
+function  TimeDebounce(var dt:TDateTime; GapTimeAfterActivation_ms:longword):boolean;
+var ok:boolean;
+begin
+  ok:=false;
+  if TimeElapsed(dt) then begin ok:=true; SetTimeOut(dt,GapTimeAfterActivation_ms); end;
+  TimeDebounce:=ok;
+end;
+
 function  ENC_Device(ptr:pointer):ptrint;
 (* seq	B	A	  AxorB		  delta	meaning	
 	0	0	0		0			0	no change
 	1	0	1		1			1	1 step clockwise
 	2	1	1		0			2	2 steps clockwise or counter-clockwise (fault condition)
 	3	1	0		1			3	1 step counter clockwise *)
-var hdl:longint;
+const SwitchDebounceTime_ms=100;	// Switch has to be pressed for a minimum time to be recognized
+	  SwitchRepeatTime_ms= 1000;	// inc count every xx ms
+var   hdl:longint; dt:TDateTime;
 begin 
   hdl:=longint(ptr);
   if (hdl>=1) and (hdl<=ENC_cnt) then
   begin
     with ENC_struct[hdl] do
     begin
-	  InitCriticalSection(ENC_CS);
+	  InitCriticalSection(ENC_CS); dt:=now;
       repeat
 	    if TimeElapsed(SyncTime) then
 	    begin
 	      SetTimeOut(SyncTime,ENC_SyncTime_c); // next allowed read time
-//writeln('ThreadStart ',TermThread,' ',sleeptime_ms); 
+//        writeln('ThreadStart ',TermThread,' ',sleeptime_ms); 
 		  begin
-			EnterCriticalSection(ENC_CS); 
-		      a:=$00; b:=$00; 
-              if A_gpio>=0 then  if gpio_get_PIN(A_gpio)  then a:=$01;
-	          if B_gpio>=0 then  if gpio_get_PIN(B_gpio)  then b:=$01;
-			  if SW_gpio>=0 then if gpio_get_PIN(SW_gpio) then inc(switchcounter);
-		      seq:=(a xor b) or (b shl 1);
+			EnterCriticalSection(ENC_CS); 			  
+              if (mmap_arr_gpio^[A_Sig.regget] and A_Sig.mask_1Bit)>0 then a:=1 else a:=0;
+	          if (mmap_arr_gpio^[B_Sig.regget] and B_Sig.mask_1Bit)>0 then b:=1 else b:=0;
+			  a:=(a xor A_Sig.polarity); b:=(b xor B_Sig.polarity);
+			  seq:=(a xor b) or (b shl 1);
+			  if SW_Sig.gpio>=0 then 
+			  begin 
+			    if (mmap_arr_gpio^[SW_Sig.regget] and SW_Sig.mask_1Bit)>0 then sw:=1 else sw:=0;
+				if ((sw xor SW_Sig.polarity)=0)
+					then SetTimeOut     (dt,SwitchDebounceTime_ms) // Retrigger press time
+					else if TimeDebounce(dt,SwitchRepeatTime_ms) then inc(switchcounter);
+			  end;
 		    LeaveCriticalSection(ENC_CS);
-		  
 		    delta:=0;
 		    if seq<>seqold then  
 		    begin
@@ -2594,13 +2572,14 @@ begin
 			  else inc(counter,delta);
 			  counter:=counter mod countermax;	// 0 - countermax-1
 			  cycles:= counter div steps_per_cycle;
-//writeln('Seq:',seq,' seqold:',seqold,' delta:',delta,' deltaold:',deltaold,' b:',b,' a:',a);		  
+//            writeln('Seq:',seq,' seqold:',seqold,' delta:',delta,' deltaold:',deltaold,' b:',b,' a:',a);		  
 		      deltaold:=delta; seqold:=seq;
 		    end; 
 		  end;
 		end;
 		if (sleeptime_ms>0) and (not TermThread) then delay_msec(sleeptime_ms);
 	  until TermThread;
+//    writeln('ENC_Device: Thread will terminate');
 	  DoneCriticalSection(ENC_CS);
 	  EndThread;
 	end; // with
@@ -2608,13 +2587,11 @@ begin
   ENC_Device:=0;
 end;
 
-function  ENC_Setup(hdl:integer; AHdrPin,BHdrPin,SWHdrPin:longint; 
-                     pup,stick2minmax:boolean; 
-		    		 ctrpreset,ctrmax,stepspercycle:longword):boolean;
+function  ENC_Setup(hdl:integer; var A_Signal,B_Signal,SW_Signal:GPIO_struct_t;
+                    stick2minmax:boolean; ctrpreset,ctrmax,stepspercycle:longword):boolean;
 //in: 	hdl:			1..ENC_cnt
-//		xHDRPin:		2 HW-Pinnumbers of RPI Header, which should be used for the Encoder A,B Signal
-//      SWHdrPin:		if Encoder has Switch function like KY-040 encoder. 
-//		pup: 			true, if no external pullup resistor is on xHDRPins and we want to use RPI internal PullUps
+//		A/B_Signal:		2 GPIOs, which should be used for the Encoder A,B Signal
+//      SW_Signal:		GPIO, which handles SwitchButton of Encoder. e.g. the KY-040 encoder has a switch. 
 //		stick2minmax: 	true,  if we don't want an immediate counter transition from <ctrmax> to 0 or from 0 to <ctrmax>  
 //		ctrpreset:		set an initial counter value
 //		ctrmax:			counter is always between 0 and <ctrmax>
@@ -2626,61 +2603,63 @@ begin
   begin
     with ENC_struct[hdl] do
     begin
-      ok:=(gpio_MAP_HDR_PIN_2_GPIO_NUM(AHdrPin)>=0) and (gpio_MAP_HDR_PIN_2_GPIO_NUM(BHdrPin)>=0);
-	  if SWHdrPin>=0 then ok:=ok and (gpio_MAP_HDR_PIN_2_GPIO_NUM(SWHdrPin)>=0);
+	  A_Sig:=A_Signal; B_Sig:=B_Signal; SW_Sig:=SW_Signal;
+	  ok:=(GPIO_Setup(A_Sig) and GPIO_Setup(B_Sig));
+	  if SW_Sig.gpio>=0 then ok:=ok and GPIO_Setup(SW_Sig);
       if ok then 
       begin	// Pins are available
         Handle:=hdl; TermThread:=false;
-		A_HdrPin:=AHdrPin; B_HdrPin:=BHdrPin; SW_HdrPin:=SWHdrPin; 
-		pullup:=pup; s2minmax:=stick2minmax; sleeptime_ms:=ENC_SyncTime_c; 
+		s2minmax:=stick2minmax; sleeptime_ms:=ENC_SyncTime_c; 
 	    seqold:=2; deltaold:=0; cycles:=0; steps_per_cycle:=stepspercycle;
 		counter:=ctrpreset; counterold:=counter; countermax:=ctrmax+1;
-		idxcounter:=0; switchcounter:=0;
-        A_gpio:=  gpio_MAP_HDR_PIN_2_GPIO_NUM(A_HdrPin); 
-		B_gpio:=  gpio_MAP_HDR_PIN_2_GPIO_NUM(B_HdrPin);
-		SW_gpio:= gpio_MAP_HDR_PIN_2_GPIO_NUM(SW_HdrPin);
-		if A_gpio>=0   then begin gpio_set_INPUT (A_gpio);   gpio_set_PULLUP(A_gpio,  pullup); end;
-		if B_gpio>=0   then begin gpio_set_INPUT (B_gpio);   gpio_set_PULLUP(B_gpio,  pullup); end;
-		if SW_gpio>=0  then begin gpio_set_INPUT (SW_gpio);  gpio_set_PULLUP(SW_gpio, pullup); end;		
-		if (*pup and*) gpio_get_PIN(A_gpio) and gpio_get_PIN(B_gpio) then 
-		  LOG_Writeln(LOG_ERROR,'ENC_RotEncInit: Looks that no encoder is connected to HW-Pins:'+
-			Num2Str(A_HdrPin,0)+','+Num2Str(B_HdrPin,0)+' GPIOs:'+Num2Str(A_gpio,0)+','+Num2Str(B_gpio,0));
- 		  
+		idxcounter:=0; switchcounter:=0;	 		  
 		BeginThread(@ENC_Device,pointer(hdl)); // Start Encoder Thread
-		
       end
 	  else LOG_Writeln(LOG_ERROR,'ENC_RotEncInit: Checked Pins not ok');
     end; // with	  
   end
-  else LOG_Writeln(LOG_ERROR,'ENC_RotEncInit: increase ENC_Cnt:'+Num2Str(ENC_cnt,0)+' hdl:'+Num2Str(hdl,0));
+  else 
+    if (hdl>ENC_cnt) then LOG_Writeln(LOG_ERROR,'ENC_RotEncInit: increase ENC_Cnt:'+Num2Str(ENC_cnt,0)+' hdl:'+Num2Str(hdl,0));
   ENC_Setup:=ENC_struct[hdl].ok;
+end;
+
+function  ENC_Setup(hdl:integer; var A_Signal,B_Signal:GPIO_struct_t;  // without a SWitch
+                    stick2minmax:boolean; ctrpreset,ctrmax,stepspercycle:longword):boolean;
+var dummy:GPIO_struct_t;
+begin 
+  GPIO_SetStruct(dummy,input,-1,-1,'Encoder without a SWitch',[]); 
+  ENC_Setup:=ENC_Setup(hdl,A_Signal,B_Signal,dummy,stick2minmax,ctrpreset,ctrmax,stepspercycle);
 end;
 
 procedure ENC_Test;
 // tested with Keyes KY-040 Rotary Encoder
-// example for usage in your main program:
-// ENC_Setup(...);
-// repeat
-//   ENC_GetVal(...);
-//   <your code, with response to ENC_GetVal...>
-// until false;
-const devnum=1; Mask_c=$0fff; ENC_A_HWPin=11; ENC_B_HWPin=12; ENC_SW_HWPin=-1; ENC_PUP=false;
-var  cnt:word; 
+// pls. be aware, that the SWitch Input has no external Pullup. Turn on internal Port-PullUP
+// Switch Input has active low signal -> ReversePolarity
+const ENC_devnum=1; StepsPerRev=4; MAXCount=1024; MAXSWCount=6; term=3;
+//    Pins on Connector, where the Encoder is connected to. 
+      ENC_A_HWPin=15; ENC_B_HWPin=16; ENC_SW_HWPin=18; // A:GPIO22 B:GPIO23 SW:GPIO24
+var   cnt,swcnt:word; A,B,SW:GPIO_struct_t;
 begin
-  if ENC_Setup(devnum,ENC_A_HWPin,ENC_B_HWPin,ENC_SW_HWPin,ENC_PUP,true,0,Mask_c,4) then
+  GPIO_SetStruct(A, INPUT,1,gpio_MAP_HDR_PIN_2_GPIO_NUM(ENC_A_HWPin), 'ENC A-Signal',[]);
+  GPIO_SetStruct(B, INPUT,2,gpio_MAP_HDR_PIN_2_GPIO_NUM(ENC_B_HWPin), 'ENC B-Signal',[]);
+  GPIO_SetStruct(SW,INPUT,3,gpio_MAP_HDR_PIN_2_GPIO_NUM(ENC_SW_HWPin),'ENC Switch',  [PullUP,ReversePOLARITY]);
+  if ENC_Setup(ENC_devnum,A,B,SW,true,0,MAXCount,StepsPerRev) then
   begin
-    cnt:=0;
-    writeln('Started Encoder Thread, do some manual rotation on encoder.');
+    cnt:=0; swcnt:=0;
+    writeln('Do some manual rotation on encoder. Prog will terminate, if Switch was pressed ',term,' times');
 	writeln('Used Pins on Connector, A-Pin:',ENC_A_HWPin,' B-Pin:',ENC_B_HWPin,' SW-Pin:',ENC_SW_HWPin);
+	writeln('Used GPIOs with Signal: A on GPIO',A.gpio,', B on GPIO',B.gpio,', SW on GPIO',SW.gpio);
+	writeln('MAXCount:',MAXCount,' MAXSWCount:',MAXSWCount-1);
 //  InitCriticalSection(ENC_CS); 
-    repeat
-      delay_msec(500);	// wait x millisec
-	  writeln( 'Counter: ',round(ENC_GetVal(devnum,0)),
-			  ' Cycles: ', round(ENC_GetVal(devnum,1)),
-			  ' Switch: ',(round(ENC_GetSwitch(devnum)) mod 2));  // switch cnt as toogle, 0 or 1
+    repeat // Main Loop
+      delay_msec(500);	// wait x millisec, relevant for reporting only
+	  swcnt:=round(ENC_GetSwitch(ENC_devnum));
+	  writeln( 'Counter: ',round(ENC_GetVal(ENC_devnum,0)),
+			  ' Cycles: ', round(ENC_GetVal(ENC_devnum,1)),
+			  ' Switch: ',(swcnt mod MAXSWCount));  // switch cnt 0-xx
       inc(cnt);
-    until false;
-	ENC_struct[devnum].TermThread:=true;
+    until (swcnt>=term);  // end, if Encoder Switch was pressed <term> times
+	ENC_struct[ENC_devnum].TermThread:=true;
 	writeln('Encoder Thread will terminate');
 //  DoneCriticalSection(ENC_CS);
   end;
@@ -3441,27 +3420,25 @@ end;
 
 procedure SPI_Test; begin rfm22B_ShowChipType; end;
 
-function rpi_snr :string;  		begin rpi_snr :=cpu_snr;  end;
-function rpi_hw  :string;  		begin rpi_hw  :=cpu_hw;   end;
-function rpi_proc:string;  		begin rpi_proc:=cpu_proc; end;
-function rpi_mips:string;  		begin rpi_mips:=cpu_mips; end;
-function rpi_feat:string;  		begin rpi_feat:=cpu_feat; end;
-function rpi_rev :string;  		begin rpi_rev :=cpu_rev; end;
-function rpi_revnum:byte;  		begin rpi_revnum:=cpu_rev_num; end;
-function rpi_gpiomapidx:byte;  	begin rpi_gpiomapidx:=gpio_map_idx; end;
-function rpi_hdrpincount:byte;  begin rpi_hdrpincount:=connector_pin_count; end; 
-function rpi_freq :string; 		begin rpi_freq :=cpu_fmin+';'+cpu_fcur+';'+cpu_fmax+';Hz'; end;
+function rpi_snr :string;  			begin rpi_snr :=cpu_snr;  end;
+function rpi_hw  :string;  			begin rpi_hw  :=cpu_hw;   end;
+function rpi_proc:string;  			begin rpi_proc:=cpu_proc; end;
+function rpi_mips:string;  			begin rpi_mips:=cpu_mips; end;
+function rpi_feat:string;  			begin rpi_feat:=cpu_feat; end;
+function rpi_rev :string;  			begin rpi_rev :=cpu_rev; end;
+function rpi_revnum:byte;  			begin rpi_revnum:=cpu_rev_num; end;
+function rpi_gpiomapidx:byte;  		begin rpi_gpiomapidx:=gpio_map_idx; end;
+function rpi_hdrpincount:byte;  	begin rpi_hdrpincount:=connector_pin_count; end; 
+function rpi_freq :string; 			begin rpi_freq :=cpu_fmin+';'+cpu_fcur+';'+cpu_fmax+';Hz'; end;
+function rpi_status_led_GPIO:byte;	begin rpi_status_led_GPIO:=status_led_GPIO; end;
 
-function rpi_i2c_busnum(func:byte):byte; { get the i2c busnumber, where e.g. the geneneral purpose devices are connected. This depends on rev1 or rev2 board . e.g. rpi_i2c_busnum(rpi_i2c_general_purpose_bus_c) }
+function rpi_i2c_busnum(func:byte):byte; 
+//get the i2c busnumber, where e.g. the geneneral purpose devices are connected. 
+//This depends on rev1 or rev2 board . e.g. rpi_i2c_busnum(rpi_i2c_general_purpose_bus_c) }
 var b:byte;
 begin
-  b:=1; if func<>rpi_i2c_general_purpose_bus_c then b:=0; { default rev2 board }
-  case rpi_revnum of 
-     1 : begin b:=0; if func<>rpi_i2c_general_purpose_bus_c then b:=1; end;
-	 2 : begin b:=1; if func<>rpi_i2c_general_purpose_bus_c then b:=0; end;
-	 3 : begin b:=1; if func<>rpi_i2c_general_purpose_bus_c then b:=0; end;
-  end;
-  rpi_i2c_busnum:=b;
+  b:=i2c_busnum; if func<>rpi_i2c_general_purpose_bus_c then inc(b);
+  rpi_i2c_busnum:=(b mod 2);
 end;
 
 procedure rpi_show_cpu_info;
@@ -3489,7 +3466,6 @@ begin
 end;
 
 procedure gpio_create_int_script(filn:string);
-{ just for convenience }
 const logfil_c='/tmp/gpio_script.log';
 var ts:TStringlist; fil:text; 
 begin
@@ -3558,18 +3534,19 @@ end;
 // https://github.com/omerk/pihwm/blob/master/demo/gpio_int.c
 // https://github.com/omerk/pihwm/blob/master/lib/pihwm.c
 function isr_handler(p:pointer):longint; // (void *isr)
-const STDIN_FILENO = 0; STDOUT_FILENO = 1; STDERR_FILENO = 2; POLLIN = $0001; POLLPRI = $0002; testrun_c=false;
+const testrun_c=true;
+      STDIN_FILENO = 0; STDOUT_FILENO = 1; STDERR_FILENO = 2; POLLIN = $0001; POLLPRI = $0002; 
 var   rslt:integer; nfds,rc:longint; buf:array[0..63] of byte; fdset:array[0..1] of pollfd; testrun:boolean; isr_ptr:^isr_t; Call_Func:TFunctionOneArgCall;
 begin
   rslt:=0; nfds:=2; testrun:=testrun_c; isr_ptr:=p; Call_Func:=isr_ptr^.func_ptr;
   if testrun then writeln('## ',isr_ptr^.gpio);
   if (isr_ptr^.flag=1) and (isr_ptr^.fd>=0) then
   begin
-    if testrun then writeln('isr_handler running ',isr_ptr^.gpio);
+    if testrun then writeln('isr_handler running for GPIO',isr_ptr^.gpio);
     while true do
 	begin
-      fdset[1].fd := STDIN_FILENO; fdset[1].events := POLLIN;  fdset[1].revents:=0;
-      fdset[0].fd := isr_ptr^.fd;  fdset[0].events := POLLPRI; fdset[0].revents:=0;
+      fdset[0].fd := STDIN_FILENO; fdset[0].events := POLLIN;  fdset[0].revents:=0;
+      fdset[1].fd := isr_ptr^.fd;  fdset[1].events := POLLPRI; fdset[1].revents:=0;
 
       rc := FPpoll (fdset, nfds, 1000);	// Timeout in ms 
 
@@ -3585,9 +3562,9 @@ begin
         end;
       end; 
 
-      if ((fdset[0].revents and POLLPRI)>0) then
+      if ((fdset[1].revents and POLLPRI)>0) then
 	  begin //* We have an interrupt! */
-        if (-1 = fpread (fdset[0].fd, buf, 64)) then
+        if (-1 = fpread (fdset[1].fd, buf, SizeOf(buf))) then
 		begin
           if testrun then writeln('read failed for interrupt');
 		  rslt:=-1;
@@ -3605,9 +3582,9 @@ begin
 		end;
       end;
 
-      if ((fdset[1].revents and POLLIN)>0) then
+      if ((fdset[0].revents and POLLIN)>0) then
 	  begin
-        if (-1 = fpread (fdset[1].fd, buf, 1)) then
+        if (-1 = fpread (fdset[0].fd, buf, 1)) then
         begin
           if testrun then writeln('read failed for stdin read');
           rslt:=-1;
@@ -3625,23 +3602,47 @@ begin
   end;
   isr_handler:=rslt;
 end;
+
+function  WriteStr2UnixDev(dev,s:string):integer; 
+var rslt,i:integer; buffer:databuf_t; 
+begin  
+  rslt:=-1;
+  {$IFDEF UNIX}
+    with buffer do
+    begin
+	  lgt:=length(s);
+      if lgt>SizeOf(buf) then exit(-1);	 
+      for i:= 1 to lgt do buf[i-1]:=ord(s[i]);
+      hdl:=fpopen(dev, Open_RDWR or O_NONBLOCK);
+      if hdl<0 then exit(-2); 
+	  rslt:=fpWrite(hdl,buf,lgt);
+      if (rslt=lgt) then rslt:=0;
+	  fpclose(hdl);
+    end; // with
+  {$ENDIF}
+  WriteStr2UnixDev:=rslt;
+end;
  
-function gpio_initX(var isr:isr_t):integer;
-// needed, because this is the only known possability to use ints without kernel modifications.
-var ts:TStringlist; rslt:integer; pathstr,edge_type:string; 
+function gpio_OpenFile(var isr:isr_t):integer;
+// needed, because this is the only known possibility to use ints without kernel modifications.
+(* path=/sys/class/gpio
+   echo $gpionum	> $path/export
+   echo in 			> $path/gpio$gpionum/direction
+   echo $edgetype	> $path/gpio$gpionum/edge
+*)
+var rslt:integer; pathstr,edge_type:string; 
 begin
   rslt:=0; pathstr:=gpio_path_c+'/gpio'+Num2Str(isr.gpio,0); 
   if isr.rising_edge then edge_type:='rising' else edge_type:='falling';
-  writeln('gpio_initX');
+  writeln('gpio_OpenFile');
   {$I-}
-    ts:=TStringList.create;
-    if not FileExists(int_filn_c) then gpio_create_int_script(int_filn_c); 
-    if call_external_prog(int_filn_c+' '+Num2Str(isr.gpio,0)+' in '+edge_type,ts)=0 then ;
-    ts.free;
+    if (WriteStr2UnixDev(gpio_path_c+'/export',Num2Str(isr.gpio,0))=0) then
+      if (WriteStr2UnixDev(pathstr+'/direction','in')=0) then
+	      WriteStr2UnixDev(pathstr+'/edge',edge_type);
     if FileExists(pathstr+'/value') then isr.fd:=fpopen(pathstr+'/value', O_RDONLY or O_NONBLOCK );
   {$I+} 
-  if (isr.fd<0) and (rslt=0) then rslt:=-1;
-  gpio_initX:=rslt;
+  if (isr.fd<0) then rslt:=-1;
+  gpio_OpenFile:=rslt;
 end;
 
 function gpio_int_active(var isr:isr_t):boolean;
@@ -3661,7 +3662,7 @@ begin
   if isr.gpio>=0 then
   begin
     gpio_set_input(isr.gpio); if isr.rising_edge then gpio_set_edge_rising(isr.gpio,true) else gpio_set_edge_falling(isr.gpio,true); 
-    if gpio_initX(isr)=0 then 
+    if gpio_OpenFile(isr)=0 then 
     begin
 	  if (isr_proc<>nil) then begin isr.func_ptr:=isr_proc; writeln('Int routine installed for GPIO'+Num2Str(gpio_num,0)); end;
       BeginThread(@isr_handler,@isr,isr.ThreadId);  		// http://www.freepascal.org/docs-html/prog/progse43.html
@@ -3679,10 +3680,14 @@ var rslt:integer;
 begin
   rslt:=0;
 //writeln('gpio_int_release: pin: ',isr.gpio);
-  isr.flag := 0; isr.int_enable:=false;
+  isr.flag:=0; isr.int_enable:=false; delay_msec(100); // let Thread Time to terminate
   gpio_set_edge_rising (isr.gpio,false);
   gpio_set_edge_falling(isr.gpio,false); 
-  if isr.fd>=0 then begin fpclose(isr.fd); isr.fd:=-1; end;
+  if isr.fd>=0 then 
+  begin 
+    fpclose(isr.fd); isr.fd:=-1; 
+	WriteStr2UnixDev(gpio_path_c+'/unexport',Num2Str(isr.gpio,0));
+  end;
   gpio_int_release:=rslt;
 end;
 
@@ -3697,7 +3702,7 @@ procedure gpio_int_disable(var isr:isr_t); begin isr.int_enable:=false; writeln(
 
 procedure inttest(gpio_nr:longint);
 // shows how to use the gpio_int functions
-const loop_max=100;
+const loop_max=30;
 var cnt:longint; isr:isr_t; 
 begin
   writeln('INT main start on GPIO',gpio_nr,' loops: ',loop_max:0);
@@ -3705,7 +3710,7 @@ begin
   gpio_int_enable(isr); // Enable Interrupts, allows execution of isr routine
   for cnt:=1 to loop_max do
   begin
-    write  ('doing nothing, waiting for an interrupt. loopcnt: ',cnt:3,' int_cnt: ',isr.int_cnt:3,' ThreadID: ',isr.ThreadID,' ThPrio: ',isr.ThreadPrio);
+    write  ('doing nothing, waiting for an interrupt on GPIO',gpio_nr:0,' loopcnt: ',cnt:3,' int_cnt: ',isr.int_cnt:3,' ThreadID: ',isr.ThreadID,' ThPrio: ',isr.ThreadPrio);
 	if isr.rslt<>0 then begin write(' result: ',isr.rslt,' last service time: ',isr.last_isr_servicetime:0,'ms'); isr.rslt:=0; end;
 	writeln;
     sleep (1000);
@@ -3716,11 +3721,9 @@ begin
 end;
 
 procedure gpio_int_test; // shows how to use the gpio_int functions
-const HW_Pin=15; // PIN Number on rpi HW Header P1  ref: http://elinux.org/RPi_Low-level_peripherals
-var   gpio:longint;
+const gpio=22; 
 begin
-  gpio:=gpio_MAP_HDR_PIN_2_GPIO_NUM(HW_pin, rpi_gpiomapidx);  // translate Header Pin number to gpio number, dependend on rpi board revision
-  writeln('gpio_int_test: HW_Pin:',HW_Pin:0,' maps to GPIO:',gpio:0,' idx:',rpi_gpiomapidx:0);
+  writeln('gpio_int_test: GPIO',gpio,' HWPin:',gpio_MAP_GPIO_NUM_2_HDR_PIN(gpio));
   inttest(gpio);
 end;
 
@@ -3754,7 +3757,9 @@ function  pfio_avail(devadr:byte):boolean; // has to be implemented. Just a dumm
 const avail_c=true;
 begin 
   // check the HW, if the Chip on Adr 'devadr' is available
-  if not avail_c then LOG_WRITELN(LOG_ERROR,'PiFace board not available or not initialized'); 
+  {$warnings off} 
+    if not avail_c then LOG_WRITELN(LOG_ERROR,'PiFace board not available or not initialized'); 
+  {$warnings on} 
   pfio_avail:=avail_c; 
 end;
 
@@ -4230,7 +4235,7 @@ begin
   repeat
     SetPoint:=PID_SetPoints_c[loop]*scale_c;
 	delta:=PID_Calc(pid1,SetPoint,NewVal);
-	if errinduct then delta:=delta*random;
+	{$warnings off} if errinduct then delta:=delta*random; {$warnings on} 
 	writeln('PID_Test: SetPoint:',SetPoint:7:2,'  NewVal:',NewVal:7:2,'   delta:',delta:12:8);
 	NewVal:=NewVal+delta;
 	// action according to NewVal
@@ -4267,21 +4272,23 @@ begin
   if rpi_run_on_known_hw then
   begin
     IO_Init_Const; 
-	{$IFDEF UNIX} gpio_create_int_script(int_filn_c); {$ENDIF} // no need for it. Just for convenience 
-	gpio_start;
-	ENC_InitDataStruct;
-    i2c_Init;
-	SPI_DEV_INIT_All;
-    SPI_BUS_INIT_All;
-	BB_pin:=rpi_status_led_GPIO;
-//  BB_SetPin(rpi_status_led_GPIO);	// set the BitBang GPIO-Pin to LED Status Pin
-	morse_speed(-1);				// set to default speed 10WpM=50BpM	-> 120ms
-//  rpi_show_all_info;
+	if gpio_start=0 then
+	begin // map init successful. next: init devices
+	  ENC_InitDataStruct;
+      i2c_Init;
+	  SPI_DEV_INIT_All;
+      SPI_BUS_INIT_All;
+	  BB_pin:=rpi_status_led_GPIO;
+//    BB_SetPin(rpi_status_led_GPIO);	// set the BitBang GPIO-Pin to LED Status Pin
+	  morse_speed(-1);					// set to default speed 10WpM=50BpM	-> 120ms
+//    rpi_show_all_info;
+    end
+	else LOG_Writeln(LOG_ERROR,'gpio_start: can not be initialize Map Areas');
+    {$IFDEF UNIX} gpio_create_int_script(int_filn_c); {$ENDIF} // no need for it. Just for convenience 
   end
   else 
   begin
-    {$IFDEF UNIX} Log_writeln(Log_ERROR,'rpi_hal: not running on known rpi HW'); {$ENDIF}   
+    {$IFDEF UNIX} Log_writeln(Log_ERROR,'rpi_hal: not running on supported rpi HW'); {$ENDIF}   
   end;
-//  gpio_set_HDR_PIN(5,false); gpio_set_HDR_PIN(13,false);
 //writeln('Leave unit hal');
 end.
