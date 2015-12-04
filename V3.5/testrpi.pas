@@ -1,4 +1,11 @@
-program testrpi; // V2
+(*Simple Test program, which is using rpi_hal. 
+  Compile it on rpi with '#fpc testrpi.' and run it '#./testrpi'
+  
+  If you use Lazarus, then modify the Lazarus IDE compiler options:
+  Project -> Project Options ... -> Compiler Options -> Other and add: -dUseCThreads    
+  pls. see http://forum.lazarus.freepascal.org/index.php/topic,20991.30.html, post from katonacs73 *)
+  
+program testrpi; // V2.2
 uses  rpi_hal;
 const piggyback=1; piface=2; board_installed=0; //board_installed=piggyback;
 begin
