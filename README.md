@@ -15,6 +15,8 @@ delivers procedures and functions to access the rpi HW
 - Bidirectional serial device access in User space /dev/yourdevice 
 - USB Reset and Access
 
+Discussion forum:
+http://forum.lazarus.freepascal.org/index.php/topic,20991.30.html
 
 Just an excerpt of the available functions and procedures:
 
