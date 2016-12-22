@@ -1,6 +1,6 @@
 # rpi_hal
 Free Pascal Hardware abstraction library for the Raspberry Pi
-This Unit, with more than 4000 Lines of Code, 
+This Unit, with more than 7000 Lines of Code, 
 delivers procedures and functions to access the rpi HW
 
 - I2C
@@ -14,6 +14,10 @@ delivers procedures and functions to access the rpi HW
 - functions to access PiFace Board
 - Bidirectional serial device access in User space /dev/yourdevice 
 - USB Reset and Access
+- SW Maintenance-/Service-functions:
+  Upload Logfiles to FTP-Server
+  Download new SW from FTP-Server
+  Install new SW on rpi
 
 Discussion forum:
 http://forum.lazarus.freepascal.org/index.php/topic,20991.30.html
