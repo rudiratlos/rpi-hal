@@ -20,7 +20,7 @@ delivers procedures and functions to access the rpi HW
   Install new SW on rpi
 
 Discussion forum:
-http://forum.lazarus.freepascal.org/index.php/topic,20991.30.html
+http://forum.lazarus.freepascal.org/index.php/topic,20991.60.html
 
 Just an excerpt of the available functions and procedures:
 
