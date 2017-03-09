@@ -452,6 +452,8 @@ type
   t_port_flags  = (	INPUT,OUTPUT,ALT5,ALT4,ALT0,ALT1,ALT2,ALT3,PWMHW,PWMSW,control,
 					FRQHW,Simulation,PullUP,PullDOWN,RisingEDGE,FallingEDGE,ReversePOLARITY);  
   s_port_flags  = set of t_port_flags;
+  t_initpart	= (InitGPIO,InitI2C,InitSPI);
+  s_initpart  	= set of t_initpart;
   t_IOBusType	= (UnknDev,I2CDev,SPIDev);
   t_PowerSwitch	= ( ELRO,Sartano,Nexa,Intertechno,FS20);
   t_rpimaintflags=(	UpdExec,UpdPKGGet,UpdPKGInstal,UpdUpload,UpdDownload,
@@ -734,10 +736,8 @@ var
   SERVO_struct: array					of SERVO_struct_t;
   ERR_MGMT: 	array					of ERR_MGMT_t;
  
-function  RPI_HW_Start:boolean;
-function  GPIO_Start:integer;
-procedure I2C_Start;
-procedure SPI_Start;
+function  RPI_HW_Start:boolean; // start all. GPIO,I2C and SPI
+function  RPI_HW_Start(initpart:s_initpart):boolean; // start dedicated parts. e.g. RPI_HW_Start([InitGPIO,InitI2C,InitSPI]); 
  
 {$IFDEF UNIX} procedure GPIO_int_test; {$ENDIF}	// only for test   
 procedure GPIO_PIN_TOGGLE_TEST; // just for demo reasons, call it from your own program. Be careful, it toggles GPIO pin 16 -> StatusLED }
@@ -1016,6 +1016,7 @@ function  LeadingZeros(l:longint;digits:byte):string;
 function  Bin(q:longword;lgt:Byte) : string; 
 function  Hex   (nr:qword;lgt:byte) : string; 
 function  HexStr(s:string):string;
+function  StrHex(Hex_strng:string):string;
 function  AdjZahlDE(r:real;lgt,nk:byte):string;
 function  AdjZahl(s:string):string;
 function  scale(valin,min1,max1,min2,max2:real):real;
@@ -1403,6 +1404,24 @@ begin
   end; // only . as decimalpoint
   hs:=StringReplace(hs,'.--','.00',[]); hs:=StringReplace(hs,'.-', '.00',[]); 
   AdjZahl:=hs;
+end;
+
+function  StrHex(Hex_strng:string):string;
+const tab:array[1..6] of byte=($0a,$0b,$0c,$0d,$0e,$0f);
+var s,sh:string; i:longint; b,bh:byte; pending:boolean;
+begin
+  sh:=''; bh:=$00; s:=GetHexChar(Hex_strng); pending:=((Length(s) mod 2)<>0);
+  for i := 1 to Length(s) do
+  begin
+    b:=ord(s[i]);
+	if (b>=$30) and (b<=$39) then b:=b and $0f else b:=tab[(b and $0f)];
+	if (((i-1) mod 2) <> 0) or ((i=Length(s)) and pending) then 
+	begin 
+	  bh:=bh or b; sh:=sh+char(bh); bh:=$00; 
+	end 
+	else bh:=b shl 4;
+  end;
+  StrHex:=sh;
 end;
 
 function  Str2DateTime(tdstring,fmt:string):TDateTime;
@@ -3217,8 +3236,9 @@ begin
   res:=-1; 
   if RPI_BCM2835 then
   begin
-   call_external_prog(LOG_NONE,'xxd -l 32 -ps -c 32 '+node,nodereturn);
+   call_external_prog(LOG_NONE,'xxd -ps '+node,nodereturn);
    if not Str2Num('$'+GetHexChar(nodereturn),res) then res:=-1; 
+// nodereturn:=StrHex(nodereturn);
   end;
   RPI_BCM2835_GetNodeValue:=res;
 end;
@@ -7539,20 +7559,19 @@ begin
   RPI_Init_Allowed:=ok;
 end;
 
-function  RPI_HW_Start:boolean;
-var ok:boolean;
+function  RPI_HW_Start(initpart:s_initpart):boolean;
+var ok:boolean; _initpart:s_initpart;
 begin
   ok:=RPI_platform_ok;
   if ok then
   begin
-    ok:=(GPIO_Start=0);
-    if ok then
-    begin // map init successful. next: init datastructures	and devices
-      I2C_Start;
-      SPI_Start;
-//    RPI_show_all_info;
-    end 
-    else 
+    _initpart:=initpart;
+    if ((InitI2C) IN _initpart) or ((InitSPI) IN _initpart) 
+      then _initpart:=_initpart+[InitGPIO]; // GPIO is mandatory
+    if ok and (InitGPIO IN _initpart) then ok:=(GPIO_Start=0);
+    if ok and (InitI2C	IN _initpart) then I2C_Start;
+    if ok and (InitSPI	IN _initpart) then SPI_Start;    
+    if not ok then
     begin
       LOG_Writeln(LOG_ERROR,'RPI_hal: can not initialize MemoryMap');
 //    Halt(1);
@@ -7566,6 +7585,9 @@ begin
   end;   
   RPI_HW_Start:=ok;
 end;
+
+function  RPI_HW_Start:boolean; 
+begin RPI_HW_Start:=RPI_HW_Start([InitGPIO,InitI2C,InitSPI]); end; // start all
 
 begin
 //writeln('Enter unit rpi_hal');
