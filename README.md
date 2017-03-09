@@ -30,7 +30,7 @@ delivers procedures and functions to access the rpi HW</br>
   
 !! Since V4.5 new startup strategy, rpi_hal will not bring up HW automatically.</br>
 !! pls. start rpi_hal with e.g. RPI_HW_Start for all components in your main program,</br>
-!! or use explicit flags: RPI_HW_Start([InitGPIO,InitI2C,InitSPI])</br>
+!! or use explicit flags: RPI_HW_Start([InitHaltOnError,InitGPIO,InitI2C,InitSPI])</br>
 
 Discussion forum: http://forum.lazarus.freepascal.org/index.php/topic,20991.75.html
 
