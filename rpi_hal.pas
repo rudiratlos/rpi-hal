@@ -3116,8 +3116,8 @@ var ts:TStringlist; sh:string; lw:longword; code:integer;
     GPIO_map_idx:=gpioidx; 	status_led_GPIO:=slednr; 
     RPI_SetInfo:=	'rev'+Num2Str(cpurev,0)+';'+
 					Num2Str(memsizMB,0)+'MB;'+
-					desc+';'+cpurevs+';'+
-	                Num2Str(connector_pin_count,0);	//	  rev3;1024MB;2B;a02082;40	
+					desc+';'+cpu_hw+';'+cpurevs+';'+
+	                Num2Str(connector_pin_count,0);	//	  rev3;1024MB;2B;BCM2709;a02082;40	
   end;
 begin 
    cpu_snr:='';  cpu_hw:='';   cpu_proc:=''; cpu_rev:=''; cpu_mips:=''; cpu_feat:=''; cpu_rev_num:=0;
