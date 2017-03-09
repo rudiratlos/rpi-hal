@@ -1022,6 +1022,8 @@ procedure AskCR(msg:string);
 function  SepRemove(s:string):string;
 function  Trimme(s:string;modus:byte):string;//modus: 1:adjL 2:adjT 3:AdjLT 4:AdjLMT 5:AdjLMTandRemoveTABs
 function  FilterChar(s,filter:string):string;
+function  GetNumChar(s:string):string;
+function  GetHexChar(s:string):string;
 function  ReplaceChars(s,filterchars,replacechar:string):string;
 function  RM_CRLF(s:string):string; 
 function  GetHostName:string;
@@ -1553,6 +1555,12 @@ begin
   end;
   FilterChar:=sh;
 end;
+
+function GetHexChar(s:string):string;
+begin GetHexChar:=FilterChar(s,'0123456789ABCDEFabcdef'); end;
+
+function GetNumChar(s:string):string;
+begin GetNumChar:=FilterChar(s,'0123456789'); end;
 
 function ReplaceChars(s,filterchars,replacechar:string):string;
 {.c ersetzt aus string s alle char die in filter angegeben sind mit replacechar }
@@ -3191,7 +3199,7 @@ begin
 	 9   : begin 
 	 	     call_external_prog(LOG_NONE,'uname -v',sh); 						// e.g. #970 SMP Mon Feb 20 19:18:29 GMT 2017
 	 	     sh:=Select_Item(sh,' ','',1);										// #970
-	 	     sh:=FilterChar (sh,'0123456789');									// 970
+	 	     sh:=GetNumChar(sh);												// 970
 	 	     if not Str2Num(sh,li) then li:=-1;									// dummy, works with kernel above 4.4.50 
 	 	     if (li<supminkrnl) or (li>supmaxkrnl) then valu:=1 else valu:=1;	// dummy, supported min./max. kernel version 4.0.5 - 4.4.50
 	 	   end;
@@ -3199,17 +3207,25 @@ begin
   RPI_mmap_get_info:=valu;
 end;
 
+function  RPI_IS_bcm2835:boolean; begin RPI_IS_BCM2835:=(Upper(RPI_hw)='BCM2835'); end;
+
 function  RPI_I2C_GetSpeed(bus:byte):longint;
-//pi@raspberrypi ~ $ sudo cat /sys/module/i2c_bcm2708/parameters/baudrate
-//100000
 var speed_kHz:longint; sh:string;
 begin
 ///sys/module/i2c_bcm2835/sections/ // does not work with kernel V4.9
 //call_external_prog(LOG_NONE,sudo+'cat /sys/module/i2c_bcm2708/parameters/baudrate',i2cspeed); // delivers 0
 //[    2.724872] bcm2708_i2c 3f804000.i2c: BSC1 Controller at 0x3f804000 (irq 83) (baudrate 400000)
-  call_external_prog(LOG_NONE,'dmesg | grep bcm2708_i2c',sh); 
-  sh:=Select_Item(Upper (sh),	'(BAUDRATE','',2);	//  400000)
-  sh:=Select_Item(Trimme(sh,4), ')','',1);			//  400000
+  if RPI_IS_bcm2835 then
+  begin // using i2c_bcm2835 driver
+   call_external_prog(LOG_NONE,'xxd /sys/class/i2c-adapter/i2c-1/of_node/clock-frequency | awk -F'': '' ''{print $2}''',sh);
+   sh:='$'+GetHexChar(sh); 
+  end
+  else
+  begin
+    call_external_prog(LOG_NONE,'dmesg | grep bcm2708_i2c',sh); 
+    sh:=Select_Item(Upper (sh),	'(BAUDRATE','',2);	//  400000)
+    sh:=Select_Item(Trimme(sh,4), ')','',1);		//  400000
+  end;
   if not Str2Num(sh,speed_kHz) then speed_kHz:=-1;
   RPI_I2C_GetSpeed:=speed_kHz;
 end;

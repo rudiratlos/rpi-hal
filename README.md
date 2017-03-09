@@ -33,7 +33,7 @@ pls. start rpi_hal with e.g. RPI_HW_Start for all components in your main progra
 or use explicit start procedures: GPIO_Start, I2C_Start, SPI_Start !!
 
 Discussion forum:
-http://forum.lazarus.freepascal.org/index.php/topic,20991.60.html
+http://forum.lazarus.freepascal.org/index.php/topic,20991.75.html
 
 Just an excerpt of the available functions and procedures:
 
