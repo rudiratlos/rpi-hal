@@ -22,15 +22,15 @@ delivers procedures and functions to access the rpi HW</br>
 - call external OS program and receive answer with multiple lines (e.g. directory list)
 - extensive Logging functions
 - CURL wrapper 
-- SW Maintenance-/Service-functions:
-  Upload Logfiles to FTP-Server
-  Download new SW from FTP-Server
+- SW Maintenance-/Service-functions:</br>
+  Upload Logfiles to FTP-Server</br>
+  Download new SW from FTP-Server</br>
   Install new SW on rpi
 - many examples, how to use the rpi_hal 
   
 !! Since V4.5 new startup strategy, rpi_hal will not bring up HW automatically.</br>
-pls. start rpi_hal with e.g. RPI_HW_Start for all components in your main program,</br>
-or use explicit start procedures: GPIO_Start, I2C_Start, SPI_Start !!</br>
+!! pls. start rpi_hal with e.g. RPI_HW_Start for all components in your main program,</br>
+!! or use explicit start procedures: GPIO_Start, I2C_Start, SPI_Start</br>
 
 Discussion forum: http://forum.lazarus.freepascal.org/index.php/topic,20991.75.html
 
@@ -44,6 +44,7 @@ GPIO Functions:
 - procedure gpio_set_alt (pin,altfunc:longword); // Set RPi GPIO pin to alternate function nr. 0..5
 - procedure gpio_set_gppud (mask:longword); // set RPi GPIO Pull-up/down Register (GPPUD) with mask
 
+General Functions:
 - function rpi_snr:string; // delivers SNR: 0000000012345678
 - function rpi_hw:string;  // delivers Processor Type: BCM2708, BCM2709 or BCM2835
 
