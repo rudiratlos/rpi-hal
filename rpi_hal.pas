@@ -883,6 +883,8 @@ function  RPI_rev :string; // rev1;256MB;1000002
 function  RPI_freq:string; // 700000;700000;900000;Hz  	
 function  RPI_revnum:byte; // 1:rev1; 2:rev2; 0:error 
 function  RPI_gpiomapidx:byte; // 1:rev1; 2:rev2; 3:B+; 0:error 
+function  RPI_BCM2835:boolean;
+function  RPI_BCM2835_GetNodeValue(node:string; var nodereturn:string):longint;
 function  RPI_status_led_GPIO:byte;	// give GPIO_NUM of Status LED
 function  RPI_I2C_busnum(func:byte):byte; // get the I2C busnumber, where e.g. the general purpose devices are connected. This depends on rev1 or rev2 board . e.g. RPI_I2C_busnum(RPI_I2C_general_purpose_bus_c) 
 function  RPI_I2C_busgen:byte;  // general purpose bus
@@ -3207,26 +3209,31 @@ begin
   RPI_mmap_get_info:=valu;
 end;
 
-function  RPI_IS_bcm2835:boolean; begin RPI_IS_BCM2835:=(Upper(RPI_hw)='BCM2835'); end;
+function  RPI_BCM2835:boolean; begin RPI_BCM2835:=(Upper(RPI_hw)='BCM2835'); end;
+
+function  RPI_BCM2835_GetNodeValue(node:string; var nodereturn:string):longint;
+var res:longint;
+begin
+  res:=-1; 
+  if RPI_BCM2835 then
+  begin
+   call_external_prog(LOG_NONE,'xxd -l 32 -ps -c 32 '+node,nodereturn);
+   if not Str2Num('$'+GetHexChar(nodereturn),res) then res:=-1; 
+  end;
+  RPI_BCM2835_GetNodeValue:=res;
+end;
 
 function  RPI_I2C_GetSpeed(bus:byte):longint;
 var speed_kHz:longint; sh:string;
 begin
-///sys/module/i2c_bcm2835/sections/ // does not work with kernel V4.9
-//call_external_prog(LOG_NONE,sudo+'cat /sys/module/i2c_bcm2708/parameters/baudrate',i2cspeed); // delivers 0
-//[    2.724872] bcm2708_i2c 3f804000.i2c: BSC1 Controller at 0x3f804000 (irq 83) (baudrate 400000)
-  if RPI_IS_bcm2835 then
-  begin // using i2c_bcm2835 driver
-   call_external_prog(LOG_NONE,'xxd /sys/class/i2c-adapter/i2c-1/of_node/clock-frequency | awk -F'': '' ''{print $2}''',sh);
-   sh:='$'+GetHexChar(sh); 
-  end
-  else
-  begin
+  speed_kHz:=RPI_BCM2835_GetNodeValue('/sys/class/i2c-adapter/i2c-1/of_node/clock-frequency',sh);
+  if speed_kHz<0 then
+  begin // last chance, try dmesg
     call_external_prog(LOG_NONE,'dmesg | grep bcm2708_i2c',sh); 
     sh:=Select_Item(Upper (sh),	'(BAUDRATE','',2);	//  400000)
     sh:=Select_Item(Trimme(sh,4), ')','',1);		//  400000
+    if not Str2Num(sh,speed_kHz) then speed_kHz:=-1;
   end;
-  if not Str2Num(sh,speed_kHz) then speed_kHz:=-1;
   RPI_I2C_GetSpeed:=speed_kHz;
 end;
 
