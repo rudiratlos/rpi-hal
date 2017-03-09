@@ -6190,11 +6190,7 @@ begin
   HW_SetInfoStruct(DeviceStruct,UnknDev,hdl_unvalid,hdl_unvalid,'');
   with DeviceStruct do begin present:=false; Hndl:=hdl_unvalid; data:=''; end;
 end;
-(*An unhandled exception occurred at $00065F64 :
-ERangeError : Range check error
-$00065F64  HW_SETINFOSTRUCT,  line 5728 of /data/home/sfischer/projects/pas/rpi/rpi_hal.pas
-$00065FE8  HW_INIINFOSTRUCT,  line 5732 of /data/home/sfischer/projects/pas/rpi/rpi_hal.pas
-*)
+
 function  SPI_HWT(var DeviceStruct:HW_DevicePresent_t; bus,adr,reg,lgt:word; nv1,nv2,dsc:string):boolean;
 begin
   with DeviceStruct do
