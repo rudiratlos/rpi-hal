@@ -1,7 +1,7 @@
 # rpi_hal
-Free Pascal Hardware abstraction library for the Raspberry Pi
-This Unit, with more than 7500 Lines of Code, 
-delivers procedures and functions to access the rpi HW
+Free Pascal Hardware abstraction library for the Raspberry Pi</br>
+This Unit, with more than 7500 Lines of Code,</br>
+delivers procedures and functions to access the rpi HW</br>
 
 - I2C
 - SPI
@@ -28,12 +28,11 @@ delivers procedures and functions to access the rpi HW
   Install new SW on rpi
 - many examples, how to use the rpi_hal 
   
-!! Since V4.5 new startup strategy, rpi_hal will not bring up HW automatically. 
-pls. start rpi_hal with e.g. RPI_HW_Start for all components in your main program, 
-or use explicit start procedures: GPIO_Start, I2C_Start, SPI_Start !!
+!! Since V4.5 new startup strategy, rpi_hal will not bring up HW automatically.</br>
+pls. start rpi_hal with e.g. RPI_HW_Start for all components in your main program,</br>
+or use explicit start procedures: GPIO_Start, I2C_Start, SPI_Start !!</br>
 
-Discussion forum:
-http://forum.lazarus.freepascal.org/index.php/topic,20991.75.html
+Discussion forum: http://forum.lazarus.freepascal.org/index.php/topic,20991.75.html
 
 Just an excerpt of the available functions and procedures:
 
@@ -46,7 +45,7 @@ GPIO Functions:
 - procedure gpio_set_gppud (mask:longword); // set RPi GPIO Pull-up/down Register (GPPUD) with mask
 
 - function rpi_snr:string; // delivers SNR: 0000000012345678
-- function rpi_hw:string;  // delivers Processor Type: BCM2708 or BCM2709
+- function rpi_hw:string;  // delivers Processor Type: BCM2708, BCM2709 or BCM2835
 
 I2C Functions:
 - function i2c_bus_write(baseadr,reg:word; var data:databuf_t; lgt:byte; testnr:integer) : integer;
@@ -58,4 +57,4 @@ SPI Functions:
 - procedure SPI_Write(devnum:byte; reg,data:word);
 - function  SPI_Read(devnum:byte; reg:word) : byte;
 - procedure SPI_BurstRead2Buffer (devnum,start_reg:byte; xferlen:longword);
-- procedure SPI_BurstWriteBuffer (devnum,start_reg:byte; xferlen:longword); // Write 'len' Bytes from Buffer SPI Dev startig at address 'reg' 
+- procedure SPI_BurstWriteBuffer (devnum,start_reg:byte; xferlen:longword); 
