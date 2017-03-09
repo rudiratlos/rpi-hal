@@ -125,6 +125,7 @@ const
 	
   PAGE_SIZE=			$1000;		// 4k
   BCM270x_PSIZ_Byte= 	$80000000-$7e000000; // MemoryMap: Size of Peripherals. Docu Page 5  
+  BCM270x_GPIOSIZ_Byte=	BCM270x_PSIZ_Byte;	// !! toDO !!
   BCM270x_RegSizInByte= SizeOf(longword);
   BCM270x_RegMaxIdx= 	(BCM270x_PSIZ_Byte div BCM270x_RegSizInByte)-1; // Registers 0..RegMaxIdx
   BCM2708_PBASE= 		$20000000; 	// Peripheral Base in Bytes
@@ -452,7 +453,7 @@ type
   t_port_flags  = (	INPUT,OUTPUT,ALT5,ALT4,ALT0,ALT1,ALT2,ALT3,PWMHW,PWMSW,control,
 					FRQHW,Simulation,PullUP,PullDOWN,RisingEDGE,FallingEDGE,ReversePOLARITY);  
   s_port_flags  = set of t_port_flags;
-  t_initpart	= (InitGPIO,InitI2C,InitSPI);
+  t_initpart	= (InitHaltOnError,InitGPIO,InitI2C,InitSPI);
   s_initpart  	= set of t_initpart;
   t_IOBusType	= (UnknDev,I2CDev,SPIDev);
   t_PowerSwitch	= ( ELRO,Sartano,Nexa,Intertechno,FS20);
@@ -3342,35 +3343,35 @@ end;
 
 function  MMAP_start:integer;
 //Set up a memory mapped region to access peripherals
-var rslt,errno:longint;
+var rslt,errno:longint; PSIZ:longword;
 begin
-  rslt:=-1; errno:=0; restrict2gpio:=false;
+  rslt:=-1; errno:=0; restrict2gpio:=false; PSIZ:=BCM270x_PSIZ_Byte;
   {$IFDEF LINUX}
     if RPI_run_on_ARM and (mmap_arr=nil) then 
     begin 
       mem_fd:=fpOpen('/dev/mem',(O_RDWR or O_SYNC (*or O_CLOEXEC*)));		// open /dev/mem 
 	  if mem_fd<0 then
       begin 
-        rslt:=-2; restrict2gpio:=true;
+        rslt:=-2; restrict2gpio:=true; PSIZ:=BCM270x_GPIOSIZ_Byte;
         mem_fd:=fpOpen('/dev/gpiomem',(O_RDWR or O_SYNC (*or O_CLOEXEC*)));	// open /dev/gpiomem
       end;
       if mem_fd>=0 then 
-      begin { mmap GPIO }
+      begin // mmap GPIO
 	    rslt:=-3;
-		mmap_arr:=fpMMap(pointer(0),BCM270x_PSIZ_Byte,
+		mmap_arr:=fpMMap(pointer(0),PSIZ,
 		                 (PROT_READ or PROT_WRITE),
 						 (MAP_SHARED {or MAP_FIXED}),
 						 mem_fd,
 						 (RPI_get_GPIO_BASE div PAGE_SIZE)
 						); 
 		if mmap_arr=MAP_FAILED then errno:=fpgeterrno else rslt:=0; 
-		  if rslt=0 then
-		  begin 
-		    rslt:=-4;
+		fpclose(mem_fd);
+		if (rslt=0) and (not restrict2gpio) then
+		begin 
+		  rslt:=-4;
 // When reading this register it returns 0x544D5241 which is the ASCII reversed value for "ARMT".
-		    if (BCM_GETREG(APMIRQCLRACK)= $544D5241) then rslt:=0; // ok
-		    fpclose(mem_fd);
-		  end;
+		  if (BCM_GETREG(APMIRQCLRACK)= $544D5241) then rslt:=0; // ok
+		end;
       end;
     end;
   {$ENDIF}
@@ -3394,7 +3395,9 @@ var rslt:longint;
 begin
   rslt:=0;
   {$IFDEF UNIX} 
-	if mmap_arr<>nil then fpMUnMap(mmap_arr,BCM270x_PSIZ_Byte);
+	if (mmap_arr<>nil) 	then 
+	  if restrict2gpio 	then fpMUnMap(mmap_arr,BCM270x_GPIOSIZ_Byte)
+	  					else fpMUnMap(mmap_arr,BCM270x_PSIZ_Byte);
   {$ENDIF}
   mmap_arr:=nil; 
   case rslt of
@@ -7568,13 +7571,24 @@ begin
     _initpart:=initpart;
     if ((InitI2C) IN _initpart) or ((InitSPI) IN _initpart) 
       then _initpart:=_initpart+[InitGPIO]; // GPIO is mandatory
-    if ok and (InitGPIO IN _initpart) then ok:=(GPIO_Start=0);
-    if ok and (InitI2C	IN _initpart) then I2C_Start;
-    if ok and (InitSPI	IN _initpart) then SPI_Start;    
+    if ok and (InitGPIO IN _initpart) 	then ok:=(GPIO_Start=0);
+
+    if ok and (InitI2C	IN _initpart) then
+    begin 
+      ok:=(not restrict2gpio);
+      if ok then I2C_Start else Log_Writeln(Log_ERROR,'RPI_HW_Start: can not start I2C');
+    end;
+
+    if ok and (InitSPI	IN _initpart) then 
+    begin
+      ok:=(not restrict2gpio);
+      if ok then SPI_Start else Log_Writeln(Log_ERROR,'RPI_HW_Start: can not start SPI');
+    end;
+    
     if not ok then
     begin
-      LOG_Writeln(LOG_ERROR,'RPI_hal: can not initialize MemoryMap');
-//    Halt(1);
+      LOG_Writeln(LOG_ERROR,'RPI_hal: can not initialize MemoryMap, RPI_hal will Halt(1)');
+      if (InitHaltOnError IN _initpart)	then Halt(1);
     end;
   end
   else
@@ -7587,7 +7601,7 @@ begin
 end;
 
 function  RPI_HW_Start:boolean; 
-begin RPI_HW_Start:=RPI_HW_Start([InitGPIO,InitI2C,InitSPI]); end; // start all
+begin RPI_HW_Start:=RPI_HW_Start([InitHaltOnError,InitGPIO,InitI2C,InitSPI]); end; // start all
 
 begin
 //writeln('Enter unit rpi_hal');

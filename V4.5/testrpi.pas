@@ -5,11 +5,11 @@
   Project -> Project Options ... -> Compiler Options -> Other and add: -dUseCThreads    
   pls. see http://forum.lazarus.freepascal.org/index.php/topic,20991.30.html, post from katonacs73 *)
   
-program testrpi; // V4.5
+program testrpi; // V4.6
 uses  rpi_hal,pfio;
 const piggyback=1; piface=2; bidir=3; board_installed=0; //board_installed=piggyback;
 begin
-  if RPI_HW_Start then
+  if RPI_HW_Start([InitHaltOnError,InitGPIO,InitSPI,InitI2C]) then
   begin
     writeln('Show CPU-Info, RPI-HW-Info and Registers:');
     rpi_show_all_info;
