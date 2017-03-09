@@ -29,8 +29,8 @@ delivers procedures and functions to access the rpi HW
 - many examples, how to use the rpi_hal 
   
 !! Since V4.5 new startup strategy, rpi_hal will not bring up HW automatically. 
-!! pls. start rpi_hal with e.g. RPI_HW_Start for all components in your main program, 
-!! or use explicit start procedures: GPIO_Start, I2C_Start, SPI_Start
+pls. start rpi_hal with e.g. RPI_HW_Start for all components in your main program, 
+or use explicit start procedures: GPIO_Start, I2C_Start, SPI_Start !!
 
 Discussion forum:
 http://forum.lazarus.freepascal.org/index.php/topic,20991.60.html
