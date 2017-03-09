@@ -125,7 +125,6 @@ const
 	
   PAGE_SIZE=			$1000;		// 4k
   BCM270x_PSIZ_Byte= 	$80000000-$7e000000; // MemoryMap: Size of Peripherals. Docu Page 5  
-  BCM270x_GPIOSIZ_Byte=	BCM270x_PSIZ_Byte;	// !! toDO !!
   BCM270x_RegSizInByte= SizeOf(longword);
   BCM270x_RegMaxIdx= 	(BCM270x_PSIZ_Byte div BCM270x_RegSizInByte)-1; // Registers 0..RegMaxIdx
   BCM2708_PBASE= 		$20000000; 	// Peripheral Base in Bytes
@@ -3343,22 +3342,23 @@ end;
 
 function  MMAP_start:integer;
 //Set up a memory mapped region to access peripherals
-var rslt,errno:longint; PSIZ:longword;
+var rslt,errno:longint; 
 begin
-  rslt:=-1; errno:=0; restrict2gpio:=false; PSIZ:=BCM270x_PSIZ_Byte;
+  rslt:=-1; errno:=0; restrict2gpio:=false; 
   {$IFDEF LINUX}
     if RPI_run_on_ARM and (mmap_arr=nil) then 
     begin 
       mem_fd:=fpOpen('/dev/mem',(O_RDWR or O_SYNC (*or O_CLOEXEC*)));		// open /dev/mem 
 	  if mem_fd<0 then
       begin 
-        rslt:=-2; restrict2gpio:=true; PSIZ:=BCM270x_GPIOSIZ_Byte;
-        mem_fd:=fpOpen('/dev/gpiomem',(O_RDWR or O_SYNC (*or O_CLOEXEC*)));	// open /dev/gpiomem
+//      rslt:=-2; restrict2gpio:=true; 
+//      mem_fd:=fpOpen('/dev/gpiomem',(O_RDWR or O_SYNC (*or O_CLOEXEC*)));	// open /dev/gpiomem
+//		not supported
       end;
       if mem_fd>=0 then 
       begin // mmap GPIO
 	    rslt:=-3;
-		mmap_arr:=fpMMap(pointer(0),PSIZ,
+		mmap_arr:=fpMMap(pointer(0),BCM270x_PSIZ_Byte,
 		                 (PROT_READ or PROT_WRITE),
 						 (MAP_SHARED {or MAP_FIXED}),
 						 mem_fd,
@@ -3395,9 +3395,7 @@ var rslt:longint;
 begin
   rslt:=0;
   {$IFDEF UNIX} 
-	if (mmap_arr<>nil) 	then 
-	  if restrict2gpio 	then fpMUnMap(mmap_arr,BCM270x_GPIOSIZ_Byte)
-	  					else fpMUnMap(mmap_arr,BCM270x_PSIZ_Byte);
+	if (mmap_arr<>nil) 	then fpMUnMap(mmap_arr,BCM270x_PSIZ_Byte);
   {$ENDIF}
   mmap_arr:=nil; 
   case rslt of
@@ -6903,17 +6901,20 @@ procedure RPI_show_all_info;
 begin
   RPI_show_SBC_info;	writeln;
   GPIO_show_regs;		writeln;
-  spi0_show_regs;		writeln;
-  pwm_show_regs;		writeln;
-  clk_show_regs;		writeln;
-  stim_show_regs;		writeln;
-  tim_show_regs;		writeln;
-  q4_show_regs; 		writeln; 
-  i2c0_show_regs;		writeln;
-  i2c1_show_regs;		writeln;
-//i2c2_show_regs;		writeln;
-  Clock_show_regs; writeln;
-  GPIO_ShowConnector;
+  if (not restrict2gpio) then
+  begin
+    spi0_show_regs;		writeln;
+    pwm_show_regs;		writeln;
+    clk_show_regs;		writeln;
+    stim_show_regs;		writeln;
+    tim_show_regs;		writeln;
+    q4_show_regs; 		writeln; 
+    i2c0_show_regs;		writeln;
+    i2c1_show_regs;		writeln;
+//  i2c2_show_regs;		writeln;
+    Clock_show_regs; writeln;
+    GPIO_ShowConnector;
+  end else Log_Writeln(Log_WARNING,'RPI_show_all_info: can report GPIO register only');
 end;
 
 procedure GPIO_create_int_script(filn:string);
@@ -7576,13 +7577,13 @@ begin
     if ok and (InitI2C	IN _initpart) then
     begin 
       ok:=(not restrict2gpio);
-      if ok then I2C_Start else Log_Writeln(Log_ERROR,'RPI_HW_Start: can not start I2C');
+      if ok then I2C_Start else Log_Writeln(Log_ERROR,'RPI_HW_Start: can not start I2C, try with sudo');
     end;
 
     if ok and (InitSPI	IN _initpart) then 
     begin
       ok:=(not restrict2gpio);
-      if ok then SPI_Start else Log_Writeln(Log_ERROR,'RPI_HW_Start: can not start SPI');
+      if ok then SPI_Start else Log_Writeln(Log_ERROR,'RPI_HW_Start: can not start SPI, try with sudo');
     end;
     
     if not ok then
