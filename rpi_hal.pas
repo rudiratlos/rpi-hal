@@ -7562,38 +7562,38 @@ end;
 function  RPI_HW_Start(initpart:s_initpart):boolean;
 var ok:boolean; _initpart:s_initpart;
 begin
-  ok:=RPI_platform_ok;
-  if ok then
-  begin
-    _initpart:=initpart;
-    if ((InitI2C) IN _initpart) or ((InitSPI) IN _initpart) 
-      then _initpart:=_initpart+[InitGPIO]; // GPIO is mandatory
-    if ok and (InitGPIO IN _initpart) 	then ok:=(GPIO_Start=0);
-
-    if ok and (InitI2C	IN _initpart) then
-    begin 
-      ok:=(not restrict2gpio);
-      if ok then I2C_Start else Log_Writeln(Log_ERROR,'RPI_HW_Start: can not start I2C, try with sudo');
-    end;
-
-    if ok and (InitSPI	IN _initpart) then 
-    begin
-      ok:=(not restrict2gpio);
-      if ok then SPI_Start else Log_Writeln(Log_ERROR,'RPI_HW_Start: can not start SPI, try with sudo');
-    end;
+  ok:=RPI_platform_ok; _initpart:=initpart;
     
-    if not ok then
-    begin
-      LOG_Writeln(LOG_ERROR,'RPI_hal: can not initialize MemoryMap, RPI_hal will Halt(1)');
-      if (InitHaltOnError IN _initpart)	then Halt(1);
-    end;
-  end
-  else
+  if ((InitI2C) IN _initpart) or ((InitSPI) IN _initpart) 
+    then _initpart:=_initpart+[InitGPIO]; // GPIO is mandatory
+    
+  if ok and (InitGPIO IN _initpart) 	then ok:=(GPIO_Start=0);
+
+  if ok and (InitI2C	IN _initpart) then
+  begin 
+    ok:=(not restrict2gpio);
+    if ok then I2C_Start else Log_Writeln(Log_ERROR,'RPI_HW_Start: can not start I2C, try with sudo');
+  end;
+
+  if ok and (InitSPI	IN _initpart) then 
   begin
-     if RPI_run_on_known_hw 
+    ok:=(not restrict2gpio);
+    if ok then SPI_Start else Log_Writeln(Log_ERROR,'RPI_HW_Start: can not start SPI, try with sudo');
+  end;
+    
+  if not ok then
+  begin
+    if RPI_run_on_known_hw 
       then Log_Writeln(Log_ERROR,'RPI_hal: supported min-/maximum kernel #'+Num2Str(supminkrnl,0)+' - #'+Num2Str(supmaxkrnl,0)+' ( uname -a )')
       else Log_Writeln(Log_ERROR,'RPI_hal: not running on supported rpi HW');
-  end;   
+
+    if (InitHaltOnError IN _initpart) then 
+    begin
+      LOG_Writeln(LOG_ERROR,'RPI_hal: can not initialize MemoryMap. RPI_hal will Halt(1)');    
+      Halt(1);
+    end;
+  end;
+  
   RPI_HW_Start:=ok;
 end;
 
