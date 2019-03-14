@@ -1,6 +1,6 @@
 # rpi_hal
 Free Pascal Hardware abstraction library for the Raspberry Pi</br>
-This Unit, with more than 7500 Lines of Code,</br>
+This Unit, with more than 10000 Lines of Code,</br>
 delivers procedures and functions to access the rpi HW</br>
 
 - I2C
@@ -32,7 +32,7 @@ delivers procedures and functions to access the rpi HW</br>
 !! pls. start rpi_hal with e.g. RPI_HW_Start for all components in your main program,</br>
 !! or use explicit flags: RPI_HW_Start([InitHaltOnError,InitGPIO,InitI2C,InitSPI])</br>
 
-Discussion forum: http://forum.lazarus.freepascal.org/index.php/topic,20991.75.html
+Discussion forum: pls. use the issues function on github 
 
 Just an excerpt of the available functions and procedures:
 

@@ -153,7 +153,7 @@ begin
   old_pin_values:=pfio_read_output(devadr);
   if (value > 0) then new_pin_values := old_pin_values or       pin_bit_mask
                  else new_pin_values := old_pin_values and (not pin_bit_mask);
-  if (LOG_Get_Level>=LOG_DEBUG) then
+  if (LOG_Level>=LOG_DEBUG) then
   begin
     Log_Writeln(LOG_DEBUG,'digital_write: pin number '+Hex(pin_number,2)+' value '+Hex(value,2));
     Log_Writeln(LOG_DEBUG,'pin bit mask:   0x'+Hex(pin_bit_mask,2));

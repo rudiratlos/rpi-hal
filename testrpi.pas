@@ -5,7 +5,7 @@
   Project -> Project Options ... -> Compiler Options -> Other and add: -dUseCThreads    
   pls. see http://forum.lazarus.freepascal.org/index.php/topic,20991.30.html, post from katonacs73 *)
   
-program testrpi; // V4.6
+program testrpi; // V5.0
 uses  rpi_hal,pfio;
 const piggyback=1; piface=2; bidir=3; board_installed=0; //board_installed=piggyback;
 begin
@@ -13,8 +13,6 @@ begin
   begin
     writeln('Show CPU-Info, RPI-HW-Info and Registers:');
     rpi_show_all_info;
-    writeln('Let Status LED Blink. Using GPIO functions:');
-    GPIO_PIN_TOGGLE_TEST;
     case board_installed of
 	  piggyback : begin
                     writeln('Test SPI Read function. (piggy back board with installed RFM22B Module is required!)');
