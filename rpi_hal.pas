@@ -1215,14 +1215,14 @@ PID_Twiddle_t = record
   IP_Info_t = record
     stat,wireless:boolean;
 	alias,iface,ip4addr,ip6addr,hwaddr,gwaddr,nsaddr,domain,
-	link,ssid,signal,ip4ext,DNSname:string;
+	link,ssid,signal,DNSname:string;
   end;
   
   IP_Infos_t = record
 	idx:		longint;
     init,
     samesubnet:	boolean;
-    devlst,
+    devlst,ip4ext,
     hostname:	string;
     IP_Info: 	array[0..IP_infomax_c] of IP_Info_t;
   end;
@@ -1759,7 +1759,7 @@ function  LeadingZeros(l:longint;digits:byte):string;
 function  Bin(q:longword;lgt:Byte) : string; 
 function  Hex(nr:qword;lgt:byte) : string; 
 function  Hex(ptr:pointer;lgt:byte): string;
-function  HexStr(s:string):string;
+function  HexStr(s:string):string;overload;
 function  StrHex(Hex_strng:string):string;
 function  AdjZahlDE(r:real;lgt,nk:byte):string;
 function  AdjZahl(s:string):string;
@@ -3671,7 +3671,7 @@ LOG_Writeln(LOG_ERROR,'Str2TimeSpec: '+s);
 end;
 function  Hex   (nr:qword;lgt:byte) : string; begin Hex:=Format('%0:-*.*x',[lgt,lgt,nr]); end;
 {$warnings off} function  Hex   (ptr:pointer;lgt:byte): string; begin Hex:=Hex(qword(ptr),lgt); end; {$warnings on}
-function  HexStr(s:string):string; var sh:string; i:longint; begin sh:=''; for i := 1 to Length(s) do sh:=sh+Hex(ord(s[i]),2); HexStr:=sh; end;
+function  HexStr(s:string):string;overload; var sh:string; i:longint; begin sh:=''; for i := 1 to Length(s) do sh:=sh+Hex(ord(s[i]),2); HexStr:=sh; end;
 function  LeadingZero(w:word):string; begin LeadingZero:=Format('%0:-*.*d',[2,2,w]); end;
 //function  Get_FixedStringLen(s:string;cnt:word;leading:boolean):string; var fmt:string; begin fmt:='%0:'; if not leading then fmt:=fmt+'-'; fmt:=fmt+'*.*s'; Get_FixedStringLen:=Format(fmt,[cnt,cnt,s]); end;
 function  Get_FixedStringLen(s:string;cnt:word;leading:boolean):string; var fmt:string; begin if leading then fmt:='%' else fmt:='%-'; fmt:=fmt+Num2Str(cnt,0)+'s'; Get_FixedStringLen:=Format(fmt,[s]); end;
@@ -3707,7 +3707,7 @@ begin
   with IPInfo do
   begin  
     iface:=intface;	
-	ip4addr:=noip_c;	ip6addr:=noip_c;	gwaddr:=noip_c;	nsaddr:=noip_c;	ip4ext:=noip_c;
+	ip4addr:=noip_c;	ip6addr:=noip_c;	gwaddr:=noip_c;	nsaddr:=noip_c;	
   	domain:='';			hwaddr:='';			link:='';	
   	ssid:='';			signal:='';			DNSname:='';
   	stat:=false;		wireless:=false;
@@ -3723,7 +3723,7 @@ begin
     SAY(lvl,'wireless:     '+Bool2Str(wireless));
     SAY(lvl,'stat:         '+Bool2Str(stat));
 	SAY(lvl,'inet:         '+ip4addr);
-	SAY(lvl,'inetextern:   '+ip4ext);
+//	SAY(lvl,'inetextern:   '+ip4ext);
 	SAY(lvl,'inet6:        '+ip6addr);
 	SAY(lvl,'ether:        '+hwaddr);
 	SAY(lvl,'default via:  '+gwaddr);
@@ -3762,10 +3762,9 @@ begin
   _tl:=TStringList.create;   // echo wlan0 Link: `cat /sys/class/net/wlan0/carrier`
   with IPInfo do
   begin
-    IPInfo_Init(iface,IPInfo); 
+    IPInfo_Init(iface,IPInfo);
     sh:=sudo+'ip a show '+iface+' ; '+
-  			'echo '+iface+' Link: `cat /sys/class/net/'+iface+'/carrier` ; '+
-  			'echo inetextern: `dig +short myip.opendns.com @resolver1.opendns.com` ; ';	
+  		 	 'echo '+iface+' Link: `cat /sys/class/net/'+iface+'/carrier` ; ';
   	wireless:=((Pos('wlan',lower(iface))>0) or (Pos('wlx',lower(iface))>0));
   	if wireless then
   	begin
@@ -3783,8 +3782,7 @@ begin
       begin
 	  	sh:=Trimme(_tl[n-1],4);	// remove all unnecessary spaces
 //		writeln(sh);
-		xx('inet ',			sh,2,ip4addr);	
-		xx('inetextern: ',	sh,2,ip4ext);
+		xx('inet ',			sh,2,ip4addr);
 		xx('inet6 ',		sh,2,ip6addr);
 		xx('ether ',		sh,2,hwaddr);
 		xx('default via ',	sh,3,gwaddr);
@@ -3807,7 +3805,7 @@ begin
   	stat:=((link='UP') and (ip4addr<>noip_c));
   	if stat then DNSname:=LNX_ResolveIP2name(Select_Item(ip4addr,'/','',1));
 //GetIPInfos[wlan0]: MAC:b8:27:eb:d9:a6:01 IP4:10.8.81.135/24 IP6:noIPAdr GW:10.8.81.1 DNS:10.8.81.1 Domain:muo.basis.biz ext:188.192.178.135
-  	sh:='GetIPInfos['+alias+'/'+iface+']: MAC:'+hwaddr+' IP4:'+ip4addr+' IP6:'+ip6addr+' GW:'+gwaddr+' DNS:'+nsaddr+' Domain:'+domain+' ext:'+ip4ext+' dnsname:'+DNSname+' wireless:'+Bool2Str(wireless);
+  	sh:='GetIPInfos['+alias+'/'+iface+']: MAC:'+hwaddr+' IP4:'+ip4addr+' IP6:'+ip6addr+' GW:'+gwaddr+' DNS:'+nsaddr+' Domain:'+domain+' dnsname:'+DNSname+' wireless:'+Bool2Str(wireless);
 //	if stat then SAY(LOG_INFO,sh) else SAY(LOG_WARNING,sh);
 //	IPInfoShow(LOG_INFO,IPInfo);
   end; // with
@@ -3823,6 +3821,7 @@ begin
     begin
       hostname:=GetHostNameOS;
       if (call_external_prog(LOG_NONE,'ls -1r /sys/class/net/',devlst)<>0) then devlst:='';
+      if (call_external_prog(LOG_NONE,'dig +short myip.opendns.com @resolver1.opendns.com',ip4ext)<>0) then ip4ext:=noip_c;	
 	  devlst:=StringReplace(devlst,LineEnding,',',[rfReplaceAll]);	// wlan0,lo,eth0,ap0
 // writeln('devlist:',devlst,':');
       samesubnet:=false;
@@ -3839,6 +3838,7 @@ begin
 	    begin
 	      IP_Info[_idx].iface:=devnam;
 		  IPInfo_GetOS(IP_Info[_idx]);
+//		  if (IP_Info[_idx].iface=ifuap_c) then IP_Info[_idx].ssid:='';		  
 		  if not ok then 
 		  begin
 		  	if IP_Info[_idx].stat then 
@@ -3980,7 +3980,7 @@ end;
 function  IP4_AddrExt:string;
 begin
   IPInfo_GetOS(IP_Infos);
-  IP4_AddrExt:=IP_Infos.IP_Info[IP_Infos.idx].ip4ext;
+  IP4_AddrExt:=IP_Infos.ip4ext;
 end;
 
 function  IP4_AddrValid(ipstr:string):boolean;
