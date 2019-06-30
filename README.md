@@ -1,26 +1,29 @@
 # rpi_hal
 Free Pascal Hardware abstraction library for the Raspberry Pi</br>
-This Unit, with more than 10000 Lines of Code,</br>
+This Unit, with more than 14600 Lines of Code,</br>
 delivers procedures and functions to access the rpi HW</br>
 
 - I2C
 - SPI
 - GPIO (input, output, SW-PWM, HW-PWM, timer, frequency output)
-- Bitbang functions for Powerswitches (ELRO, Intertechno, Sartano, Nexa)
-- Morse functions
+- HW watchdog handling
+- BTLE Beacon (Blutooth)
 - Rotational Encoders implemented with Threads (e.g. Keyes KY-040 Rotary Encoder)
 - Servo functions
 - PID Algorithmus
-- functions to access PiFace Board
 - Bidirectional serial device access in User space /dev/yourdevice 
 - USB Reset and Access
 - Maintain INI-Files for parameter management
 - RPI HAT access
 - Thread Management
+- OS signal handler (SIGHUP, SIGUSR1...)
+- OS IP info access (IPaddr, GWaddr, Domainname...)
 - Timing functions (e.g. SetTimeOut, TimeElapsed)
 - StringManipulation (e.g. Select_Item for handling .csv files)
+- StringListManipulation
 - call external OS program and receive answer with multiple lines (e.g. directory list)
 - extensive Logging functions
+- TAR wrapper
 - CURL wrapper 
 - SW Maintenance-/Service-functions:</br>
   Upload Logfiles to FTP-Server</br>
@@ -49,13 +52,12 @@ General Functions:
 - function rpi_hw:string;  // delivers Processor Type: BCM2708, BCM2709 or BCM2835
 
 I2C Functions:
-- function i2c_bus_write(baseadr,reg:word; var data:databuf_t; lgt:byte; testnr:integer) : integer;
-- function i2c_bus_read (baseadr,reg:word; var data:databuf_t; lgt:byte; testnr:integer) : integer;
-- function i2c_string_read(baseadr,reg:word; var data:databuf_t; lgt:byte; testnr:integer) : string;
-- function i2c_string_write(baseadr,reg:word; s:string; testnr:integer) : integer;
+- function I2C_bus_WrRd(busnum,baseadr:word; const WRbuf:string; WRflgs:word; var RDbuf:string; RDflgs:word; RDlen:byte; errhdl:integer):integer;
+- function I2C_string_read(busnum,baseadr:word; const WRbuf:string; RDlen:byte; errhdl:integer; var RDbuf:string):integer;
+- function I2C_string_write(busnum,baseadr:word; const WRbuf:string; errhdl:integer):integer; 
 
 SPI Functions:
-- procedure SPI_Write(devnum:byte; reg,data:word);
-- function  SPI_Read(devnum:byte; reg:word) : byte;
-- procedure SPI_BurstRead2Buffer (devnum,start_reg:byte; xferlen:longword);
-- procedure SPI_BurstWriteBuffer (devnum,start_reg:byte; xferlen:longword); 
+- function SPI_Write(busnum,devnum:byte; basereg,data:word):integer;
+- function SPI_Read (busnum,devnum:byte; basereg:word) : byte;
+- function SPI_Transfer (busnum,devnum:byte; cmdseq:string):integer;
+

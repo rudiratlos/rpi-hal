@@ -1,7 +1,7 @@
-unit rpi_hal; // V5.0 // 2019-03-17
+unit rpi_hal; // V5.1 // 2019-06-30
 { RPI_hal:
 * Free Pascal Hardware abstraction library for the Raspberry Pi
-* Copyright (c) 2012-2018 Stefan Fischer
+* Copyright (c) 2012-2019 Stefan Fischer
 ***********************************************************************
 *
 * RPI_hal is free software: you can redistribute it and/or modify
@@ -20,15 +20,14 @@ unit rpi_hal; // V5.0 // 2019-03-17
 *********************************************************************** 
 
   requires minimum FPC Version: 2.4.6
-  support for the following RPI-Models: A,B,A+,B+,Pi2B,Zero,Pi3B...
+  support for the following RPI-Models: A,B,A+,B+,Pi2B,Zero,Pi3B,4B...
   !!!!! In your program, pls. use following uses sequence: !!!!!
   uses cthreads,rpi_hal,<yourunits>...
   required sw tools (apt-get install curl whois):
   - curl		(PKG: curl)  is used by function RPI_MAINT.
   - mkpasswd	(PKG: whois) is used by function LNX_ChkUsrPwdValid.
   Info:  http://wiki.freepascal.org/Lazarus_on_Raspberry_Pi
-  pls. report bugs and discuss code enhancements here:
-  Forum: http://www.lazarus.freepascal.org/index.php/topic,20991.0.html 
+  pls. report bugs and discuss code enhancements on github issues
   Supported by the H2020 Project # 664786 - Reservoir Computing with Real-Time Data for Future IT
 }
   {$MODE OBJFPC}
@@ -47,6 +46,7 @@ uses {$IFDEF UNIX}    cthreads,initc,ctypes,unixtype,cmem,BaseUnix,Unix,unixutil
 const
   supminkrnl=797; supmaxkrnl=970; 	// not used
   fmt_rfc3339='yyyy-mm-dd"T"hh:nn:ss';
+  tfmt0 = 'hh:mm:ss.zz';
   
   MinSingle=	Single	(1.5E-45);		MaxSingle=	Single	(3.4E38);
   MinDouble=	Double	(5.0E-324);		MaxDouble=	Double	(1.7E308);
@@ -213,6 +213,7 @@ options fbtft_device name=adafruit13m debug=3 speed=16000000 gpios=dc:9
   BCM270x_RegMaxIdx= 	(BCM270x_PSIZ_Byte div BCM270x_RegSizInByte)-1; // Registers 0..RegMaxIdx
   BCM2708_PBASE= 		$20000000; 	// Peripheral Base in Bytes
   BCM2709_PBASE= 		$3F000000; 	// Peripheral Base in Bytes (RPI2B Processor) 
+  BCM2711_PBASE=		$fe000000;	// Peripheral Base in Bytes (rpi4) 
   
   STIM_BASE_OFS=    	$00003000; 	// Docu Page 172ff SystemTimer
   INTR_BASE_OFS=   		$0000B000;  // Docu Page 112ff 
@@ -411,7 +412,7 @@ options fbtft_device name=adafruit13m debug=3 speed=16000000 gpios=dc:9
   ENC_SyncTime_c	= 12;	  // max. interval /sync. response time of device in msec and switch debounce time
   ENC_SwRepeatTime_c= 1000;	  // if switch is pressed 1sec, treat as repeated keystroke 
   ENC_sleeptime_def	= 50;
-  ENC_SwitchShutDown= 3000;	  // Switch pressed 3sec signals ShutDown 
+  ENC_SwitchShutDown=3000;	  // Switch pressed 3sec signals ShutDown 
   
   TRIG_SyncTime_c	= 10;
     
@@ -721,14 +722,14 @@ type
 //t_port_flags order is important, do not change. Ord(t_port_flags) will be used to set ALT-Bits in GPFSELx Registers.
 // ORD:				   0,     1,   2,   3,   4,   5,   6,   7,    8,    9      10
   t_port_flags  = (	INPUT,OUTPUT,ALT5,ALT4,ALT0,ALT1,ALT2,ALT3,PWMHW,PWMSW,control,
-					FRQHW,Simulation,PullUP,PullDOWN,(*PullEnable,*)RisingEDGE,FallingEDGE,
+					FRQHW,Simulation,PullUP,PullDOWN,RisingEDGE,FallingEDGE,
 					DS2mA,DS4mA,DS6mA,DS8mA,DS10mA,DS12mA,DS14mA,DS16mA,noPADhyst,noPADslew,
 					ReversePOLARITY,InitialHIGH,WRthrough,IOCheck,UseCSec,I2C,
 					Bit5,Bit6,Bit7,Bit8,StopBit1,StopBit1H,StopBit2,HShw,HSsw,
 					ParityNONE,ParityODD,ParityEVEN,ParityMark,ParitySpace,withSTTY,
-					TTYstartCursor,TTYstopCursor,TTYclearScreen); 
-					
+					TTYstartCursor,TTYstopCursor,TTYclearScreen); 					
   s_port_flags  = set of t_port_flags;
+  
   t_initpart	= (	InitHaltOnError,InitGPIO, (* InitGPIOonly,*) InitRPIfw,InitI2C,InitSPI,
   					InitCreateScript,InitOnExitShowRuntime,StartShutDownWatcher,InitWDOG,InitWDOGnoThread,
   					InstSignalHandler,UPDAuthDBDateTime,InitCertSnakeOil,InitCertServer,InitCertLetsEncrypt);
@@ -738,7 +739,7 @@ type
   t_rpimaintflags=(	UseENCrypt,UpdExec,UpdPKGGet,UpdPKGcopy,UseDECrypt,UpdPKGInst,UpdPKGInstV,
   					UpdUpld,UpdDwnld,UpdProtoHTTP,UpdProtoRAW,UAgent,UpdNoRedoRequest,
   					UpdNOP,UpdSSL,UpdVerbose,UpdForce,UpdUpdate,UpdNoProgressBar,UpdLogAppend,UpdNoFTPDefaults, //UpdSUDO,
-  					UpdErrVerbose,UpdNoCreateDir,UpdNewerOnly,UpdCleanUP,
+  					UpdErrVerbose,UpdNoCreateDir,UpdNewerOnly,UpdCleanUP,UpdKeepFile,
   					UpdNoWDOGprevent,UpdNoZIP,UpdFollowLink,UpdVerify,UpdDBG1,UpdDBG2,UpdnoMD5Chk,
   					UPDStop,UPDDisable,UPDEnable,UPDStart,UPDReStart,UpdShowThInfo,SysV,Systemd,
   					WDOG_Close,WDOG_Retrig,WDOG_GTO,WDOG_STO,WDOG_BSTAT,WDOG_GSup,WDOG_Pause,WDOG_Resume);  
@@ -806,6 +807,7 @@ type
 	last_isr_servicetime	: int64;
   end;
     
+  Thread_name_t=	string[16];
   Thread_Ctrl_ptr= ^Thread_Ctrl_t;
   Thread_Ctrl_t=record	 
 	ThreadID:		TThreadID; //PtrUInt; 
@@ -967,7 +969,9 @@ type
 	pwm_dutyrange,
 	pwm_value		: longword;	
 	pwm_dtycycl,				// 0-1 // 0%-100%
-	pwm_freq_hz		: real;
+	pwm_freq_hz,
+	pwm_freq_min,
+	pwm_freq_max	: real;
   end;
   
   GPIO_ptr	   = ^GPIO_struct_t;
@@ -983,10 +987,13 @@ type
 	mask_1Bit		: longword;
 	initok,ein		: boolean;
 	ThreadCtrl		: Thread_Ctrl_t;
-	FRQ_freq_Hz		: real;
+	FRQ_freq_Hz,
+	FRQ_freq_min,
+	FRQ_freq_max	: real;
 	FRQ_CTLIdx,
 	FRQ_DIVIdx		: longword;
 	PWM				: PWM_struct_t;
+	portCapabilityFlags,
 	portflags		: s_port_flags;
   end;
       
@@ -1015,7 +1022,8 @@ type
   ENC_CNT_struct_t = record	  
     Handle:integer;
     ENC_activity:boolean;
-    switchcounter,switchcounterold,switchcountermax,switchlastpresstime,
+    switchcounter,switchcounterold,switchcountermax,
+    switchlastpresstime,
     counter,counterold,countermax,cycles,cyclesold:longint;
     encsteps,enccycles,swsteps,Interval_ms:longint;
     enc,encold:real;
@@ -1074,10 +1082,15 @@ type
     pad				: word;
   end;
   
+  SPI_AddrMux_t = record
+    AdrMuxEnable	: boolean;
+    AdrCSgpio		: array[0..1] of longint;
+  end;
+  
   SPI_Bus_Info_t = record
     SPI_CS 			: TRTLCriticalSection;
     SPI_useCS		: boolean;
-	spi_maxspeed	: longword;
+	SPI_maxspeed	: longword;
   end;
  	
   SPI_Device_Info_t = record
@@ -1116,7 +1129,7 @@ type
   end;
    
   Terminal_device_t = record
-	fdmaster,fdslave,ridx,rlgt:longint; 
+	fdmaster,fdslave,ridx,rlgt:longint;
 	masterpath,slavepath,linkpath:string;   
 	si : array [1..Terminal_MaxBuf] of char; 
   end;
@@ -1223,6 +1236,7 @@ PID_Twiddle_t = record
     init,
     samesubnet:	boolean;
     devlst,ip4ext,
+    hostapd_extdev,
     hostname:	string;
     IP_Info: 	array[0..IP_infomax_c] of IP_Info_t;
   end;
@@ -1254,6 +1268,7 @@ msg:RPI_MBX_msg_t;	// 32 byte aligned
   RpiMaintCmd:TIniFile;
   PtrRPI_SignalRoutine:TcFunctionOneArgCall;
   MSG_HUB_ptr,CURL_ProgressUpdateHook_ptr:TFunctionThreeArgCall;
+  ERR_step:longint; ERR_title,ERR_msg:string;
 
   USBDEVFS_RESET,
   SPI_IOC_RD_MODE,SPI_IOC_WR_MODE,SPI_IOC_RD_LSB_FIRST,SPI_IOC_WR_LSB_FIRST,
@@ -1273,6 +1288,7 @@ msg:RPI_MBX_msg_t;	// 32 byte aligned
   CertPack:		array[CertPackRPIMaint..
   					 	CertPackLast]	of cert_pack_t;
     
+  SPI_AddrMux:	array[0..spi_max_dev]	of SPI_AddrMux_t;
   spi_bus: 		array[0..spi_max_bus]	of SPI_Bus_Info_t;
   spi_dev:		array[0..spi_max_bus,
 					  0..spi_max_dev]	of SPI_Device_Info_t;
@@ -1361,20 +1377,23 @@ function  CLK_GetMaxFreq:real;
 function  OSC_Setup(_gpio:longint; pwm_freq_Hz,pwm_dty:real):longint;
 procedure OSC_Write(_gpio,pwm_dutyrange:longint; pwm_dty:real);
 
-function  FRQ_Setup		(var GPIO_struct:GPIO_struct_t; freq_Hz:real):boolean;
-procedure FRQ_Switch	(var GPIO_struct:GPIO_struct_t; ein:boolean);
 function  TIM_Setup(timr_freq_Hz:real):real;
 procedure TIM_Test; // 1MHz
+
+procedure FRQ_SetStruct (var GPIO_struct:GPIO_struct_t);	// set default values
+procedure FRQ_SetStruct (var GPIO_struct:GPIO_struct_t; freq_Hz,freq_min,freq_max:real);
+function  FRQ_Setup		(var GPIO_struct:GPIO_struct_t):boolean;
+procedure FRQ_Switch	(var GPIO_struct:GPIO_struct_t; ein:boolean);
 
 procedure PWM_SetStruct (var GPIO_struct:GPIO_struct_t);  // set default values
 procedure PWM_SetStruct (var GPIO_struct:GPIO_struct_t; mode:byte; freq_Hz:real; dutyrange,startval:longword);
 function  PWM_Setup     (var GPIO_struct:GPIO_struct_t):boolean;
 procedure PWM_Write     (var GPIO_struct:GPIO_struct_t; value:longword); // value: 0-1023
-procedure PWM_SetClock  (var GPIO_struct:GPIO_struct_t); // same clock for PWM0 and PWM1. Needs only to be set once
+procedure PWM_setClock  (var GPIO_struct:GPIO_struct_t); // same clock for PWM0 and PWM1. Needs only to be set once
 procedure PWM_End		(var GPIO_struct:GPIO_struct_t);
 function  PWM_GetDtyRangeVal(var GPIO_struct:GPIO_struct_t; DutyCycle:real):longword;
-function  PWM_GetMinFreq(dutycycle:longword):longword;
-function  PWM_GetMaxFreq(dutycycle:longword):longword;
+function  PWM_GetMinFreq(dutycycle:longword):real;
+function  PWM_GetMaxFreq(dutycycle:longword):real;
 function  PWM_GetMaxDtyC(freq:real):longword;
 function  PWM_GetDRVal  (percent:real; dutyrange:longword):longword; 
 
@@ -1422,6 +1441,9 @@ procedure Clock_show_regs;
 function  GPIO_get_desc(regidx,regcontent:longword) : string;  
 procedure GPIO_ShowConnector;
 procedure GPIO_ConnectorStringList(tl:TStringList);
+function  GPIO_PortCapabilityFlags(gpio:longint):s_port_flags;
+function  GPIO_PortFlags2String(flgs:s_port_flags):string;
+function  GPIO_String2PortFlags(flagstring:string):s_port_flags;
 
 procedure FREQ_CounterReset	(var FREQ_Struct:FREQ_Determine_t);
 procedure FREQ_InitStruct	(var FREQ_Struct:FREQ_Determine_t; detint_ms:longint);
@@ -1454,6 +1476,7 @@ procedure SERVO_SetStruct(var SERVO_struct:SERVO_struct_t; dty_min,dty_mid,dty_m
 procedure SERVO_Write(var SERVO_struct:SERVO_struct_t; angle:longint; syncwait:boolean);
 procedure SERVO_End(var SERVO_struct:SERVO_struct_t);
 
+function  BIOS_GetIniFilename:string;
 procedure BIOS_ReadIniFile(fname:string);
 procedure BIOS_EndIniFile;
 function  BIOS_CacheUpdate:boolean;
@@ -1491,6 +1514,7 @@ function  RPI_rev :string; // rev1;256MB;1000002
 function  RPI_freq:string; // 700000;700000;900000;Hz  	
 function  RPI_Volt:string;	// core:1.2000V;sdram_c:1.2000V;sdram_i:1.2000V;sdram_p:1.2250V
 function  RPI_FREQs:string;	// arm:600000000;core:250000000;h264:250000000;isp:250000000;...
+function  RPI_whoami:string;
 function  RPI_Temp(logmsg:boolean):t_ERRORLevel;	//  TempInfo: CPU:41.8'C;GPU:50.464'C;WARN:65.0'C;ALARM:70.0'C;COOL:40.0'C	// temps in celsius
 function  RPI_revnum:real; // 0:error
 function  RPI_gpiomapidx:byte; // 1:rev1; 2:rev2; 3:B+; 0:error 
@@ -1592,20 +1616,13 @@ procedure SPI_show_buffer(busnum,devnum:byte);
 procedure SPI_show_dev_info_struct(busnum,devnum:byte);
 procedure SPI_show_bus_info_struct(busnum:byte);
 procedure SPI_show_struct(var spi_strct:spi_ioc_transfer_t);
+procedure SPI_AdrMuxInit(CSnum,adr0gpio,adr1gpio:longint);
+procedure SPI_AdrMux(CSnum,adr:byte);
+procedure SPI_AdrMux(adr:byte);
 
 procedure eeprom_SetAddr(devaddr:word);
 function  eeprom_write_page(startadr:word; datas:string):integer;
 function  eeprom_read_page(startadr:word; len:byte; var outs:string):integer;
-
-procedure BB_OOK_PIN(state:boolean);
-procedure BB_SetPin(gpio:longint); 
-function  BB_GetPin:longint; 
-procedure BB_SendCode(switch_type:T_PowerSwitch; adr,id,desc:string; ein:boolean);
-procedure BB_InitPin(id:string); // e.g. id:'TLP434A' or id:'13'  (direct RPI Pin on HW Header P1 )
-procedure MORSE_speed(speed:integer); // 1..5, -1=default_speed
-procedure MORSE_tx(s:string);
-procedure MORSE_test;
-procedure ELRO_TEST;
 
 function  Thread_Start		(var ThreadCtrl:Thread_Ctrl_t; funcadr:TThreadFunc; paraadr:pointer; delaymsec:longword; prio:longint):boolean;
 function  Thread_End  		(var ThreadCtrl:Thread_Ctrl_t; waitmsec:longword):boolean;
@@ -1632,6 +1649,10 @@ procedure LOG_LevelColor(enab:boolean);
 function  LOG_GetEndMsg(comment:string):string;
 function  LOG_GetVersion(version:real):string; 
 function  LOG_Get_LevelStringShort(lvl:T_ErrorLevel):string;
+procedure ERR_SetStep(nr:longint; title,msg:string);
+procedure ERR_SetStep(nr:longint; msg:string); 
+procedure ERR_SetStep(nr:longint); 
+function  ERR_string:string;
 		
 procedure SAY   (typ:T_ErrorLevel; msg:string); // writes to STDOUT
 procedure SAY   (typ:T_ErrorLevel; const msg:string; const params:array of const);overload;
@@ -1659,6 +1680,7 @@ function  IP4AddrsInSameSubnet(ip4adr1,ip4adr2:string):boolean;
 
 procedure LNX_sudo(sudouse:boolean);
 function  LNX_sudo:boolean;
+function  LNX_ProgInstalled(progname:string):boolean;
 function  LNX_ParSET(filnam,parnam,parval:string):integer;
 function  LNX_ParGET(filnam,parnam:string; var parval:string):integer;
 function  LNX_ParLinEXIST(filnam,parstr:string):boolean;
@@ -1739,6 +1761,7 @@ function  Num2Str(num:real;nk:byte):string;
 function  Num2Str(num:int64;lgt:byte):string;
 function  Num2Str(num:longint; lgt:byte):string;
 function  Num2Str(num:longword;lgt:byte):string;
+function  Num2Str(num:qword;lgt:byte):string;
 function  Num2Str(num:real;lgt,nk:byte):string;  
 function  Str2Num(s:string; var num:byte):boolean;
 function  Str2Num(s:string; var num:smallint):boolean;
@@ -1748,6 +1771,8 @@ function  Str2Num(s:string; var num:longint):boolean;
 function  Str2Num(s:string; var num:longword):boolean;
 function  Str2Num(s:string; var num:real):boolean; 
 function  Str2Num(s:string; var num:extended):boolean;
+function  Str2NumFMT(s:string; nk:byte):string;
+function  Num2StrFMT(num:real; nk:byte):string;
 function  Str2CP437(s:string):string;
 function  Str2TimeSpec(s:string; var ts:timespec):boolean; 
 function  Str2DateTime(tdstring,fmt:string; var dt:TDateTime):boolean;
@@ -1757,15 +1782,17 @@ function  GetLogLvls(tr:string):string;
 function  LeadingZero(w : Word) : String; 
 function  LeadingZeros(l:longint;digits:byte):string;  
 function  Bin(q:longword;lgt:Byte) : string; 
-function  Hex(nr:qword;lgt:byte) : string; 
-function  Hex(ptr:pointer;lgt:byte): string;
+//function  Hex(nr:qword;lgt:byte) : string; 
+//function  Hex(ptr:pointer;lgt:byte): string;
 function  HexStr(s:string):string;overload;
 function  StrHex(Hex_strng:string):string;
 function  AdjZahlDE(r:real;lgt,nk:byte):string;
 function  AdjZahl(s:string):string;
+function  adjL0(s:string):string;
 function  FormatFileSize(const Size: Int64):string;
 function  scale(valin,min1,max1,min2,max2:real):real;
 function  Get_FixedStringLen(s:string;cnt:word;leading:boolean):string; 
+function  StringReverse(s:string):string;
 function  ShortString(fmt,maxlgt,divdr:longint; str:string):string;
 procedure AskCR;
 procedure AskCR(msg:string);
@@ -1825,6 +1852,7 @@ function  TextFile2StringList(filname:string; StrListOut:TStringList; append:boo
 function  StringListAdd2List(StrList1,StrList2:TStringList; append:boolean):longword; 
 function  StringListAdd2List(StrList1,StrList2:TStringList):longword; //Adds StringList2 to Stringlist1. result is size of Stringlist in bytes
 function  StringList2TextFile(filname:string; StrListOut:TStringList):boolean;
+function  StringList2TextFile(filname:string; StrListOut:TStringList; append_mode:boolean):boolean;
 function  StringList2String(StrList:TStringList):string;
 function  StringList2String(StrList:TStringList; tr:string):string;
 procedure String2StringList(str:string; StrList:TStringList);
@@ -1855,7 +1883,9 @@ function  GiveStringListIdx2(StrList:TStringList; srchstrng:string; var idxStart
 procedure MemCopy(src,dst:pointer; size:longint); 
 procedure MemCopy(src,dst:pointer; size,srcofs,dstofs:longint);
 function  DeltaTime_in_ms(dt1,dt2:TDateTime):int64;
+function  CHK8(s:string):byte;
 function  CRC8(s:string):byte;
+function  CRC8_ok(s:string):boolean;
 function  MD5_HashGET(filnam:string; var MD5hash:string):boolean;
 function  MD5_HashCreateFile(filnam,MD5filnam:string; var MD5hash:string):boolean;
 function  MD5_HashGETFile(MD5filnam:string; var MD5hash:string):boolean;
@@ -1874,12 +1904,16 @@ function  GetUTCOffsetString:string; // e.g. '+02:00'
 function  GetUTCOffsetMinutes(offset_String:string):longint; // e.g. '-02:00' -> -120
 function  GetDateTimeUTC:TDateTime;
 function  GetDateTimeUTC(dt:TDateTime; tzofs:longint):TDateTime; 
+function  GetTimeStamp(dt:TDateTime):string; 	// YEAR-MM-DD hh:mm:ss.zzz
+function  GetTZTimeStamp(dt:TDateTime):string;	// YEAR-MM-DD hh:mm:ss.zzz+XX:XX
 function  GetXMLTimeStamp(dt:TDateTime):string; // YEAR-MM-DDThh:mm:ss.zzz+XX:XX
 function  GetDateTimefromXMLTimeStamp(tstmp:string; var dt:TDateTime; var tzofs:longint):boolean;
+function  GetUTCDateTimefromXMLTimeStamp(tstmp:string; var dt:TDateTime):boolean;
 function  GetDateTimefromUTC(tstmp:string; var dt:TDateTime):boolean;
 function  call_external_prog(typ:t_ErrorLevel; cmdline:string):integer; 
 function  call_external_prog(typ:t_ErrorLevel; cmdline:string; var receivestring:string):integer;
 function  call_external_prog(typ:t_ErrorLevel; cmdline:string; receivelist:TStringList):integer; 
+function  call_external_prog(typ:t_ErrorLevel; cmdline:string; receivelist:TStringList; timo_msec:word):integer;
 function  RunScript(filname,para:string):integer;
 function  RunScript(ts:TStringList; para:string):integer;
 function  RunScript(ts:TStringList; filname,para:string):integer;
@@ -1986,10 +2020,10 @@ var
     _LOG_LevelColor,restrict2gpio,_OnExitShowRuntime:boolean;
     GPIO_map_idx,I2C_busnum,connector_pin_count,status_led_GPIO:byte;
     cpu_snr,cpu_hw,cpu_proc,cpu_rev,cpu_mips,cpu_feat,cpu_fmin,cpu_fcur,
-    cpu_machine,cpu_fmax,os_rev,cpu_fw,uname,sudo:string;
+    cpu_machine,cpu_fmax,os_rev,cpu_fw,uname,sudo,whoami:string;
     cpu_rev_num,cpu_freq,pll_freq:real;
-    BB_pin,RPI_ShutDownGPIO,cpu_cores: longint;
-	MORSE_dit_lgt,eeprom_devadr:word; 
+    RPI_ShutDownGPIO,cpu_cores: longint;
+	eeprom_devadr:word; 
 	GPU_MEM_BASE:longword;
 	oa,na:PSigActionRec;
 	RPIHDR_Desc:array[1..max_pins_c] of string[mdl];
@@ -1998,8 +2032,17 @@ var
 function  Aligned(p:pointer; alig:byte):boolean; begin Aligned:=(p=Align(p,alig)); end;
 procedure AlignShow; 
 begin 
-  writeln('addr 0x'+Hex(@msg,8),' (',PtrUInt(@msg),') aligned ',Aligned(@msg,32),' (',(PtrUint(@msg) mod 32),')'); 
+  writeln('addr 0x'+HexStr(@msg),' (',PtrUInt(@msg),') aligned ',Aligned(@msg,32),' (',(PtrUint(@msg) mod 32),')'); 
 end;
+
+function  ERR_string:string;
+begin ERR_string:=ERR_title+'['+Num2Str(ERR_step,0)+']: '+ERR_msg; end;
+procedure ERR_SetStep(nr:longint); 
+begin ERR_step:=nr; end;
+procedure ERR_SetStep(nr:longint; msg:string); 
+begin ERR_step:=nr; ERR_msg:=msg; end;
+procedure ERR_SetStep(nr:longint; title,msg:string); 
+begin ERR_step:=nr; ERR_title:=title; ERR_msg:=msg; end;
 	
 function  MOD_Euclid(a,b:longint):longint;
 var m:longint;
@@ -2016,7 +2059,9 @@ end;
 function  RoundUpPow2(nr:real):longword; begin RoundUpPow2:=round(intpower(2,round(log2(nr)))); end;
 function  DivRoundUp(n,d:real):longword; begin DivRoundUp:=round((n+d-1)/d); end;	
 procedure delay_msec (Milliseconds:longword);  begin if Milliseconds>0 then sysutils.sleep(Milliseconds); end;
+function  CHK8(s:string):byte; var i,chk:byte; begin chk:=$00; for i := 1 to Length(s) do chk:=chk  +  ord(s[i]); CHK8:=chk; end;
 function  CRC8(s:string):byte; var i,crc:byte; begin crc:=$00; for i := 1 to Length(s) do crc:=crc xor ord(s[i]); CRC8:=crc; end;
+function  CRC8_ok(s:string):boolean; var ok:boolean; begin ok:=false; if s<>'' then ok:=(ord(s[Length(s)])=CRC8(copy(s,1,Length(s)-1))); CRC8_ok:=ok; end;
 procedure SetTimeOut (var EndTime:TDateTime;TimeOut_ms:Int64); begin EndTime:=IncMilliSecond(now,TimeOut_ms); end;
 function  TimeElapsed(EndTime:TDateTime):boolean;              begin TimeElapsed:=(EndTime<=now); end;
 
@@ -2279,8 +2324,15 @@ end;
 function  GetXMLTimeStamp(dt:TDateTime):string; // YEAR-MM-DDThh:mm:ss.zzz+XX:XX
 begin GetXMLTimeStamp:=FormatDateTime('YYYY-MM-DD"T"hh:mm:ss.zzz',dt)+_TZOffsetString; end; 
 
+function  GetTimeStamp(dt:TDateTime):string; // YEAR-MM-DD hh:mm:ss.zzz
+begin GetTimeStamp:=FormatDateTime('YYYY-MM-DD" "hh:mm:ss.zzz',dt); end; 
+
+function  GetTZTimeStamp(dt:TDateTime):string; // YEAR-MM-DD hh:mm:ss.zzz+XX:XX
+begin GetTZTimeStamp:=GetTimeStamp(dt)+_TZOffsetString; end; 
+
 function  GetDateTimefromXMLTimeStamp(tstmp:string; var dt:TDateTime; var tzofs:longint):boolean;
 // IN: 2018-06-26T16:01:12.070+02:00
+//     2019-04-16T20:09:25.745+02:00
 var _ok:boolean; p:longint; dats,tims:string; 
 begin    
   p:=Pos('T',tstmp);
@@ -2296,7 +2348,7 @@ begin
     tzofs:= GetUTCOffsetMinutes(copy(tims,p,Length(tims)));
     tims:=	copy(tims,1,p-1);
   end else tzofs:=0;
-//writeln(dats,'|',tims,'|',tzofs,'|');
+//writeln;writeln('GetDateTimefromXMLTimeStamp:',dats,'|',tims,'|',tzofs,'|',tstmp);
   try
 	_ok:=	Str2DateTime(dats+' '+tims,'YYYY-MM-DD hh:mm:ss.zzz',dt);
 	if not _ok then 
@@ -2305,6 +2357,14 @@ begin
     _ok:=false;
   end;
   GetDateTimefromXMLTimeStamp:=_ok
+end;
+
+function  GetUTCDateTimefromXMLTimeStamp(tstmp:string; var dt:TDateTime):boolean;
+var _ok:boolean; tzofs:longint;
+begin
+  _ok:=GetDateTimefromXMLTimeStamp(tstmp,dt,tzofs);
+  if _ok then dt:=GetDateTimeUTC(dt,tzofs);
+  GetUTCDateTimefromXMLTimeStamp:=_ok;
 end;
 
 function  xGetDateTimefromXMLTimeStamp(tstmp:string; var dt:TDateTime; var tzofs:longint):longint;
@@ -2637,6 +2697,7 @@ var i64:int64; sh:string;
 begin
 //SAY(LOG_WARNING,'LNX_WDOG_Thread: start');
   try
+    Thread_SetName('WDOG'); 
   	with wdog do
   	begin
 	  with ThreadCtrl do 
@@ -2833,7 +2894,7 @@ SETTIMEOUT     Set timeout (in seconds)       0           0		*)
 								then sh:=sh+char(identity[res]) else res:=31;
 							  inc(res);
 							end;
-							SAY(LOG_INFO,'LNX_WDOG[GSup]: '+sh+' [version '+Num2Str(firmware_version,0)+'] opts:0x'+Hex(options,8));
+							SAY(LOG_INFO,'LNX_WDOG[GSup]: '+sh+' [version '+Num2Str(firmware_version,0)+'] opts:0x'+HexStr(options,8));
 							res:=options;
 						  end; // with
 						end;
@@ -2979,7 +3040,7 @@ begin
   begin
 	res:=0;
 	{$IFDEF WINDOWS}
-	  res:=call_external_prog(LOG_NONE,'chmod '+Hex(mode,3)+' '+filename);
+	  res:=call_external_prog(LOG_NONE,'chmod '+HexStr(mode,3)+' '+filename);
 	{$ELSE}
 	  res:=fpChmod(filename,mode);
 	{$ENDIF}
@@ -3506,6 +3567,9 @@ begin if value>maxvalue then value:=maxvalue; if value<minvalue then value:=minv
 function  Limits(var value:real; minvalue,maxvalue:real):real;
 begin if value>maxvalue then value:=maxvalue; if value<minvalue then value:=minvalue; Limits:=value; end;
 
+function  InLimits(value,minvalue,maxvalue:real):boolean;
+begin InLimits:=((value>=minvalue) and (value<=maxvalue)); end;
+
 procedure MinMax(value:longint; var minvalue,maxvalue:longint);
 begin if value>maxvalue then maxvalue:=value; if value<minvalue then minvalue:=value; end;
 procedure MinMax(value:longword; var minvalue,maxvalue:longword);
@@ -3617,6 +3681,7 @@ function  Bool2UpDown(b:boolean):string; 	 begin if b then Bool2UpDown:='up'	els
 function  Num2Str(num:int64;lgt:byte):string;    var s:string; begin str(num:lgt,s); Num2Str:=s; end;
 function  Num2Str(num:longint;lgt:byte):string;  var s:string; begin str(num:lgt,s); Num2Str:=s; end;
 function  Num2Str(num:longword;lgt:byte):string; var s:string; begin str(num:lgt,s); Num2Str:=s; end;
+function  Num2Str(num:qword;lgt:byte):string; 	 var s:string; begin str(num:lgt,s); Num2Str:=s; end;
 function  Num2Str(num:real;lgt,nk:byte):string;  var s:string; begin str(num:lgt:nk,s);Num2Str:=s; end;
 function  Num2Str(num:int64):string;   		begin Num2Str:=Num2Str(num,0); end;
 function  Num2Str(num:longint):string; 		begin Num2Str:=Num2Str(num,0); end;
@@ -3646,6 +3711,26 @@ begin
   if (code<>0) and Str2Num(s,r) then begin num:=r; code:=0; end;
   Str2Num:=(code=0); 
 end;
+function  Str2NumFMT(s:string; nk:byte):string;
+var r:real; i:integer; sh:string;
+begin
+  if not Str2Num(s,r) then 
+  begin
+	sh:='';
+	if (nk>0) then 
+	  begin for i:=1 to nk do sh:=sh+'_'; sh:='.'+sh; end;
+	sh:='_'+sh;
+  end else sh:=Num2Str(r,nk);
+  Str2NumFMT:=sh;
+end;
+function  Num2StrFMT(num:real;nk:byte):string;
+var sh:string;
+begin 
+  if not IsNaN(num) 
+	then sh:=Num2Str(num,0,nk)
+  	else sh:=Str2NumFMT(' ',nk);
+  Num2StrFMT:=sh;
+end;
 
 function  Str2CP437(s:string):string;
 var sh:string;
@@ -3661,6 +3746,14 @@ begin
   Str2CP437:=sh;
 end;
 
+function StringReverse(s:string):string;
+var i : integer; sh:string;  
+begin 
+  sh:='';
+  for i := Length(s) downto 1 do sh:=sh+s[i];  
+  StringReverse:=sh;
+end;
+
 function  Str2TimeSpec(s:string; var ts:timespec):boolean;
 var c1,c2:integer; 
 begin 
@@ -3669,9 +3762,9 @@ begin
 LOG_Writeln(LOG_ERROR,'Str2TimeSpec: '+s);
   Str2TimeSpec:=((c1=0) and (c2=0));
 end;
-function  Hex   (nr:qword;lgt:byte) : string; begin Hex:=Format('%0:-*.*x',[lgt,lgt,nr]); end;
-{$warnings off} function  Hex   (ptr:pointer;lgt:byte): string; begin Hex:=Hex(qword(ptr),lgt); end; {$warnings on}
-function  HexStr(s:string):string;overload; var sh:string; i:longint; begin sh:=''; for i := 1 to Length(s) do sh:=sh+Hex(ord(s[i]),2); HexStr:=sh; end;
+//function  Hex   (nr:qword;lgt:byte) : string; begin Hex:=Format('%0:-*.*x',[lgt,lgt,nr]); end;
+//{$warnings off} function  Hex   (ptr:pointer;lgt:byte): string; begin Hex:=Hex(qword(ptr),lgt); end; {$warnings on}
+function  HexStr(s:string):string;overload; var sh:string; i:longint; begin sh:=''; for i := 1 to Length(s) do sh:=sh+HexStr(ord(s[i]),2); HexStr:=sh; end;
 function  LeadingZero(w:word):string; begin LeadingZero:=Format('%0:-*.*d',[2,2,w]); end;
 //function  Get_FixedStringLen(s:string;cnt:word;leading:boolean):string; var fmt:string; begin fmt:='%0:'; if not leading then fmt:=fmt+'-'; fmt:=fmt+'*.*s'; Get_FixedStringLen:=Format(fmt,[cnt,cnt,s]); end;
 function  Get_FixedStringLen(s:string;cnt:word;leading:boolean):string; var fmt:string; begin if leading then fmt:='%' else fmt:='%-'; fmt:=fmt+Num2Str(cnt,0)+'s'; Get_FixedStringLen:=Format(fmt,[s]); end;
@@ -3852,6 +3945,13 @@ begin
 	  end; // for
 	  init:=true;
 	end; // if
+
+	hostapd_extdev:=ifeth_c;
+	if (not IP_Info[1].stat) then
+	begin
+	  if IP_Info[0].stat then hostapd_extdev:=IP_Info[0].iface;	// wlan0
+	  if IP_Info[3].stat then hostapd_extdev:=IP_Info[3].iface;	// wlan1
+	end else 				  hostapd_extdev:=IP_Info[1].iface; // eth0
 	
 (*	for n:= 1 to 2 do
 	begin
@@ -4448,6 +4548,19 @@ begin
   Trimme := sh;  
 end;
 
+function  adjL0(s:string):string;
+var exp:string; num:extended; nk:integer;
+begin
+  if Str2Num(s,num) then
+  begin
+    s:=Upper(s); exp:='0'; 
+	if Pos('.',s)<>0 then begin exp:=Select_Item(s,'.','',2); exp:=Num2Str(Length(exp),0); end;	// preserve accuracy
+	if Pos('E',s)<>0 then begin exp:=Select_Item(s,'E','',2); end;
+    if Str2Num(exp,nk) then s:=Num2Str(num,0,abs(nk));
+  end;
+  adjL0:=s;
+end;
+
 function FilterChar(s,filter:string):string;
 {.c filtert aus string s alle char die in filter angegeben sind. }
 var sh:string; i,j:integer;
@@ -4958,6 +5071,13 @@ begin
   SearchInConfigList:=sh;
 end;
 
+function  GetRndTmpFileName(filhdr,extname:string):string;
+var sh:string;
+begin  
+  sh:=c_tmpdir+'/'+filhdr+FormatDateTime('YYYYMMDDhhmmss',now)+extname;	// was '/tmp_'  ext: .txt
+  GetRndTmpFileName:=PrepFilePath(sh); 
+end;
+
 procedure String2StringList(str:string; StrList:TStringList);
 var li:longint; sh:string;
 begin
@@ -4995,6 +5115,29 @@ begin
     LOG_Writeln(LOG_Error,'StringList2TextFile: could not write file '+fn);
   end;
   StringList2TextFile:=_ok;
+end;
+
+function  StringList2TextFile(filname:string; StrListOut:TStringList; append_mode:boolean):boolean;
+var b:boolean; sh,fn,fn2:string;
+begin
+  b:=true;
+  if (StrListOut.count>0) then
+  begin
+    b:=false; fn:=PrepFilePath(filname); 
+    if append_mode and FileExists(fn) then
+    begin
+      fn2:=GetRndTmpFileName('tmp_','.txt');
+      if StringList2TextFile(fn2,StrListOut) then
+      begin
+    	{$ifdef WINDOWS}sh:='type '+fn2;{$else}sh:='cat '+fn2;{$endif}
+	  	sh:=sh+' >> '+fn;
+		b:=(call_external_prog(LOG_NONE,sh)=0);
+		if not b then LOG_Writeln(LOG_ERROR,'StringList2TextFile, failed: '+sh);
+		{$I-} DeleteFile(fn2); {$I+} 
+	  end else LOG_Writeln(LOG_ERROR,'StringList2TextFile: '+fn2); 
+    end else b:=StringList2TextFile(fn,StrListOut);
+  end;
+  StringList2TextFile:=b;
 end;
 
 function  String2TextFile(filname:string; StrOut:string):boolean;
@@ -5146,13 +5289,6 @@ begin
   until TimeElapsed(timo);
 end;
 
-function  GetRndTmpFileName(filhdr,extname:string):string;
-var sh:string;
-begin  
-  sh:=c_tmpdir+'/'+filhdr+FormatDateTime('YYYYMMDDhhmmss',now)+extname;	// was '/tmp_'  ext: .txt
-  GetRndTmpFileName:=PrepFilePath(sh); 
-end;
-
 procedure BIOS_EndIniFile; 
 // https://github.com/graemeg/freepascal/blob/master/packages/fcl-base/src/inifiles.pp
 var res:longint;
@@ -5172,7 +5308,7 @@ begin
       if FileExists(inifilename) then
       begin
 		res:=fpChmod (inifilename,&600);
-		if (res<>0) then LOG_Writeln(LOG_ERROR,'BIOS_EndIniFile: can not set perm '+inifilename+' 0x'+Hex(res,8));
+		if (res<>0) then LOG_Writeln(LOG_ERROR,'BIOS_EndIniFile: can not set perm '+inifilename+' 0x'+HexStr(res,8));
 	  end else res:=-1;
 	  {$ENDIF}
     end;
@@ -5218,6 +5354,9 @@ begin
   BIOS_CacheUpdate:=upd;
 end;
 
+function  BIOS_GetIniFilename:string;
+begin BIOS_GetIniFilename:=IniFileDesc.inifilename; end;
+
 procedure BIOS_ReadIniFile(fname:string);
 // e.g. BIOS_ReadIniFile('/etc/configfile.ini')
 //var res:longint;
@@ -5231,7 +5370,7 @@ begin
 	    then call_external_prog(LOG_NONE,'touch '+inifilename); // just create on
 	  {$IFNDEF WINDOWS} 
 //		res:=fpChmod (inifilename,&600);
-//		if (res<>0) then LOG_Writeln(LOG_ERROR,'BIOS_ReadIniFile: can not set perm '+inifilename+' 0x'+Hex(res,8));
+//		if (res<>0) then LOG_Writeln(LOG_ERROR,'BIOS_ReadIniFile: can not set perm '+inifilename+' 0x'+HexStr(res,8));
 	  {$ENDIF}
 //	  writeln(inifilename,' ',FileExists(inifilename),' ',(inifilbuf=nil));
 //	  if FileExists(inifilename) then 
@@ -5476,6 +5615,15 @@ begin
   DeltaTime_in_ms:=GetVZ(dt1,dt2)*MilliSecondsBetween(dt1,dt2);
 end;
 
+function LNX_ProgInstalled(progname:string):boolean;
+var sh:string;
+begin
+  if (progname<>'')
+	then call_external_prog(LOG_NONE,'which '+progname,sh)
+	else sh:='#';
+  LNX_ProgInstalled:=(Pos(progname,sh)>0);
+end;
+
 procedure LNX_KillProcesses(processlist:string; signal:word);
 // IN:  '1234 5678'
 var n,num,sig:longint; sh:string;
@@ -5515,7 +5663,7 @@ function  HexStrFrm(str:string):string;
 var n:longint; sh:string;
 begin
   sh:='';
-  for n:=1 to Length(str) do sh:=sh+Hex(ord(str[n]),2)+' ';
+  for n:=1 to Length(str) do sh:=sh+HexStr(ord(str[n]),2)+' ';
   HexStrFrm:=Trimme(sh,4);
 end;
 
@@ -5558,7 +5706,7 @@ begin
   if (Length(sh)>23) then
   begin
     sh:=''; LOG_Writeln(LOG_ERROR,'BTLE_GetBeaconHexStr: url to long: '+url); 
-  end else sh:=StrHex('0303'+ServiceID+Hex(Length(sh),2))+sh;
+  end else sh:=StrHex('0303'+ServiceID+HexStr(Length(sh),2))+sh;
 //writeln('0x',HexStrFrm(sh));
   BTLE_GetBeaconHexStr:=sh;
 end;
@@ -5576,14 +5724,14 @@ begin
   _ok:=(hexstrng<>'');
   if _ok then 
   begin
-//	writeln('BTLE_StartBeacon: hcitool -i hci0 cmd 0x08 0x0008 '+Hex(Length(hexstrng),2)+' '+HexStrFrm(hexstrng));
+//	writeln('BTLE_StartBeacon: hcitool -i hci0 cmd 0x08 0x0008 '+HexStr(Length(hexstrng),2)+' '+HexStrFrm(hexstrng));
     _ok:=(RunProcess(
     BTLE_StopBeaconStr+' ; '+
     'sleep 5 ; '+
   	'hciconfig hci0 up >/dev/null 2>&1 ; '+
   	'hciconfig hci0 noscan >/dev/null 2>&1 ; '+
   	'hciconfig hci0 leadv 3 >/dev/null 2>&1 ; '+
-  	'hcitool -i hci0 cmd 0x08 0x0008 '+Hex(Length(hexstrng),2)+' '+HexStrFrm(hexstrng)+' >/dev/null 2>&1',
+  	'hcitool -i hci0 cmd 0x08 0x0008 '+HexStr(Length(hexstrng),2)+' '+HexStrFrm(hexstrng)+' >/dev/null 2>&1',
   	'',false)=0); // start async
   end else LOG_Writeln(LOG_ERROR,'BTLE_StartBeacon: no HexSting supplied');
   BTLE_StartBeacon:=_ok;
@@ -5631,11 +5779,11 @@ begin
   OS_ShellExitDesc:=sh;
 end;
 
-function  call_external_prog(typ:t_ErrorLevel; cmdline:string; receivelist:TStringList):integer;
+function  call_external_prog(typ:t_ErrorLevel; cmdline:string; receivelist:TStringList; timo_msec:word):integer;
 // http://wiki.freepascal.org/Executing_External_Programs#Reading_large_output
 // can return multiple lines in StringList
 const BUF_SIZE=2048;
-var exitStat,exitCode:integer; BytesRead:LongInt; 
+var exitStat,exitCode:integer; BytesRead:LongInt; timo:TDateTime;
 	OutputStream:TStream; AProcess:TProcess; 
 	Buffer: array[1..BUF_SIZE] of byte;
 begin
@@ -5656,13 +5804,28 @@ begin
     AProcess.Parameters.Add(cmdline);
 
 	AProcess.Execute;
-	
     OutputStream:=	TMemoryStream.Create;
-    repeat     
-	  BytesRead:=AProcess.Output.Read(Buffer,BUF_SIZE);
-	  OutputStream.Write(Buffer,BytesRead);
-    until (BytesRead=0);
-    
+
+	if (timo_msec>0) then
+	begin   
+      SetTimeOut(timo,timo_msec);    
+      repeat 
+      	if (AProcess.Output.NumBytesAvailable>0) then
+      	begin
+          SetTimeOut(timo,timo_msec);
+	      BytesRead:=AProcess.Output.Read(Buffer,BUF_SIZE);
+	      OutputStream.Write(Buffer,BytesRead);
+      	end else delay_msec(1000);
+      until TimeElapsed(timo); 
+	end
+	else
+	begin
+	  repeat     
+	  	BytesRead:=AProcess.Output.Read(Buffer,BUF_SIZE);
+	  	OutputStream.Write(Buffer,BytesRead);
+	  until (BytesRead=0);
+	end;
+       
     OutputStream.Position:=0;
     receivelist.LoadFromStream(OutputStream);
     OutputStream.free;
@@ -5692,11 +5855,15 @@ begin
   call_external_prog:=exitCode;
 end;
 
+function  call_external_prog(typ:t_ErrorLevel; cmdline:string; receivelist:TStringList):integer;
+begin call_external_prog:=call_external_prog(typ,cmdline,receivelist,0); end;
+
 function  call_external_prog(typ:t_ErrorLevel; cmdline:string; var receivestring:string):integer;
 var exitCode:integer; receivelist:TStringList;
 begin
   receivelist:=TStringList.create;
   exitCode:=call_external_prog(typ,cmdline,receivelist);
+//showstringlist(receivelist);
   receivestring:=StringList2String(receivelist,LineEnding);
   receivelist.free;
   call_external_prog:=exitCode;
@@ -6471,6 +6638,23 @@ var   p2:t_parr; j,res:integer; i64:int64; r,version_new_md5,version_old_md5:rea
 	  UpdPkgSrcFile,UpdPkgSrcDir,UpdPkgDstFile,UpdPkgDstDirAndFile,
 	  UpdPkgMaintDir,UpdPkgMD5FileOld,UpdPkgDstDir,UpdPkglogf,
 	  UplSrcFiles,UplSrcPkgRem,UplDstDir,Upllogf,DwnSrcDir,DwnSrcFiles,DwnDstDir,DwnLogf:string;
+
+  function creaOutFileOpt(ddir,fils:string):string;
+  var _i:longint; sh,fil:string;
+  begin
+    sh:='';
+    for _i:=1 to Anz_Item(fils,',','"') do
+    begin
+      fil:=Trimme(Select_Item(fils,',','"',_i),3);
+      if (fil<>'') then
+      begin
+        if (ddir='/dev/null')	then sh:=sh+'-o /dev/null '
+        						else sh:=sh+'-o "'+PrepFilePath(ddir+'/'+fil)+'" ';
+      end;
+    end;
+    sh:=Trimme(sh,3);
+    creaOutFileOpt:=sh;
+  end;
 	  
   function  cmdget(var p:t_parr):string; var i:integer; sh:string; begin sh:=p[1]; for i:=2 to c_maxp do sh:=sh+' '+p[i]; cmdget:=Trimme(sh,4); end;
   procedure parr_clean(var p:t_parr); var i:integer; begin for i:=1 to c_maxp do p[i]:=''; end;
@@ -6510,9 +6694,12 @@ var   p2:t_parr; j,res:integer; i64:int64; r,version_new_md5,version_old_md5:rea
 begin
   DfltMaintDir:=	AppDataDir_c+'/'+ApplicationName+'/maint';	// /var/lib/<CompanyShortName>/<appname>/maint
   res:=-1; 
+  
   test:=	(UpdDBG1 		IN UpdFlags); 
   test2:=	(UpdDBG2 		IN UpdFlags);  // test2:=true;
   noMD5Chk:=(UpdnoMD5Chk 	IN UpdFlags);
+  
+//test2:=true; // test:=true;
   
   flgs:=UpdFlags+[UpdNOP]; 
   FTPServer:=		RpiMaintCmd.ReadString('RPIMAINT','FTPSRV', '');	
@@ -6633,8 +6820,8 @@ begin
 					      then sh:='http://'+FTPServer+PrepFilePath(DwnSrcDir+'/')+'{'+DwnSrcFiles+'}'
 					      else sh:='ftp://'+ FTPServer+PrepFilePath(DwnSrcDir+'/')+'{'+DwnSrcFiles+'}';
 					  end;
-					  if DwnDstDir='/dev/null' then cdmod:='';
-//curl -u usr:pwd -v -k --ssl -o "./#1" "ftp://www.xyz.com/dir/{file1,file2,file3}" > "file.log" 2> "file.log.prog"
+					  if DwnDstDir='/dev/null' then cdmod:=''; if cdmod<>'' then ;
+//curl -u usr:pwd -v -k --ssl -o "./file1" -o "./file2" "ftp://www.xyz.com/dir/{file1,file2}" > "file.log" 2> "file.log.prog"
 					  p2[1]:='curl'; 	
 					  if usrpwd<>''						  	then p2[2]:='-u '+usrpwd;
 //					  if UpdSUDO		IN UpdFlags 	  	then p2[1]:='sudo '+p2[1];  
@@ -6644,7 +6831,9 @@ begin
 					  if not (UpdNoCreateDir IN UpdFlags) 	then p2[2]:=p2[2]+' --ftp-create-dirs';
 					  
 					  p2[2]:=p2[2]+' '+FTPOpts;
-					  p2[3]:='-o'; 		p2[4]:='"'+PrepFilePath(DwnDstDir+cdmod)+'"'; 
+//					  p2[3]:='-o'; 		p2[4]:='"'+PrepFilePath(DwnDstDir+cdmod)+'"'; 
+					  p2[3]:=creaOutFileOpt(DwnDstDir,DwnSrcFiles); p2[4]:='';
+					  
 					  p2[5]:='"'+sh+'"';p2[6]:='';					  					  
 					  parr_show('#1',p2);
 					  MSG_HUB(LOG_INFO,maintmsg,cmdsf);
@@ -6709,7 +6898,7 @@ begin
 					  if not (UpdNoCreateDir IN UpdFlags) then p2[2]:=p2[2]+' --ftp-create-dirs';
 					  
 					  p2[2]:=p2[2]+' '+FTPOpts;
-					  p2[3]:='-o'; 			p2[4]:=UpdPkgDstDirAndFile+'.md5'; 
+					  p2[3]:='-o'; 			p2[4]:='"'+UpdPkgDstDirAndFile+'.md5"'; 
 					  p2[5]:='"'+sh+'.md5"';p2[6]:='';
 					  parr_show('#1',p2); 
 					  MSG_HUB(LOG_INFO,maintmsg,cmdsf+' md5');
@@ -6723,7 +6912,7 @@ begin
 						if noMD5Chk or (not MD5Chk(LOG_INFO,LOG_WARNING,UpdPkgDstDirAndFile+'.md5',UpdPkgMD5FileOld)) then
 						begin // get big file, there is a different package available
 						  SAY(LOG_INFO,cmdsf+' download tar ball');
-						  p2[4]:=UpdPkgDstDirAndFile; p2[5]:='"'+sh+'"';
+						  p2[4]:='"'+UpdPkgDstDirAndFile+'"'; p2[5]:='"'+sh+'"';
 						  parr_show('#2',p2);
 						  MSG_HUB(LOG_INFO,maintmsg,cmdsf+' '+version);
 						  CURL_SetPara(CurlThCtl,cmdsf,cmdget(p2),FTPlogf,UpdPkgDstFile,Get_Dirs(UpdPkgDstDirAndFile),0,UpdFlags+[UpdLogAppend]);
@@ -6736,7 +6925,7 @@ begin
 							parr_clean(p2); 
 							p2[1]:='md5sum'; p2[2]:=UpdPkgDstDirAndFile; 
 //							if UpdSUDO 	  IN UpdFlags then	p2[1]:='sudo '+p2[1];  
-							p2[3]:='>'; p2[4]:=UpdPkgDstDirAndFile+'.md5.2'; 
+							p2[3]:='>'; p2[4]:='"'+UpdPkgDstDirAndFile+'.md5.2"'; 
 							parr_show('#3',p2);	
 							if (cmd_do(p2)=0) then
 							begin
@@ -6749,11 +6938,21 @@ begin
 							  begin
 								LOG_Writeln(LOG_ERROR,cmdsf+' Step#4 '+parr_gets(p2)); 
 								MSG_HUB(LOG_ERROR,maintmsg,cmdsf+' chk md5 bad xfr');
+								if UpdKeepFile IN UpdFlags then
+								begin	
+								  parr_clean(p2); 
+								  p2[1]:='cp';
+								  p2[2]:=UpdPkgDstDirAndFile; 
+								  p2[3]:=UpdPkgDstDirAndFile+'.err'; 
+								  parr_show('#4',p2);
+								  cmd_do(p2); // cp unvalid package
+								end;
+								
 								parr_clean(p2); 
 								p2[1]:='rm'; 				p2[2]:='-f'; 
 //								if UpdSUDO IN UpdFlags then	p2[1]:='sudo '+p2[1];  
 								p2[3]:=UpdPkgDstDirAndFile; 
-								parr_show('#4',p2);
+								parr_show('#5',p2);
 								LOG_Writeln(LOG_ERROR,cmdsf+' invalid md5 of '+UpdPkgDstFile+' '+parr_gets(p2)+' bad xfr');
 								cmd_do(p2); // remove unvalid package
 							  end;								  
@@ -6995,7 +7194,7 @@ begin
     with ERR_MGMT[errhdl] do 
     begin 
 	  if ERR_MGMT_STAT(errhdl) then _lvl:=LOG_NOTICE else _lvl:=LOG_ERROR;
-	  LOG_Writeln(_lvl,	'ERR_MGMT[0x'+Hex(addr,4)+']: '+desc+
+	  LOG_Writeln(_lvl,	'ERR_MGMT[0x'+HexStr(addr,4)+']: '+desc+
 						' ERR RD:'+Num2Str(RDerr,0)+
 						' WR:'+Num2Str(WRerr,0)+
 						' CMD:'+Num2Str(CMDerr,0)+
@@ -7011,7 +7210,7 @@ begin
   SetLength(ERR_MGMT,0); 
 end;
 
-{$IFDEF UNIX}  
+{$IFDEF UNIX} 
 function  Term_ptmx(var termio:Terminal_device_t; link:string; menablemask,mdisablemask:longint):boolean;
 // opens pseudo terminal.
 // returns master and slave filedescriptor, and slavename for usage. link, links slavename to link
@@ -7021,7 +7220,8 @@ var snp:pchar; linkflag:boolean; tl:TStringList; newsettings:termios; sh:string;
 begin 
   with termio do
   begin
-    slavepath:=''; masterpath:=ptmx_c; linkpath:=link; fdslave:=-1; rlgt:=-1; ridx:=0; linkflag:=true; 
+    slavepath:=''; masterpath:=ptmx_c; linkpath:=link; 
+    fdslave:=-1; rlgt:=-1; ridx:=0; linkflag:=true;
     fdmaster := fpopen (ptmx_c, Open_RDWR or O_NONBLOCK);
     if fdmaster>=0 then
     begin
@@ -7044,15 +7244,15 @@ begin
 			      if FileExists(link) then 
 				  begin 
 				    LOG_WRITELN(LOG_Warning,'ptmx, link exits: '+link+' (unlink '+link+')');
-				    call_external_prog(LOG_NONE,'unlink '+link+'; ls -l '+link,sh);
+				    call_external_prog(LOG_NONE,'unlink '+link+' ; ls -l '+link,sh);
 					LOG_ShowStringList(LOG_WARNING,tl);
-			        sleep(500);
+//			        sleep(500);
 				  end;
 				  if (not FileExists(link)) then
 			      begin
 			        call_external_prog(LOG_NONE,'ln -s '+slavepath+' '+link+'; ls -l '+link,sh);
 //LOG_ShowStringList(LOG_WARNING,tl);
-					sleep(500);
+//					sleep(500);
 				    linkflag:=FileExists(link);
 				    if not linkflag then 
 					begin
@@ -7149,7 +7349,7 @@ begin
 		if str<>'' then DoActionOnReceivedInput(str);		// process input data, if something was red
 	    TermIO_Write(termio,'Hello#'+Num2Str(loop,0)+LF);	// write to  master device
         sleep(1000); inc(loop);
-      until loop>maxloops;
+      until (loop>maxloops);
 	  writeln('closing '+linkpath);
 	  fpclose(fdmaster);
 	  writeln('End of Test_BiDirectionDevice_in_UserSpace (you should get an Input/output error on screen2 now)');
@@ -7321,7 +7521,7 @@ var ts:TStringlist; sh:string; anz:longint; lw:longword;
 		  $13: sh:=RPI_SetInfo(cpurevs,'B+', 'Embest',	1.2, 0, 2, 47, 40, 1, 512);
 		  $14: sh:=RPI_SetInfo(cpurevs,'CM1','Embest',	1.1, 0, 2, 47,  0, 1, 512); 
 		  $15: sh:=RPI_SetInfo(cpurevs,'A+', 'Embest',	1.1, 0, 2, 47, 40, 1, 256);
-		  else LOG_Writeln(LOG_ERROR,'Get_CPU_INFO_Init: (0x'+Hex(lw,8)+') unknown rev:'+cpurevs+': RPI not supported');
+		  else LOG_Writeln(LOG_ERROR,'Get_CPU_INFO_Init: (0x'+HexStr(lw,8)+') unknown rev:'+cpurevs+': RPI not supported');
 		end; // case
 	  end
 	  else
@@ -7343,7 +7543,9 @@ var ts:TStringlist; sh:string; anz:longint; lw:longword;
 		    0: sh:=sh+'256MB';
 		    1: sh:=sh+'512MB';
 		    2: sh:=sh+'1GB';
-		  else sh:=sh+'0x'+Hex(M,2);
+		    3: sh:=sh+'2GB';
+		    4: sh:=sh+'4GB';
+		  else sh:=sh+'0x'+HexStr(M,2);
 		end; // case 
 		sh:=sh+';';
 		case RPI_bType of // Type
@@ -7360,14 +7562,17 @@ var ts:TStringlist; sh:string; anz:longint; lw:longword;
 		  $0c: sh:=sh+'Zero W';
 		  $0d: sh:=sh+'3B+';
 		  $0e: sh:=sh+'3A+';
-		  else sh:=sh+'0x'+Hex(RPI_bType,2);
+		  $10: sh:=sh+'CM3+';
+		  $11: sh:=sh+'4B';
+		  else sh:=sh+'0x'+HexStr(RPI_bType,2);
 		end; // case					
 		sh:=sh+';';
 		case P of // Processor
 		    0: cpu_hw:='BCM2835';
 		    1: cpu_hw:='BCM2836';
 		    2: cpu_hw:='BCM2837';
-		  else cpu_hw:=cpu_hw+'0x'+Hex(P,2);
+		    3: cpu_hw:='BCM2711';
+		  else cpu_hw:=cpu_hw+'0x'+HexStr(P,2);
 		end; // case
 		sh:=sh+cpu_hw+';'+cpurevs+';'+Num2Str(connector_pin_count,0)+';'+Num2Str(cpu_cores,0)+';'+cpu_machine+';';
 		case C of // Manufacturer
@@ -7375,7 +7580,9 @@ var ts:TStringlist; sh:string; anz:longint; lw:longword;
 		    1: sh:=sh+'Egoman';
 		    2: sh:=sh+'Embest';
 		    3: sh:=sh+'Sony Japan';
-		  else sh:=sh+'0x'+Hex(C,2);
+		    4: sh:=sh+'Embest';
+		    5: sh:=sh+'Stadium';
+		  else sh:=sh+'0x'+HexStr(C,2);
 		end; // case
 	  end;
 	end; // else Log_Writeln(LOG_ERROR,'Get_CPU_INFO_Init: Rev:'+cpurevs+' Hardware:'+cpu_hw+' Processor:'+cpu_proc+' no known platform');
@@ -7385,12 +7592,13 @@ var ts:TStringlist; sh:string; anz:longint; lw:longword;
 begin
    cpu_snr:='';   cpu_hw:='';   cpu_proc:=''; cpu_rev:=''; cpu_mips:=''; cpu_feat:=''; cpu_rev_num:=0;
    cpu_fmin:='';  cpu_fcur:=''; cpu_fmax:=''; os_rev:='';  uname:=''; 	 cpu_machine:='';
-   cpu_cores:=0;  I2C_busnum:=0; status_led_GPIO:=0; 
+   cpu_cores:=0;  I2C_busnum:=0; status_led_GPIO:=0;  	   whoami:='';
    RPI_bType:=0;
    for lw:=1 to max_pins_c do RPIHDR_Desc[lw]:='';
    connector_pin_count:=40; 
    cpu_freq:= 700000000; pll_freq:=2000000000; 
   {$IFDEF UNIX}  
+    call_external_prog(LOG_NONE,'whoami',whoami);
 	ts:=TStringList.Create;
 	call_external_prog(LOG_NONE,proc3_c,sh); 			 os_rev:= 		RM_CRLF(sh);
 	call_external_prog(LOG_NONE,proc2_c+'_min_freq',sh); cpu_fmin:=		RM_CRLF(sh);
@@ -7415,43 +7623,7 @@ begin
 	  cpu_rev:= cpuinfo_unix('Revision', anz);		// e.g. a01041 
 	  cpu_rev:= AnalyzeRevCode(cpu_rev); 			// new style
 //	  writeln(cpu_rev);
-
-(*	  if Str2Num('0x'+cpu_rev,lw) and ((Pos('BCM',cpu_hw)=1)) then
-	  begin
-//writeln('cpuinfo ',hex(lw,8));
-// http://elinux.org/RPI_HardwareHistory
-// http://www.raspberrypi-spy.co.uk/2012/09/checking-your-raspberry-pi-board-version/
-// https://www.raspberrypi.org/documentation/hardware/raspberrypi/revision-codes/README.md
-        case (lw and $7fffff) of // mask out overvoltage bit
-          $00..$03 : cpu_rev:=RPI_SetInfo(cpu_rev,'B',  1.0,0,1,16,26, 256);
-	      $04..$06 : cpu_rev:=RPI_SetInfo(cpu_rev,'B',  2.0,1,2,16,26, 256);
-		  $07..$09 : cpu_rev:=RPI_SetInfo(cpu_rev,'A',  2.0,1,2,16,26, 256);
-		  $0d..$0f : cpu_rev:=RPI_SetInfo(cpu_rev,'B',  2.0,1,2,16,26, 512);
-		  $10:		 cpu_rev:=RPI_SetInfo(cpu_rev,'B+', 1.0,0,2,47,40, 512);
-		  $13:		 cpu_rev:=RPI_SetInfo(cpu_rev,'B+', 1.2,0,2,47,40, 512);
-		  $11,$14  : cpu_rev:=RPI_SetInfo(cpu_rev,'CM1',1.1,0,2,47, 0, 512); 	// ComputeModule
-		  $12,$15  : cpu_rev:=RPI_SetInfo(cpu_rev,'A+', 1.1,0,2,47,40, 256);
-		  $100021  : cpu_rev:=RPI_SetInfo(cpu_rev,'A+', 1.1,1,2,47,40, 512);
-		  $100032  : cpu_rev:=RPI_SetInfo(cpu_rev,'B+', 1.2,1,2,47,40, 512);
-		  $100092  : cpu_rev:=RPI_SetInfo(cpu_rev,'Z',  1.2,0,2,47,40, 512); 	// PiZero (900092)
-		  $100093  : cpu_rev:=RPI_SetInfo(cpu_rev,'Z',  1.3,0,2,47,40, 512); 	// PiZero (900093)
-		  $1000c1  : cpu_rev:=RPI_SetInfo(cpu_rev,'ZW', 1.1,0,2,47,40, 512); 	// PiZero (9000c1)
-		  $2020a0  : cpu_rev:=RPI_SetInfo(cpu_rev,'CM3',1.0,0,2,47, 0,1024); 	// ComputeModule3
-		  $201040  : cpu_rev:=RPI_SetInfo(cpu_rev,'2B', 1.0,1,2,47,40,1024); 	// Pi2B (a01040 Sony, UK)
-		  $221041  : cpu_rev:=RPI_SetInfo(cpu_rev,'2B', 1.1,1,2,47,40,1024); 	// Pi2B  
-		  $201041  : cpu_rev:=RPI_SetInfo(cpu_rev,'2B', 1.1,1,2,47,40,1024); 	// Pi2B
-		  $222042  : cpu_rev:=RPI_SetInfo(cpu_rev,'2B', 1.2,1,2,47,40,1024); 	// Pi2B with BCM2837	
-		  $202082  : cpu_rev:=RPI_SetInfo(cpu_rev,'3B', 1.2,1,2,47,40,1024);	// Pi3B (a02082 Sony, UK)	  
-		  $222082  : cpu_rev:=RPI_SetInfo(cpu_rev,'3B', 1.2,1,2,47,40,1024);	// Pi3B (a22082 Embest, China)																
-		  $232082  : cpu_rev:=RPI_SetInfo(cpu_rev,'3B', 1.2,1,2,47,40,1024); 	// Pi3B (a32082 Sony, Japan)
-		  $2020d3  : cpu_rev:=RPI_SetInfo(cpu_rev,'3B+',1.3,1,2,47,40,1024); 	// Pi3B+(a020d3 Sony, UK)
-		  $9020e0  : cpu_rev:=RPI_SetInfo(cpu_rev,'3A+',1.0,1,2,47,40, 512); 	// Pi3A+(9020e0 Sony, UK)
-// 	RPI_SetInfo(cpurevs,desc:string; cpurev,I2Cbusnr,gpioidx,slednr,pincnt:byte;memsizMB:word)
-		  else LOG_Writeln(LOG_ERROR,'Get_CPU_INFO_Init: (0x'+Hex(lw,8)+') unknown rev:'+cpu_rev+': RPI not supported');
-        end; // case   
-      end else Log_Writeln(LOG_ERROR,'Get_CPU_INFO_Init: Rev:'+cpu_rev+' Hardware:'+cpu_hw+' Processor:'+cpu_proc+' no known platform'); *)
-//    writeln(cpu_rev_num);	 
-
+//    writeln(cpu_rev_num);
     end;
 	ts.free;   	
   {$ENDIF}
@@ -7483,30 +7655,39 @@ begin if (HWPin>=1) and (HWPin<=max_pins_c) then RPIHDR_Desc[HWPin]:=copy(desc,1
 
 function  RPI_mmap_get_info (modus:longint)  : longword;
 // https://github.com/raspberrypi/userland/blob/master/host_applications/linux/libs/bcm_host/bcm_host.c
-var valu:longword; li:longint; sh:string;
+var valu:longword; li,ofs:longint; sh:string;
 begin 
   valu:=0;
   case modus of
 	 1,2 : valu:=PAGE_SIZE;
-	 3	 : begin // e.g. for ZeroW: 7e0000002000000002000000
-			 call_external_prog(LOG_NONE,'xxd -ps /proc/device-tree/soc/ranges',sh);
-			 if not Str2Num('$'+copy(sh,9,8),valu) then	// $20000000
+	 3	 : begin // get peri base from device tree
+// e.g. for ZeroW:	7e0000002000000002000000...
+//		3B+:		7e0000003f00000001000000400000004000000000001000
+//		4B:			7e00000000000000fe000000018000007c00000000000000fc000000020000004000000000000000ff80000000800000
+			 call_external_prog(LOG_NONE,'xxd -ps -c250 /proc/device-tree/soc/ranges',sh);
+			 ofs:=8;
+			 if (Upper(RPI_hw)='BCM2711') then ofs:=16;	// rpi4
+//writeln('pbase: '+sh);
+			 if not Str2Num('$'+copy(sh,ofs+1,8),valu) then valu:=0;		// $20000000
+			 if (valu=0) then
 			 begin // old variant
 			   valu:=BCM2709_PBASE; // for BCM2709 and BCM2835
 			   if (Upper(RPI_hw)='BCM2708') then valu:=BCM2708_PBASE;	// for old RPI
+			   if (Upper(RPI_hw)='BCM2711') then valu:=BCM2711_PBASE;	// rpi4
 			 end;
-//			 writeln('PBase: 0x',Hex(valu,8));		 
+//			 writeln('PBase: 0x',HexStr(valu,8));		 
 		   end;
 	 4   : begin {$IFDEF UNIX} valu:=1; {$ELSE} valu:=0; {$ENDIF} end;      (* if run_on_unix ->1 else 0 *)
 	 5   : if (Upper({$i %FPCTARGETCPU%})='ARM') then valu:=1 else valu:=0; (* if run_on_ARM  ->1 else 0 *)
-	 6	 : begin valu:=1; end;					(* if RPI_Piggyback_board_available -> 1 dummy, for future use *)
+	 6	 : begin valu:=1; end;								// if RPI_Piggyback_board_available -> 1 dummy, for future use 
 	 7   : if ((RPI_mmap_get_info(5)=1) and 
 	           ((Upper(RPI_hw)='BCM2708') or
-	            (Upper(RPI_hw)='BCM2835') or 								(* new in Linux raspberrypi 4.9.11-v7+ #971 SMP Mon Feb 20 20:44:55 GMT 2017 armv7l GNU/Linux *) 
+	            (Upper(RPI_hw)='BCM2835') or 				// new in Linux raspberrypi 4.9.11-v7+ #971 SMP Mon Feb 20 20:44:55 GMT 2017 armv7l GNU/Linux 
 			    (Upper(RPI_hw)='BCM2836') or 
 			    (Upper(RPI_hw)='BCM2837') or 
-			    (Upper(RPI_hw)='BCM2709'))) then valu:=1;		   			(* runs on known rpi HW *)  
-	 8	 : begin valu:=1; end;												(* if PiFaceBoard_board_available -> 1 dummy, for future use *)
+			 	(Upper(RPI_hw)='BCM2711') or 				// rpi4
+			    (Upper(RPI_hw)='BCM2709'))) then valu:=1;	// runs on known rpi HW
+	 8	 : begin valu:=1; end;								// if PiFaceBoard_board_available -> 1 dummy, for future use *)
 	 9   : begin 
 	 	     call_external_prog(LOG_NONE,'uname -v',sh); 						// e.g. #970 SMP Mon Feb 20 19:18:29 GMT 2017
 	 	     sh:=Select_Item(sh,' ','',1);										// #970
@@ -7528,7 +7709,7 @@ begin
   begin
    call_external_prog(LOG_NONE,'xxd -ps '+node,nodereturn);
    if not Str2Num('$'+GetHexChar(nodereturn),res) then res:=-1; 
-// nodereturn:=StrHex(nodereturn); // if return is ASCII text
+// nodereturn:=StrHexStr(nodereturn); // if return is ASCII text
   end;
   RPI_BCM2835_GetNodeValue:=res;
 end;
@@ -7569,19 +7750,19 @@ begin
 	p[4]:=0;						// req_resp_size
 	Move(tag_data^,p[5],buf_size);	// Move(src^, dest^, size);
 	p[5+(buf_size div 4)]:=TAG_PROPERTY_END;
-//	for n:=0 to (5+(buf_size div 4)) do writeln(n:2,'. ',Hex(p[n],8)); writeln;	
+//	for n:=0 to (5+(buf_size div 4)) do writeln(n:2,'. ',HexStr(p[n],8)); writeln;	
 {$RANGECHECKS OFF} 				
 	if (fpioctl(rpi_fw_api.hndl,IOCTL_TAG_PROPERTY,addr(p[0]))<>-1) then
 	begin
 	  if (p[1]=TAG_STATUS_SUCCESS) then
 	  begin
-//		for n:=0 to (5+(buf_size div 4)) do writeln(n:2,'. ',Hex(p[n],8));	
+//		for n:=0 to (5+(buf_size div 4)) do writeln(n:2,'. ',HexStr(p[n],8));	
 		Move(p[5],tag_data^,buf_size);
 		res:=p[4] and $ff;
-	  end else LOG_Writeln(LOG_ERROR,'RPI_FW_property: firmware returned 0x'+Hex(p[1],8));		
+	  end else LOG_Writeln(LOG_ERROR,'RPI_FW_property: firmware returned 0x'+HexStr(p[1],8));		
 	end else LOG_Writeln(LOG_ERROR,'RPI_FW_property: ioctl: IOCTL_TAG_PROPERTY: '+LNX_ErrDesc(fpgeterrno));  
 {$RANGECHECKS ON}
-  end; // else LOG_Writeln(LOG_ERROR,'RPI_FW_property['+Hex(req,2)+'/0x'+Hex(tag,8)+']: device not opened '+rpi_fw_dev+' use InitRPIfw flag at RPI_HW_Start');
+  end; // else LOG_Writeln(LOG_ERROR,'RPI_FW_property['+HexStr(req,2)+'/0x'+HexStr(tag,8)+']: device not opened '+rpi_fw_dev+' use InitRPIfw flag at RPI_HW_Start');
   RPI_FW_property:=res;
 end;
 
@@ -7589,7 +7770,7 @@ function  MACpretty(macstr:string):string;
 var n:longint; sh,MAChexStr:string;
 begin
   sh:=''; MAChexStr:=StrHex(macstr);
-  for n:=1 to Length(MAChexStr) do sh:=sh+Hex(ord(MAChexStr[n]),2)+':';
+  for n:=1 to Length(MAChexStr) do sh:=sh+HexStr(ord(MAChexStr[n]),2)+':';
   MACpretty:=CSV_RemLastSep(sh,':');
 end;
 
@@ -7608,7 +7789,7 @@ begin
 			begin
 			  p[0]:= swap(Hi(p[0])) or (swap(Lo(p[0])) shl 16);
 			  p[1]:= swap(Lo(p[1]));
-			  FWinfo:=MACpretty(Hex(p[0],8)+copy(Hex(p[1],8),8+1-bcnt*2,bcnt*2));
+			  FWinfo:=MACpretty(HexStr(p[0],8)+copy(HexStr(p[1],8),8+1-bcnt*2,bcnt*2));
 			end;
 		TAG_GET_FIRMWARE_REVISION:
 			begin
@@ -7616,12 +7797,12 @@ begin
 			end;
 		TAG_GET_CLOCK_RATE:
 			begin
-			  FWInfo:='ClockID 0x'+Hex(p[0],8)+' @ '+Num2Str(p[1],0)+'Hz';
+			  FWInfo:='ClockID 0x'+HexStr(p[0],8)+' @ '+Num2Str(p[1],0)+'Hz';
 			end;
 	  else 	begin
 	  		  FWinfo:='';
-	  		  if bcnt>0 then FWinfo:=FWinfo+copy(Hex(p[wcnt],8),8+1-bcnt*2,bcnt*2);
-			  for n:=wcnt downto 1 do FWinfo:=FWinfo+Hex(p[n-1],8);
+	  		  if bcnt>0 then FWinfo:=FWinfo+copy(HexStr(p[wcnt],8),8+1-bcnt*2,bcnt*2);
+			  for n:=wcnt downto 1 do FWinfo:=FWinfo+HexStr(p[n-1],8);
 	  		end;
 	end; // case
   end;
@@ -7639,7 +7820,7 @@ var i:longint; p:array[0..mm] of longword; lw:longword; info:string; // dt1,dt2,
     begin
 	  writeln(msg+'(',cnt,'byte):');
       _cnt:=(cnt div 4); if (cnt mod 4)>0 then inc(_cnt);
-	  for _n:=1 to _cnt do writeln(_n:4,'. 0x',Hex(p[_n-1],8));
+	  for _n:=1 to _cnt do writeln(_n:4,'. 0x',HexStr(p[_n-1],8));
     end;	
   end;
 
@@ -7663,16 +7844,16 @@ begin
   if RPI_FW_Info(TAG_STATUS_REQUEST,TAG_GET_CLOCK_RATE,info) then writeln(info);writeln;
 
   if RPI_FW_property(TAG_STATUS_REQUEST,TAG_GET_TEMPERATURE,addr(p),8)>0
-	then writeln('temp: 0x',Hex(p[1],8),' ',(p[1]/1000):5:2,' celsius'); 
+	then writeln('temp: 0x',HexStr(p[1],8),' ',(p[1]/1000):5:2,' celsius'); 
   
   if RPI_FW_property(TAG_STATUS_REQUEST,TAG_GET_MAX_TEMPERATURE,addr(p),8)>0
-	then writeln('tmax: 0x',Hex(p[1],8),' ',(p[1]/1000):5:2,' celsius');
+	then writeln('tmax: 0x',HexStr(p[1],8),' ',(p[1]/1000):5:2,' celsius');
 	
   if RPI_FW_property(TAG_STATUS_REQUEST,TAG_GET_VC_MEMORY,addr(p),8)>0
-	then writeln('VCmem:  0x',Hex(p[1],8),' ',p[1]:10,' Bytes @ 0x'+Hex(p[0],8));
+	then writeln('VCmem:  0x',HexStr(p[1],8),' ',p[1]:10,' Bytes @ 0x'+HexStr(p[0],8));
 	
   if RPI_FW_property(TAG_STATUS_REQUEST,TAG_GET_ARM_MEMORY,addr(p),8)>0
-	then writeln('ARMmem: 0x',Hex(p[1],8),' ',p[1]:10,' Bytes @ 0x'+Hex(p[0],8));
+	then writeln('ARMmem: 0x',HexStr(p[1],8),' ',p[1]:10,' Bytes @ 0x'+HexStr(p[0],8));
 	
   p[0]:=$3; // get ARM clock
   i:=RPI_FW_property(TAG_STATUS_REQUEST,TAG_GET_CLOCK_RATE,addr(p),sizeof(p)); 		
@@ -7708,17 +7889,17 @@ procedure RPI_MBX_msgshow(msgptr:RPI_MBX_msgPTR_t);
 begin
   with msgptr^ do
   begin
-	writeln('  msg_size:      0x',Hex(msg_size,8));
-	writeln('  request_code:  0x',Hex(request_code,8));
+	writeln('  msg_size:      0x',HexStr(msg_size,8));
+	writeln('  request_code:  0x',HexStr(request_code,8));
 //	with tag do
 	begin
-	  writeln('    tag_id:      0x',Hex(tag_id,8));
-	  writeln('    buffer_size: 0x',Hex(buffer_size,8));
-	  writeln('    data_size:   0x',Hex(data_size,8)); 
-	  writeln('    dev_id:      0x',Hex(dev_id,8)); 
-	  writeln('    val:         0x',Hex(val,8)); 		
+	  writeln('    tag_id:      0x',HexStr(tag_id,8));
+	  writeln('    buffer_size: 0x',HexStr(buffer_size,8));
+	  writeln('    data_size:   0x',HexStr(data_size,8)); 
+	  writeln('    dev_id:      0x',HexStr(dev_id,8)); 
+	  writeln('    val:         0x',HexStr(val,8)); 		
 	end; // with
-	writeln('  end_tag:       0x',Hex(end_tag,8));
+	writeln('  end_tag:       0x',HexStr(end_tag,8));
   end; // with
 end;
 
@@ -7770,15 +7951,15 @@ begin
 	  	delay_msec(1);
 	  end;
 	  if _ok then _value:=BCM_GETREG(MBX_READ0);
-writeln('read1: 0x',Hex(_value,8),' ',_ok);
+writeln('read1: 0x',HexStr(_value,8),' ',_ok);
 	until ((_value and $f)=channel) or (not _ok);
 	if (not _ok) then
 	begin
-	  LOG_Writeln(LOG_ERROR,'RPI_MBX_read['+Hex(channel,2)+']: timeout');
+	  LOG_Writeln(LOG_ERROR,'RPI_MBX_read['+HexStr(channel,2)+']: timeout');
 	  _value:=MB_CHANNEL_ERROR;
 	end else _value:=_value and (not $f); // _value:=_value shr 4; 
-  end else LOG_Writeln(LOG_ERROR,'RPI_MBX_read['+Hex(channel,2)+']: wrong channel 0x'+Hex(channel,2));
-writeln('read2: 0x',Hex(_value,8),' ',_ok);
+  end else LOG_Writeln(LOG_ERROR,'RPI_MBX_read['+HexStr(channel,2)+']: wrong channel 0x'+HexStr(channel,2));
+writeln('read2: 0x',HexStr(_value,8),' ',_ok);
   RPI_MBX_read:=_value;
 end;
 
@@ -7788,7 +7969,7 @@ const RPI3_MAILBOX_TIMEOUT=1000;
 var _ok:boolean; timo:TDateTime;
 begin
   _ok:=false;
-  writeln('write0: value:0x',Hex(value,8));
+  writeln('write0: value:0x',HexStr(value,8));
   if (channel<=MB_CHANNEL_GPU) then
   begin // GPU_MEM_BASE
 // ??????????? #define BUS_ADDRESS(phys) (((phys) & ~0xC0000000) | GPU_MEM_BASE) 
@@ -7803,10 +7984,10 @@ begin
 	  delay_msec(1);
 	end;
 	
-writeln('write1: value:0x',Hex(value,8));
+writeln('write1: value:0x',HexStr(value,8));
 	if _ok 	then BCM_SETREG(MBX_WRITE1,value) 
-			else LOG_Writeln(LOG_ERROR,'RPI_MBX_write['+Hex(channel,2)+']: timeout');
-  end else LOG_Writeln(LOG_ERROR,'RPI_MBX_write['+Hex(channel,2)+']: wrong channel 0x'+Hex(channel,2));
+			else LOG_Writeln(LOG_ERROR,'RPI_MBX_write['+HexStr(channel,2)+']: timeout');
+  end else LOG_Writeln(LOG_ERROR,'RPI_MBX_write['+HexStr(channel,2)+']: wrong channel 0x'+HexStr(channel,2));
 writeln('write2: ',_ok);
   RPI_MBX_write:=_ok;
 end;
@@ -7827,10 +8008,10 @@ RPI_MBX_msgshow(@msg); writeln;
 	  begin
 	  	value:=RPI_MBX_read(channel);
 	  	_ok:=(value<>MB_CHANNEL_ERROR);
-	  	if not _ok then LOG_Writeln(LOG_ERROR,'RPI_MBX_Call['+Hex(channel,2)+']: read timeout');
-	  end else LOG_Writeln(LOG_ERROR,'RPI_MBX_Call['+Hex(channel,2)+']: can not write');
-	end else LOG_Writeln(LOG_ERROR,'RPI_MBX_Call['+Hex(channel,2)+']: not empty timeout');
-  end else  LOG_Writeln(LOG_ERROR,'RPI_MBX_Call['+Hex(channel,2)+']: msgptr not aligned');
+	  	if not _ok then LOG_Writeln(LOG_ERROR,'RPI_MBX_Call['+HexStr(channel,2)+']: read timeout');
+	  end else LOG_Writeln(LOG_ERROR,'RPI_MBX_Call['+HexStr(channel,2)+']: can not write');
+	end else LOG_Writeln(LOG_ERROR,'RPI_MBX_Call['+HexStr(channel,2)+']: not empty timeout');
+  end else  LOG_Writeln(LOG_ERROR,'RPI_MBX_Call['+HexStr(channel,2)+']: msgptr not aligned');
   RPI_MBX_Call:=_ok;
 end;
 
@@ -7886,19 +8067,19 @@ begin
   	0);						// empty data field  	
 
 //RPI_MBX_msgshow(@msg); writeln;
-writeln('####1  0x',Hex(addr(msg),8),' ',Hex(GPU_MEM_BASE,8));
-writeln('stat0  0x',Hex(BCM_REGAdr(MBX_STATUS0),8),' read0  0x',Hex(BCM_REGAdr(MBX_READ0),8));  
-writeln('stat1  0x',Hex(BCM_REGAdr(MBX_STATUS1),8),' write1 0x',Hex(BCM_REGAdr(MBX_WRITE1),8)); 
+writeln('####1  0x',HexStr(addr(msg)),' ',HexStr(GPU_MEM_BASE,8));
+writeln('stat0  0x',HexStr(BCM_REGAdr(MBX_STATUS0),8),' read0  0x',HexStr(BCM_REGAdr(MBX_READ0),8));  
+writeln('stat1  0x',HexStr(BCM_REGAdr(MBX_STATUS1),8),' write1 0x',HexStr(BCM_REGAdr(MBX_WRITE1),8)); 
 
   _ok:=RPI_MBX_Call(MB_CHANNEL_TAGS,@msg,lw);
 if _ok then
 begin
-  writeln('####2  0x',Hex(lw,8),' ',Hex(msg.request_code,8),' ',_ok);
+  writeln('####2  0x',HexStr(lw,8),' ',HexStr(msg.request_code,8),' ',_ok);
   RPI_MBX_msgshow(@msg); 
 end;
   if (msg.request_code=MB_CHANNEL_SUCCESS) then
   begin
-	writeln('CPU speed: ',msg.val,' lw:0x',Hex(lw,8));	
+	writeln('CPU speed: ',msg.val,' lw:0x',HexStr(lw,8));	
   end;
 writeln;
 //if bcm2835_vc_get_temperature(lw) 	then writeln('GPUtemp: ',lw);
@@ -7961,7 +8142,7 @@ function  BCM_REGAdr(idx:longword):longword; begin BCM_REGAdr:=RPI_get_GPIO_BASE
 
 function  BCM_GETREG (regidx:longword):longword; 
 begin 
-//writeln('Boom: 0x',Hex(regidx,8),' ',regidx);
+//writeln('Boom: 0x',HexStr(regidx,8),' ',regidx);
   BCM_GETREG:=mmap_arr^[regidx]; 
 end;
 
@@ -7994,7 +8175,7 @@ begin
   dt2:=now; for i:=1 to loops do lw1:=mmap_arr^[APMIRQCLRACK]; // 0x544D5241
   dt3:=now; 
   writeln('mem:  ',MilliSecondsBetween(dt2,dt1),'ms');
-  writeln('mmap: ',MilliSecondsBetween(dt3,dt2),'ms',' APMIRQCLRACK Value: 0x',Hex(lw1,4));
+  writeln('mmap: ',MilliSecondsBetween(dt3,dt2),'ms',' APMIRQCLRACK Value: 0x',HexStr(lw1,4));
 end;
 
 function  MMAP_start(gpioonly:boolean):integer;
@@ -8019,7 +8200,8 @@ begin
       if mem_fd>=0 then 
       begin // mmap GPIO
 	    rslt:=-3;
-//writeln('MMAP_start: PSIZ:0x',Hex(BCM270x_PSIZ_Byte,8),' Base: 0x',Hex(RPI_get_GPIO_BASE,8));
+//writeln('MMAP_start: PSIZ:0x',HexStr(BCM270x_PSIZ_Byte,8),' Base: 0x',HexStr(RPI_get_GPIO_BASE,8));
+//MMAP_start: PSIZ:0x02000000 Base: 0xFE000000
 		mmap_arr:=fpMMap(pointer(0),BCM270x_PSIZ_Byte,
 		                 (PROT_READ or PROT_WRITE),
 						 (MAP_SHARED {or MAP_FIXED}),
@@ -8034,7 +8216,7 @@ begin
 		  lw:=BCM_GETREG(APMIRQCLRACK);
 // When reading this register it returns 0x544D5241 which is the ASCII reversed value for "ARMT".
 		  if (lw=$544D5241) then rslt:=0 // ok
-		  else LOG_Writeln(LOG_ERROR,'MMAP_start: APMIRQCLRACK 0x'+Hex(lw,8));
+		  else LOG_Writeln(LOG_ERROR,'MMAP_start: APMIRQCLRACK 0x'+HexStr(lw,8));
 //writeln('MMAP_start: ',rslt);
 		end;
       end;
@@ -8107,6 +8289,59 @@ begin
 		   (gpio=GPIO_FRQ42_CLK1) or (gpio=GPIO_FRQ43_CLK2) or (gpio=GPIO_FRQ42_CLK1));
   GPIO_FCTOK:=_ok;
 end;
+
+function  GPIO_PortCapabilityFlags(gpio:longint):s_port_flags;
+var flgs:s_port_flags;
+begin
+  if GPIO_FCTOK(gpio,[]) then
+  begin // valid GPIO num
+	flgs:=[INPUT,OUTPUT,PullUP,PullDOWN,RisingEDGE,FallingEDGE,PWMSW];
+  	if GPIO_FCTOK(gpio,[PWMHW])  then flgs:=flgs+[PWMHW];
+  	if GPIO_FCTOK(gpio,[FRQHW])  then flgs:=flgs+[FRQHW];
+  end else flgs:=[];
+//writeln('GPIO_PortCapabilityFlags:',gpio,' ',GPIO_PortFlags2String(flgs));
+  GPIO_PortCapabilityFlags:=flgs;
+end;
+
+function  GPIO_String2PortFlags(flagstring:string):s_port_flags;
+var i,j:longint; flagsOUT:s_port_flags; sh:string;
+begin
+  flagsOUT:=[]; flagstring:=Trimme(flagstring,4);
+  for i:=1 to Anz_Item(flagstring,' ','') do
+  begin
+    sh:=Select_Item(flagstring,' ','',i);
+	j:=ord(Low(t_port_flags));
+	while (j<=ord(High(t_port_flags))) do 
+	begin
+      if (Upper(GetEnumName(TypeInfo(t_port_flags),j))=Upper(sh)) then 
+      begin
+      	flagsOUT:=flagsOUT+[t_port_flags(j)]; 
+      	j:=ord(High(t_port_flags));
+      end;
+      inc(j);
+    end;
+  end;
+  GPIO_String2PortFlags:=flagsOUT;
+end;
+
+(*function  GPIO_PortFlags(flagstring:string; flagsALLOW:s_port_flags; var flagsOUT:s_port_flags):boolean;
+var _ok:boolean; j:t_port_flags; i:longint; sh:string;
+begin
+  _ok:=false; flagsOUT:=[]; flagstring:=Trimme(flagstring,4);
+  for i:=1 to Anz_Item(flagstring,' ','') do
+  begin
+    sh:=Select_Item(flagstring,' ','',i);
+	for j IN flagsALLOW do 
+	begin
+      if (Upper(GetEnumName(TypeInfo(t_port_flags),ord(t_port_flags(j))))=Upper(sh)) then 
+      begin
+      	_ok:=true;
+      	flagsOUT:=flagsOUT+[j];
+      end;
+    end;
+  end;
+  GPIO_PortFlags:=_ok;
+end;*)
 
 function GPIO_get_AltDesc(gpio:longint; altpin:byte; dfltifempty:string):string;
 // datasheet page 102 
@@ -8320,10 +8555,10 @@ begin
 	Q4LP_Core0IrqSrc+3:		s:='C'+Num2Str(longword(regidx-Q4LP_Core0IrqSrc),0)+'IRQSRC';
 	Q4LP_Core0FIQSrc..
 	Q4LP_Core0FIQSrc+3:		s:='C'+Num2Str(longword(regidx-Q4LP_Core0FIQSrc),0)+'FIQSRC';
-	else 					s:='['+Hex(RPI_get_GPIO_BASE+(regidx*BCM270x_RegSizInByte),8)+']'; 
+	else 					s:='['+HexStr(RPI_get_GPIO_BASE+(regidx*BCM270x_RegSizInByte),8)+']'; 
 						  //s:='Reg['+Num2Str(longword(regidx),0)+']';
   end; // case
-  s:=Get_FixedStringLen(s,wid1,false)+': '+Bin(regcontent,32)+' 0x'+Hex(regcontent,8);  
+  s:=Get_FixedStringLen(s,wid1,false)+': '+Bin(regcontent,32)+' 0x'+HexStr(regcontent,8);  
   get_reg_desc:=s;
 end;
 
@@ -8430,8 +8665,8 @@ begin
     HAT_INFO_tl.add(Get_FixedStringLen('vendor:',lgt,false)+vendor);
     HAT_INFO_tl.add(Get_FixedStringLen('product:',lgt,false)+product);
     if snr<>'' then HAT_INFO_tl.add(Get_FixedStringLen('snr:',lgt,false)+snr);
-    HAT_INFO_tl.add(Get_FixedStringLen('prod_id:',lgt,false)+'0x'+Hex(product_id, 4));
-    HAT_INFO_tl.add(Get_FixedStringLen('prod_ver:',lgt,false)+'0x'+Hex(product_ver,4));
+    HAT_INFO_tl.add(Get_FixedStringLen('prod_id:',lgt,false)+'0x'+HexStr(product_id, 4));
+    HAT_INFO_tl.add(Get_FixedStringLen('prod_ver:',lgt,false)+'0x'+HexStr(product_ver,4));
   end; // with
 end;
 procedure HAT_ShowStruct;
@@ -8470,8 +8705,8 @@ begin
 	la('# Vendor info');
 	la('');
 	la('product_uuid '+_uuid);
-	la('product_id 0x'+ Hex(prodid, 4));
-	la('product_ver 0x'+Hex(prodver,4));
+	la('product_id 0x'+ HexStr(prodid, 4));
+	la('product_ver 0x'+HexStr(prodver,4));
 	la('vendor "'+ copy(_vendor, 1,255)+'"');
 	la('product "'+copy(_product,1,255)+'"');		
 	la('');
@@ -8623,12 +8858,12 @@ procedure show_regs(desc:string; ofs,startidx,endidx,mode:longword; showhdr:bool
 var idx:longword; skip:boolean;
 begin
   skip:=((mode=2) and (RPI_hw='BCM2708'));
-  writeln(Get_FixedStringLen(desc,wid1,false)+': ',Hex(RPI_get_GPIO_BASE+ofs,8));
+  writeln(Get_FixedStringLen(desc,wid1,false)+': ',HexStr(RPI_get_GPIO_BASE+ofs,8));
   if showhdr then
   begin
     write  (Get_FixedStringLen('Adr(1F-00)',wid1,false)+': ');
     for idx:=31 downto 0 do 
-      begin write(Hex((idx mod $10),1)); if (idx mod 4)=0 then write(' '); end; writeln;
+      begin write(HexStr((idx mod $10),1)); if (idx mod 4)=0 then write(' '); end; writeln;
   end;
   if (not skip) then
   begin
@@ -8862,7 +9097,7 @@ begin
   PWM_GetDRVal:=res;
 end;
 
-procedure pwm_WriteRange(gpio,range:longword);
+procedure PWM_WriteRange(gpio,range:longword);
 begin
   case gpio of 
     GPIO_PWM0,GPIO_PWM0A0: BCM_SETREG(PWM0RNG,range); // HW PWM
@@ -8870,7 +9105,7 @@ begin
   end; // case
 end;
 
-procedure pwm_Write(gpio,value:longword);
+procedure PWM_Write(gpio,value:longword);
 begin
   case gpio of  
     GPIO_PWM0,GPIO_PWM0A0: BCM_SETREG(PWM0DAT,value); // HW PWM
@@ -8878,34 +9113,37 @@ begin
   end; // case
 end;
 
-procedure pwm_Write(var GPIO_struct:GPIO_struct_t; value:longword); // value: 0-(pwm_dutyrange-1)
+procedure PWM_Write(var GPIO_struct:GPIO_struct_t; value:longword); // value: 0-(pwm_dutyrange-1)
 begin
   with GPIO_struct do
   begin
-    PWM.pwm_value:=pwm_GetMODVal(value,PWM.pwm_dutyrange); //value: 0-(pwm_dutyrange-1)
-	PWM.pwm_dutycycle_us:=pwm_GetDCSWVal(PWM.pwm_period_us,PWM.pwm_value,PWM.pwm_dutyrange);	
-	PWM.pwm_restcycle_us:=0; 
-	if PWM.pwm_period_us>PWM.pwm_dutycycle_us 
-	  then PWM.pwm_restcycle_us:=PWM.pwm_period_us-PWM.pwm_dutycycle_us
-	  else PWM.pwm_dutycycle_us:=PWM.pwm_period_us;
-	PWM.pwm_period_ms:=trunc(PWM.pwm_period_us/1000); 
-	if PWM.pwm_period_ms<=0 then PWM.pwm_period_ms:=1;
-	PWM.pwm_sigalt:=true;
-(*  writeln('pwm_Write:'+
-		' GPIO'+Num2Str(gpio,0)+
-		' value:'+Num2Str(PWM.pwm_value,0)+
-		' dtyrange:'+Num2Str(PWM.pwm_dutyrange,0)+
-		' dtyperiod(us):'+Num2Str(PWM.pwm_period_us,0)+
-		' dtycycl(us):'+Num2Str(PWM.pwm_dutycycle_us,0)+
-		' dtyrest(us):'+Num2Str(PWM.pwm_restcycle_us,0)
-		);*)
-    if (PWMHW IN portflags) then
+	with PWM do
 	begin
-      case gpio of	  
-         GPIO_PWM0,GPIO_PWM0A0: BCM_SETREG(PWM0DAT,PWM.pwm_value,false,false); // HW PWM
-	     GPIO_PWM1,GPIO_PWM1A0: BCM_SETREG(PWM1DAT,PWM.pwm_value,false,false); // HW PWM
-      end; // case
-	end;
+      pwm_value:=pwm_GetMODVal(value,pwm_dutyrange); //value: 0-(pwm_dutyrange-1)
+	  pwm_dutycycle_us:=pwm_GetDCSWVal(pwm_period_us,pwm_value,pwm_dutyrange);	
+	  pwm_restcycle_us:=0; 
+	  if pwm_period_us>pwm_dutycycle_us 
+	  	then pwm_restcycle_us:=pwm_period_us-pwm_dutycycle_us
+	  	else pwm_dutycycle_us:=pwm_period_us;
+	  pwm_period_ms:=trunc(pwm_period_us/1000); 
+	  if pwm_period_ms<=0 then pwm_period_ms:=1;
+	  pwm_sigalt:=true;
+(*  writeln('PWM_Write:'+
+		' GPIO'+			Num2Str(gpio,0)+
+		' value:'+			Num2Str(pwm_value,0)+
+		' dtyrange:'+		Num2Str(pwm_dutyrange,0)+
+		' dtyperiod(us):'+	Num2Str(pwm_period_us,0)+
+		' dtycycl(us):'+	Num2Str(pwm_dutycycle_us,0)+
+		' dtyrest(us):'+	Num2Str(pwm_restcycle_us,0)
+		); *)
+      if (PWMHW IN portflags) then
+	  begin
+      	case gpio of	  
+         GPIO_PWM0,GPIO_PWM0A0: BCM_SETREG(PWM0DAT,pwm_value,false,false); // HW PWM
+	     GPIO_PWM1,GPIO_PWM1A0: BCM_SETREG(PWM1DAT,pwm_value,false,false); // HW PWM
+      	end; // case
+	  end;
+  	end; // with
   end; // with  
 end; 
 
@@ -9084,25 +9322,25 @@ var pwm_control:longword; ok:boolean;
 begin
 //writeln('PWM_ClkWrite: '+Num2Str(DIVI,0));
   pwm_control:=BCM_GETREG(PWMCTL);				// save register content 
-//writeln('PWMCTL: 0x',Hex(pwm_control,8));
+//writeln('PWMCTL: 0x',HexStr(pwm_control,8));
   BCM_SETREG(PWMCTL,0,false,false);  			// stop PWM 
   ok:=CLK_Write(regctlidx,regdividx,DIVI,0,$01);// $01: clock src from osci
   BCM_SETREG(PWMCTL,pwm_control,false,false); 	// restore PWM_CONTROL	
   PWM_ClkWrite:=ok;
 end;
 
-function  PWM_GetMinFreq(dutycycle:longword):longword; 
-var lw:longword; 
+function  PWM_GetMinFreq(dutycycle:longword):real; 
+var r:real; 
 begin
-  if dutycycle<>0 then lw:=round(CLK_GetFreq(1)/(PWM_DIVImax*dutycycle)) else lw:=0;
-  PWM_GetMinFreq:=lw;
+  if dutycycle<>0 then r:=(CLK_GetFreq(1)/(PWM_DIVImax*dutycycle)) else r:=0;
+  PWM_GetMinFreq:=r;
 end;
 
-function  PWM_GetMaxFreq(dutycycle:longword):longword;
-var lw:longword;   
+function  PWM_GetMaxFreq(dutycycle:longword):real;
+var r:real;   
 begin
-  if dutycycle<>0 then lw:=round(CLK_GetFreq(1)/(PWM_DIVImin*dutycycle)) else lw:=0;
-  PWM_GetMaxFreq:=lw;
+  if dutycycle<>0 then r:=(CLK_GetFreq(1)/(PWM_DIVImin*dutycycle)) else r:=0;
+  PWM_GetMaxFreq:=r;
 end;
 
 function  PWM_GetMaxDtyC(freq:real):longword;
@@ -9124,45 +9362,48 @@ begin
   PWM_GetDtyRangeVal:=drlw;
 end;
 
-procedure pwm_SetClock(var GPIO_struct:GPIO_struct_t); 
+procedure PWM_setClock(var GPIO_struct:GPIO_struct_t); 
 // same clock for PWM0 and PWM1. Needs only to be set once
-var DIVI:longword;
+var DIVI:longword; r:real;
 begin
   with GPIO_struct do
   begin
-    if (PWMHW IN portflags) then
-	begin
-      DIVI:=PWM_DIVImin;  // default
-      if ((PWM.pwm_freq_Hz*PWM.pwm_dutyrange)<>0) 
-	    then DIVI:=round(CLK_GetFreq(1)/(PWM.pwm_freq_Hz*PWM.pwm_dutyrange)); 
-//    writeln('pwm_SetClock0: ',CLK_GetFreq(1):0:5,' freq(Hz):',PWM.pwm_freq_Hz:0:5,' dty:',PWM.pwm_dutyrange:0,' DIVI:',DIVI);
-	  if (DIVI<PWM_DIVImin) or (DIVI>PWM_DIVImax) then 
+    with PWM do
+    begin
+	  if (PWMHW IN portflags) then
 	  begin
-	    LOG_Writeln(LOG_ERROR,'pwm_SetClock DIVI:'+Num2Str(DIVI,0)+' desired PWM-Freq. will not be reached. use smaller duty cycle');
-	    if (DIVI<PWM_DIVImin) then DIVI:=PWM_DIVImin else DIVI:=PWM_DIVImax;
+      	DIVI:=PWM_DIVImin;  // default
+      	r:=pwm_freq_Hz*pwm_dutyrange;
+      	if (r>0) then DIVI:=round(CLK_GetFreq(1)/r) else DIVI:=0; 
+//    	writeln('PWM_setClock0: ',CLK_GetFreq(1):0:5,' freq(Hz):',pwm_freq_Hz:0:5,' dty:',pwm_dutyrange:0,' DIVI:',DIVI);
+	  	if (DIVI<PWM_DIVImin) or (DIVI>PWM_DIVImax) then 
+	  	begin
+	      LOG_Writeln(LOG_ERROR,'PWM_setClock['+Num2Str(gpio,0)+'|'+Num2Str(DIVI,0)+'/'+Num2Str(PWM_DIVImin,0)+'/'+Num2Str(PWM_DIVImax,0)+']: desired PWM-Freq '+Num2Str(pwm_freq_Hz,0,2)+'Hz will not be set. use other duty cycle');
+	      if (DIVI<PWM_DIVImin) then DIVI:=PWM_DIVImin else DIVI:=PWM_DIVImax;
+	  	end;
+//     	writeln('PWM_setClock1: ',DIVI);
+	  	PWM_ClkWrite(PWMCLKCTL,PWMCLKDIV,DIVI);	
 	  end;
-//    writeln('pwm_SetClock1: ',DIVI);
-	  PWM_ClkWrite(PWMCLKCTL,PWMCLKDIV,DIVI);	
-	end;
+	end; // with
   end; // with
 end;
 		
-function  PortFlagsString(flgs:s_port_flags):string;
+function  GPIO_PortFlags2String(flgs:s_port_flags):string;
 var j:t_port_flags; sh:string;
 begin
   sh:=''; 
   for j IN flgs do 
     sh:=sh+GetEnumName(TypeInfo(t_port_flags),ord(t_port_flags(j)))+' ';
-  PortFlagsString:=sh;
+  GPIO_PortFlags2String:=sh;
 end;
 		
 procedure GPIO_ShowStruct(var GPIO_struct:GPIO_struct_t);
 begin
   with GPIO_struct do
   begin 
-    writeln('GPIO_ShowStruct: ',description,' Portflags:',PortFlagsString(portflags),' initok:',initok,' Simulation:',simulation);
+    writeln('GPIO_ShowStruct: ',description,' Portflags:',GPIO_PortFlags2String(portflags),' initok:',initok,' Simulation:',simulation);
 	writeln('HWPin:',HWPin,' GPIO',gpio:0,' nr:',nr:0,' State:',ein);
-	writeln('idxofs_1Bit:0x',Hex(idxofs_1Bit,2),' mask_1Bit:0x',Hex(mask_1Bit,8),' idxofs_3Bit:0x',Hex(idxofs_3Bit,2),' mask_3Bit:0x',Hex(mask_3Bit,8));
+	writeln('idxofs_1Bit:0x',HexStr(idxofs_1Bit,2),' mask_1Bit:0x',HexStr(mask_1Bit,8),' idxofs_3Bit:0x',HexStr(idxofs_3Bit,2),' mask_3Bit:0x',HexStr(mask_3Bit,8));
 	writeln('pwm_mode:',PWM.pwm_mode,' pwm_freq:',PWM.pwm_freq_hz:0:2,' pwm_dutyrange:',PWM.pwm_dutyrange,' value:',PWM.pwm_value,
 	       ' pwm_dutycycle_us:',PWM.pwm_dutycycle_us,' pwm_period_us:',PWM.pwm_period_us);
   end;
@@ -9170,7 +9411,7 @@ end;
 
 procedure  Thread_SetName(name:string);
 const PR_SET_NAME=$0f;
-var   thread_name:string[16];
+var   thread_name:Thread_name_t;
 begin
   thread_name:=copy(name+#$00,1,16); 
   if thread_name<>'' then
@@ -9191,7 +9432,7 @@ begin
 	SAY(LOG_INFO,'ThreadInfo:        '+ThreadInfo);
 //	SAY(LOG_INFO,'ThreadID:          ',TThreadID);
 	SAY(LOG_INFO,'ThreadRunning:     '+Bool2Str(ThreadRunning)+' TermThread: '+Bool2Str(TermThread));
-	SAY(LOG_INFO,'ThreadFunc:      0x'+Hex(ThreadFunc,16));
+	SAY(LOG_INFO,'ThreadFunc:      0x'+HexStr(ThreadFunc));
 	SAY(LOG_INFO,'ThreadTimeOut:     '+FormatDateTime('YYYYMMDD hh:mm:ss.zzz',ThreadTimeOut));
 	SAY(LOG_INFO,'ThreadCmdStr:      '+ThreadCmdStr);
 	SAY(LOG_INFO,'ThreadRetStr:      '+ThreadRetStr);
@@ -9281,11 +9522,11 @@ begin
       if GPIO_HWPWM_capable(gpio) then
 	  begin 
 		regsav:=BCM_GETREG(PWMCTL);			// save ctl register
-//      writeln('PWM_End: PWMCTL 0x',hex(regsav,8));			
+//      writeln('PWM_End: PWMCTL 0x',HexStr(regsav,8));			
 		if GPIO_HWPWM_capable(gpio,0) // // maskout Bits for channel1/2
 		  then regsav:=(regsav and $0000ff00) and (not PWM0_ENABLE)
 		  else regsav:=(regsav and $000000ff) and (not PWM1_ENABLE); 	
-//      writeln('PWM_End: PWMCTL 0x',hex(regsav,8));
+//      writeln('PWM_End: PWMCTL 0x',HexStr(regsav,8));
 		BCM_SETREG(PWMCTL,regsav,false,false); // Disable channel PWM
 	  end;
     end
@@ -9293,38 +9534,56 @@ begin
   end;  // with
 end;
 
-procedure pwm_SetStruct(var GPIO_struct:GPIO_struct_t; mode:byte; freq_Hz:real; dutyrange,startval:longword);
+procedure PWM_SetStruct(var GPIO_struct:GPIO_struct_t; mode:byte; freq_Hz,freq_min,freq_max:real; dutyrange,startval:longword);
 begin
   with GPIO_struct do
   begin
-  	PWM.pwm_mode:=mode; PWM.pwm_freq_hz:=freq_Hz; 
-	with ThreadCtrl do begin TermThread:=true; ThreadRunning:=false; ThreadID:=TThreadID(0); end;
-	if (PWM.pwm_freq_hz<>0) then PWM.pwm_period_us:=round(1000000/PWM.pwm_freq_hz) else PWM.pwm_period_us:=0; 
-	PWM.pwm_dutyrange:=dutyrange; pwm_Write(GPIO_struct,startval);
-(*	PWM.pwm_value:=startval; 
-	PWM.pwm_dutycycle_us:=pwm_GetDCSWVal(PWM.pwm_period_us,PWM.pwm_value,PWM.pwm_dutyrange);
-    if PWM.pwm_period_us>PWM.pwm_dutycycle_us 
-	  then PWM.pwm_restcycle_us:=PWM.pwm_period_us-PWM.pwm_dutycycle_us
-	  else PWM.pwm_dutycycle_us:=PWM.pwm_period_us;
-	PWM.pwm_period_ms:=trunc(PWM.pwm_period_us/1000); 
-	if PWM.pwm_period_ms<=0 then PWM.pwm_period_ms:=1;*)
+    with PWM do
+    begin
+      pwm_mode:=mode;
+      pwm_freq_hz:=freq_Hz; PWM_freq_min:=freq_min; 	PWM_freq_max:=freq_max;
+      if (PWMHW IN portflags) then
+      begin
+		Limits(PWM_freq_min,PWM_GetMinFreq(dutyrange),	PWM_GetMaxFreq(dutyrange));  	
+	  	Limits(PWM_freq_max,PWM_freq_min,				PWM_GetMaxFreq(dutyrange));  	
+	  end
+	  else
+	  begin // SW PWM
+		Limits(PWM_freq_min,10,							100);  	
+	  	Limits(PWM_freq_max,PWM_freq_min,				150); 
+	  end;
+	  Limits(  PWM_freq_hz, PWM_freq_min,				PWM_freq_max);  
+	  with ThreadCtrl do begin TermThread:=true; ThreadRunning:=false; ThreadID:=TThreadID(0); end;
+	  if (pwm_freq_hz<>0) then pwm_period_us:=round(1000000/pwm_freq_hz) else pwm_period_us:=0; 
+	  pwm_dutyrange:=dutyrange; 
+
+//	  PWM_Write(GPIO_struct,startval);
+
+(*	  pwm_value:=startval; 
+	  pwm_dutycycle_us:=pwm_GetDCSWVal(pwm_period_us,pwm_value,pwm_dutyrange);
+      if pwm_period_us>pwm_dutycycle_us 
+	  	then pwm_restcycle_us:=pwm_period_us-pwm_dutycycle_us
+	  	else pwm_dutycycle_us:=pwm_period_us;
+	  pwm_period_ms:=trunc(pwm_period_us/1000); 
+	  if pwm_period_ms<=0 then pwm_period_ms:=1;*)
+	end; // with
   end;
 end;
 
-procedure pwm_SetStruct(var GPIO_struct:GPIO_struct_t); 
+procedure PWM_SetStruct(var GPIO_struct:GPIO_struct_t; mode:byte; freq_Hz:real; dutyrange,startval:longword);
+begin PWM_SetStruct(GPIO_struct,PWM_MS_MODE,freq_Hz,0,0,dutyrange,0); end;
+
+procedure PWM_SetStruct(var GPIO_struct:GPIO_struct_t); 
 //HW-PWM: Mark Space mode // set pwm hw clock div to 32 (19.2Mhz/32 = 600kHz) // Default range of 1024
 //SW-PWM: Mark Space mode // set pwm sw clock to 50Hz // DutyCycle range of 1000 (0-999)
 const dcycl=1000;
+var freq_Hz:real;
 begin 
-  with GPIO_struct do
-  begin
-    if (PWMHW IN portflags)   
-	  then pwm_SetStruct(GPIO_struct,PWM_MS_MODE,PWM_GetMaxFreq(dcycl),dcycl,0)  // set default values for HW PWM0/1
-	  else pwm_SetStruct(GPIO_struct,PWM_MS_MODE, 				   50, dcycl,0); // SW PWM 50Hz; DutyCycle 0-999
-  end;
+  if (PWMHW IN GPIO_struct.portflags) then freq_Hz:=PWM_GetMaxFreq(dcycl) else freq_Hz:=50;
+  PWM_SetStruct(GPIO_struct,PWM_MS_MODE,freq_Hz,dcycl,0);
 end;
 
-function  pwm_Setup(var GPIO_struct:GPIO_struct_t):boolean;
+function  PWM_Setup(var GPIO_struct:GPIO_struct_t):boolean;
 var regsav:longword;
 begin
   with GPIO_struct do
@@ -9338,13 +9597,13 @@ begin
 	      GPIO_PWM0,GPIO_PWM0A0,GPIO_PWM1A0,
 		  GPIO_PWM1 : begin // PWM0:Pin12:GPIO18 PWM1:Pin35:GPIO19 
 					    initok:=true; 
-//				    	writeln('pwm_Setup (HW):'); GPIO_ShowStruct(GPIO_struct);
+//				    	writeln('PWM_Setup (HW):'); GPIO_ShowStruct(GPIO_struct);
 					    GPIO_set_PINMODE(gpio,PWMHW);					  
 						regsav:=BCM_GETREG(PWMCTL);			// save ctl register
 						BCM_SETREG(PWMCTL,0,false,false);  	// stop PWM 
-					    pwm_SetClock      (GPIO_struct); 	// set clock external before pwm_Setup
-//                      writeln('pwm_Setup: PWMCTL 0x',hex(regsav,8));			
-//  					writeln('pwm_Setup: pwm_dutyrange ',PWM.pwm_dutyrange);
+					    PWM_setClock(GPIO_struct);			// set clock external before PWM_Setup
+//                      writeln('PWM_Setup: PWMCTL 0x',HexStr(regsav,8));			
+//  					writeln('PWM_Setup: pwm_dutyrange ',PWM.pwm_dutyrange);
 						if GPIO_HWPWM_capable(gpio,0) then
 						begin
 						  BCM_SETREG(PWM0RNG,PWM.pwm_dutyrange,false,false); delay_us(10); // set max value for duty cycle	
@@ -9367,24 +9626,24 @@ begin
 						  if ((PWM.pwm_mode and PWM_RPTL)<>0) 	    then regsav:=regsav or PWM1_REPEATFF;			
 						  if ((PWM.pwm_mode and PWM_SERIALIZER)<>0) then regsav:=regsav or PWM1_SERIAL;		
 						end;
-//                      writeln('pwm_Setup: pwm_value ',PWM.pwm_value);
-						pwm_Write  (GPIO_struct,PWM.pwm_value);	// set start value
-//                      writeln('pwm_Setup: PWMCTL 0x',hex(regsav,8));			// 					
+//                      writeln('PWM_Setup: pwm_value ',PWM.pwm_value);
+						PWM_Write  (GPIO_struct,PWM.pwm_value);	// set start value
+//                      writeln('PWM_Setup: PWMCTL 0x',HexStr(regsav,8));			// 					
 					    BCM_SETREG(PWMCTL,regsav,false,false);		// Enable channel PWM
 					  end;
-		  else Log_Writeln(LOG_ERROR,'pwm_Setup: GPIO'+Num2Str(gpio,0)+' not supported for HW PWM'); 
+		  else Log_Writeln(LOG_ERROR,'PWM_Setup: GPIO'+Num2Str(gpio,0)+' not supported for HW PWM'); 
 		end;
 	  end
 	  else
 	  begin // SW PWM
         case gpio of
-		  -999..-1: Log_Writeln(LOG_ERROR,'pwm_Setup: GPIO'+Num2Str(gpio,0)+' not supported for PWM'); 
+		  -999..-1: Log_Writeln(LOG_ERROR,'PWM_Setup: GPIO'+Num2Str(gpio,0)+' not supported for PWM'); 
 		  else		begin 
 		              if (gpio>=0) and (PWMSW IN portflags) then
 					  begin
 					    initok:=true;
 						GPIO_set_PINMODE(gpio,OUTPUT); portflags:=portflags+[OUTPUT];
-//                      writeln('pwm_Setup (SW):'); GPIO_ShowStruct(GPIO_struct);
+//                      writeln('PWM_Setup (SW):'); GPIO_ShowStruct(GPIO_struct);
 // Start SW PWM Thread
 					    Thread_Start(ThreadCtrl,@pwm_SW_Thread,addr(GPIO_struct),100,-1);
 (*					    with ThreadCtrl do
@@ -9395,14 +9654,14 @@ begin
 						delay_msec(100); // let SW-Threads start
 *)
 					  end
-					  else Log_Writeln(LOG_ERROR,'pwm_Setup: wrong neg. GPIO Error Code: '+Num2Str(gpio,0)+' '+PortFlagsString(portflags));
+					  else Log_Writeln(LOG_ERROR,'PWM_Setup: wrong neg. GPIO Error Code: '+Num2Str(gpio,0)+' '+GPIO_PortFlags2String(portflags));
 					end;
 	    end; // case
 	  end;
     end
-	else Log_Writeln(LOG_ERROR,'pwm_Setup: GPIO_struct is not initialized'); 
+	else Log_Writeln(LOG_ERROR,'PWM_Setup: GPIO_struct is not initialized'); 
   end;
-  pwm_Setup:=GPIO_struct.initok;
+  PWM_Setup:=GPIO_struct.initok;
 end;
 
 function  TIM_Setup(timr_freq_Hz:real):real;
@@ -9440,8 +9699,8 @@ begin
   pwm_dutyrange:=PWM_GetMaxDtyC(pwm_freq_Hz); _dtyw:=round(pwm_dutyrange*pwm_dty);
   writeln('OSC_Setup: ',(PWMHW IN flgh),' f:',pwm_freq_Hz:0:1,'Hz range:',pwm_dutyrange:0,' dty:',_dtyw:0);
   GPIO_SetStruct (gpio_struct,1,_gpio,'OSC',[OUTPUT]+flgh);
-  pwm_SetStruct  (gpio_struct,PWM_MS_MODE,pwm_freq_Hz,pwm_dutyrange,_dtyw); 
-  pwm_SetClock   (gpio_struct);
+  PWM_SetStruct  (gpio_struct,PWM_MS_MODE,pwm_freq_Hz,pwm_dutyrange,_dtyw); 
+  PWM_setClock   (gpio_struct);
   if not GPIO_Setup(gpio_struct) then pwm_dutyrange:=-1;
   OSC_Setup:=pwm_dutyrange;
 end;
@@ -9451,7 +9710,7 @@ begin
   if pwm_dutyrange>0 then
   begin
     if pwm_dty<0 then pwm_dty:=0; if pwm_dty>1 then pwm_dty:=1; 
-    pwm_write(_gpio,round(pwm_dty*(pwm_dutyrange-1)));
+    PWM_Write(_gpio,round(pwm_dty*(pwm_dutyrange-1)));
   end else LOG_Writeln(LOG_ERROR,'OSC_Write: invalid pwm_dutyrange '+Num2Str(pwm_dutyrange,0));
 end;
 	
@@ -9749,19 +10008,35 @@ begin
   FRQ_GetClkRegIdx:=_ok;
 end;
 
-function  FRQ_Setup(var GPIO_struct:GPIO_struct_t; freq_Hz:real):boolean;
+procedure FRQ_SetStruct(var GPIO_struct:GPIO_struct_t; freq_Hz,freq_min,freq_max:real);
+begin
+  with GPIO_struct do
+  begin
+    FRQ_freq_Hz:=freq_Hz; FRQ_freq_min:=freq_min; FRQ_freq_max:=freq_max;
+    Limits(FRQ_freq_min,CLK_GetMinFreq,CLK_GetMaxFreq);
+    Limits(FRQ_freq_max,FRQ_freq_min,  CLK_GetMaxFreq);
+    Limits(FRQ_freq_Hz, FRQ_freq_min,  FRQ_freq_max);
+  end; // with
+end;
+procedure FRQ_SetStruct(var GPIO_struct:GPIO_struct_t; freq_Hz:real);
+begin FRQ_SetStruct(GPIO_struct,freq_Hz,CLK_GetMinFreq,CLK_GetMaxFreq); end;
+procedure FRQ_SetStruct(var GPIO_struct:GPIO_struct_t);
+begin FRQ_SetStruct(GPIO_struct,CLK_GetMinFreq); end;
+
+function  FRQ_Setup(var GPIO_struct:GPIO_struct_t):boolean;
 var _mode:byte; _clksrc,_msk,_divi,_divf,_mash:longword; 
 begin
   with GPIO_struct do
   begin
-    initok:=CLK_ValidFreq(freq_Hz);
+//  initok:=CLK_ValidFreq(freq_Hz);
+    initok:=InLimits(FRQ_freq_Hz,FRQ_freq_min,FRQ_freq_max);
     if initok and (FRQHW IN portflags) then 
 	begin
-	  FRQ_freq_Hz:=freq_Hz; _mash:=0;
+	  _mash:=0;
 	  initok:=CLK_GetSource(FRQ_freq_Hz,_clksrc,_divi,_divf,_mash); 
 	  if initok then
 	  begin	  	  
-//writeln('FRQ_Setup: freq(Hz):',FRQ_freq_Hz:0:2,' divi:0x',Hex(_divi,3),' divf:0x',Hex(_divf,3),' clksrc:',_clksrc:0,' mash:',_mash:0);
+//writeln('FRQ_Setup: freq(Hz):',FRQ_freq_Hz:0:2,' divi:0x',HexStr(_divi,3),' divf:0x',HexStr(_divf,3),' clksrc:',_clksrc:0,' mash:',_mash:0);
 	    initok:=FRQ_GetClkRegIdx(gpio,_mode); 	
         if initok then initok:=CLK_GetRegIdx(_mode,FRQ_CTLIdx,FRQ_DIVIdx);  		
 		if initok then
@@ -9773,14 +10048,14 @@ begin
 		  if (ALT3 IN portflags) then begin GPIO_set_ALT(gpio,ALT3); initok:=true; end; 
 		  if (ALT4 IN portflags) then begin GPIO_set_ALT(gpio,ALT4); initok:=true; end; 
 		  if (ALT5 IN portflags) then begin GPIO_set_ALT(gpio,ALT5); initok:=true; end; 
-          if not initok then LOG_Writeln(LOG_ERROR,'FRQ_Setup: ALTx');		  
+          if not initok then LOG_Writeln(LOG_ERROR,'FRQ_Setup['+Num2Str(gpio,0)+']: ALTx');		  
           _msk:=((_mash and $3) shl 9) or (_clksrc and $0f); // set mash and clk-src	  
 		  if initok then initok:=CLK_Write(FRQ_CTLIdx,FRQ_DIVIdx,_divi,_divf,_msk);
-//        writeln('Mash:0x',Hex(CLK_GetMashValue(_mode),2),' mode:',_mode,' clksrc:',_clksrc);
-		  if not initok then LOG_Writeln(LOG_ERROR,'FRQ_Setup: CLK_Write');		  
-        end else LOG_Writeln(LOG_ERROR,'FRQ_Setup: CLK_GetRegIdx');					
-	  end else LOG_Writeln(LOG_ERROR,'FRQ_Setup: CLK_GetSource');	
-	end else LOG_Writeln(LOG_ERROR,'FRQ_Setup for freq(Hz): '+Num2Str(FRQ_freq_Hz,0,2)+' not possible');
+//        writeln('Mash:0x',HexStr(CLK_GetMashValue(_mode),2),' mode:',_mode,' clksrc:',_clksrc);
+		  if not initok then LOG_Writeln(LOG_ERROR,'FRQ_Setup['+Num2Str(gpio,0)+']: CLK_Write');		  
+        end else LOG_Writeln(LOG_ERROR,'FRQ_Setup['+Num2Str(gpio,0)+']: CLK_GetRegIdx');					
+	  end else LOG_Writeln(LOG_ERROR,'FRQ_Setup['+Num2Str(gpio,0)+']: CLK_GetSource');	
+	end else LOG_Writeln(LOG_ERROR,'FRQ_Setup['+Num2Str(gpio,0)+']: for freq(Hz): '+Num2Str(FRQ_freq_Hz,0,2)+' not possible');
     FRQ_Setup:=initok;
   end; // with
 end;
@@ -9801,9 +10076,10 @@ exit;
   SetLength(range,maxcnt);
   FillWaveTable;
   GPIO_SetStruct(GPIO_struct,1,gpio,'WAVE-TEST',[FRQHW]);
+  FRQ_SetStruct(GPIO_struct,freqHz);
   if GPIO_Setup (GPIO_struct) then 
   begin
-    if FRQ_Setup(GPIO_struct,freqHz) then
+    if FRQ_Setup(GPIO_struct) then
 	begin
 	  FRQ_Switch(GPIO_struct,true);	// switch freq ON 
       repeat
@@ -9835,7 +10111,7 @@ begin
       begin
         CLK_GetRegIdx(b,regctl,regdiv);
         reg:=BCM_GETREG(regdiv);  
-	    writeln(Hex(BCM_REGAdr(regdiv),8),':  ',Hex(reg,8),' divisor:',CLK_GetDivisor(reg):0:5);
+	    writeln(HexStr(BCM_REGAdr(regdiv),8),':  ',HexStr(reg,8),' divisor:',CLK_GetDivisor(reg):0:5);
       end;
 	  initok:=FRQ_GetClkRegIdx(gpio,_mode); 	
       if initok then initok:=CLK_GetRegIdx(_mode,FRQ_CTLIdx,FRQ_DIVIdx); 
@@ -9843,10 +10119,11 @@ begin
 	  begin
 	    for b:=0 to 3 do
 	    begin
-		  writeln('Mash: ',b:0,' ',Hex(CLK_GetMashValue(b),4)); 
+		  writeln('Mash: ',b:0,' ',HexStr(CLK_GetMashValue(b),4)); 
 		end;
 	    show_regs('GMGP'+Num2Str(_mode,0)+'CTL',CLK_BASE_OFS,FRQ_CTLIdx,FRQ_DIVIdx,0,false); 
-        initok:=FRQ_Setup(GPIO_struct,freqHz);
+	    FRQ_SetStruct(GPIO_struct,freqHz);
+        initok:=FRQ_Setup(GPIO_struct);
 	    show_regs('GMGP'+Num2Str(_mode,0)+'CTL',CLK_BASE_OFS,FRQ_CTLIdx,FRQ_DIVIdx,0,false); 
 //	    Clock_show_regs;
 	    delay_msec(60000);
@@ -9864,12 +10141,12 @@ var mode_pll,MASH,n:byte; reg,regctl,regdiv,DIVIF:longword;
 begin
   mode_pll:=1; fr:=18.32*1000000;
   ok:=CLK_GetClkFreq(3,CLK_GetFreq(mode_pll),fr,FREQ_O_min,FREQ_O_avg,FREQ_O_max,MASH,DIVIF);
-  writeln('CLK_Tst, mode:',mode_pll:0,' f:',fr:0:2,' fmin:',FREQ_O_min:0:2,' favg:',FREQ_O_avg:0:2,' fmax:',FREQ_O_max:0:2,' MASH:',MASH,' DIVIF:0x',Hex(DIVIF,8),' ok:',ok);
+  writeln('CLK_Tst, mode:',mode_pll:0,' f:',fr:0:2,' fmin:',FREQ_O_min:0:2,' favg:',FREQ_O_avg:0:2,' fmax:',FREQ_O_max:0:2,' MASH:',MASH,' DIVIF:0x',HexStr(DIVIF,8),' ok:',ok);
   for n:= 0 to 3 do
   begin
     CLK_GetRegIdx(n,regctl,regdiv);
     reg:=BCM_GETREG(regdiv);  
-	writeln(Hex(BCM_REGAdr(regdiv),8),':  ',Hex(reg,8),' divisor:',CLK_GetDivisor(reg):0:5);
+	writeln(HexStr(BCM_REGAdr(regdiv),8),':  ',HexStr(reg,8),' divisor:',CLK_GetDivisor(reg):0:5);
   end;
 end;
 
@@ -9953,9 +10230,10 @@ procedure GPIO_SetStruct(var GPIO_struct:GPIO_struct_t; num,gpionum:longint; des
 //e.g. GPIO_SetStruct(structure,3,8,'description',[INPUT,PullUP,ReversePOLARITY]);
 begin  
   with GPIO_struct do
-  begin	
+  begin
 	gpio:=gpionum; HWPin:=GPIO_MAP_GPIO_NUM_2_HDR_PIN(gpio); 
-	nr:=num; description:=desc; portflags:=flags; FRQ_freq_Hz:=0.0;
+	nr:=num; description:=desc; 
+	portflags:=flags; portCapabilityFlags:=GPIO_PortCapabilityFlags(gpio);
 	RPI_HDR_SetDesc(HWPin,desc);
 	idxofs_1Bit:=0; idxofs_3Bit:=0; mask_1Bit:=0; mask_3Bit:=0; mask_pol:=0; 
 	regget:=GPIOONLYREAD; regset:=GPIOONLYREAD; regclr:=GPIOONLYREAD; ein:=false;
@@ -9963,22 +10241,29 @@ begin
 //	plausibility check and clean-up of port flags 
 	if (PWMHW 		IN portflags)  or 
 	   (PWMSW 		IN portflags)  then portflags:=portflags+[OUTPUT];
+
     if (INPUT  	    IN portflags)  and 
 	   (OUTPUT      IN portflags)  then portflags:=portflags-[OUTPUT,PWMHW,PWMSW]; // cannot be both		  
+
 	if (PullUP      IN portflags)  and 
-	   (PullDOWN    IN portflags)  then portflags:=portflags-[PullDOWN]; // cannot be both		  		  
-	if (RisingEDGE  IN portflags)  and 
-	   (not(INPUT   IN portflags)) then portflags:=portflags-[RisingEDGE]; 
-    if (FallingEDGE IN portflags)  and 
-	   (not(INPUT   IN portflags)) then portflags:=portflags-[FallingEDGE]; 
+	   (PullDOWN    IN portflags)  then portflags:=portflags-[PullDOWN]; // cannot be both
+	   
+	if (not(INPUT   IN portflags)) then
+	begin
+	 if(RisingEDGE 	IN portflags)  then portflags:=portflags-[RisingEDGE];
+	 if(FallingEDGE IN portflags)  then portflags:=portflags-[FallingEDGE];
+	end;	
+	
 	if (PWMHW IN portflags) and (not GPIO_FCTOK(gpio,[PWMHW])) then
 	begin
 	  LOG_writeln(LOG_ERROR,'GPIO_SetStruct: GPIO'+Num2Str(gpio,0)+' can not be PWMHW');
 	  portflags:=portflags-[PWMHW]+[PWMSW];		
 	end;
+	
 	if (FRQHW IN portflags) then
     begin
-	  portflags:=portflags-[OUTPUT,ALT0,ALT5];
+//	  portflags:=portflags-[OUTPUT,ALT0,ALT5];
+	  portflags:=portflags-[ALT0,ALT5];
 	  if GPIO_FCTOK(gpio,[FRQHW]) then
 	  begin
 	    portflags:=portflags+[ALT0];	
@@ -9991,7 +10276,9 @@ begin
 	    portflags:=portflags-[FRQHW];		
 	  end;
 	end;
-	if (portflags=[]) 			   then portflags:=[INPUT]; 
+	
+	if (portflags=[]) then portflags:=[INPUT]; 
+	
 	initok:=((gpio>=0) and (gpio<64)); 
 	if initok then 
 	begin
@@ -10011,24 +10298,51 @@ begin
 		mask_pol:=0;
 	  end;
 	end;
-    pwm_SetStruct(GPIO_struct); // set default values for pwm
+	FRQ_SetStruct(GPIO_struct);	FRQ_freq_Hz:=-1; // set default values for frq
+    PWM_SetStruct(GPIO_struct); PWM.PWM_freq_hz:=-1; // set default values for pwm
 //  GPIO_ShowStruct(GPIO_struct);
   end;
 end;
 
 procedure GPIO_SetStruct(var GPIO_struct:GPIO_struct_t);
+begin GPIO_SetStruct(GPIO_struct,0,-1,'',[INPUT]); end;
+
+
+procedure GPIO_set_edge(gpio:longword; flgs:s_port_flags; enable:boolean);
 begin
-  GPIO_SetStruct(GPIO_struct,0,-1,'',[INPUT]);
+  if (FallingEDGE IN flgs) then GPIO_set_edge_falling(gpio,enable); 
+  if (RisingEDGE  IN flgs) then GPIO_set_edge_rising (gpio,enable);
+end;
+
+procedure GPIO_set_pull(gpio:longword; flgs:s_port_flags; enable:boolean);
+// natural pull of the GPIO (0-8 pull high, 9-27 pull low)
+begin
+  if (PullDOWN	  IN flgs) then GPIO_set_PULLDOWN	 (gpio,enable); 
+  if (PullUP	  IN flgs) then GPIO_set_PULLUP  	 (gpio,enable);
+end;
+
+procedure GPIO_set_PAD(gpio:longword; flgs:s_port_flags);
+var drivestrength:byte;
+begin							driveStrength:=$b;
+  if (DS2mA		IN flgs) then	driveStrength:= 0;
+  if (DS4mA		IN flgs) then 	driveStrength:= 1;
+  if (DS6mA		IN flgs) then 	driveStrength:= 2;
+  if (DS8mA		IN flgs) then 	driveStrength:= 3;
+  if (DS10mA	IN flgs) then 	driveStrength:= 4;
+  if (DS12mA	IN flgs) then 	driveStrength:= 5;
+  if (DS14mA	IN flgs) then 	driveStrength:= 6;
+  if (DS16mA	IN flgs) then 	driveStrength:= 7;
+  if (driveStrength>7) then
+	GPIO_set_PAD(gpio,(noPADslew IN flgs),(noPADhyst IN flgs),drivestrength);
 end;
 
 function  GPIO_Setup(var GPIO_struct:GPIO_struct_t):boolean;
-var driveStrength:byte; // drivStrngth:boolean;
 begin
   with GPIO_struct do
   begin
     if initok then 
 	begin
-	  if gpio<0 then
+	  if (gpio<0) then
 	  begin
 	    gpio:=-1; initok:=false;
 	    LOG_Writeln(LOG_ERROR,'GPIO_Reg for HDRPin: '+Num2Str(HWPin,0)+' can not be mapped to GPIO num');
@@ -10036,52 +10350,39 @@ begin
 	  else
 	  begin
 	    if not (simulation IN portflags)then
-	    begin	
-//		  setup of portflags
-		  ein:=false;
-		  if (FallingEDGE  	IN portflags) then GPIO_set_edge_falling(gpio,true); 
-		  if (RisingEDGE   	IN portflags) then GPIO_set_edge_rising (gpio,true); 
-//		  writeln('GPIO_Setup: ',ord(port_dir));
-          if (INPUT  		IN portflags) then 
-          begin 
-        	GPIO_set_PINMODE (gpio,INPUT);  
-          end; 
-	      if (OUTPUT 		IN portflags) then 
-		  begin 
-		    GPIO_set_PINMODE (gpio,OUTPUT);  
-			GPIO_Switch(GPIO_struct,	(InitialHIGH 	 IN portflags) or
-										(ReversePolarity IN portflags)
-						); 
-		  end;
-		  										driveStrength:=$b;
-		  if (DS2mA		  	IN portflags) then 	driveStrength:= 0;
-		  if (DS4mA		  	IN portflags) then 	driveStrength:= 1;
-		  if (DS6mA		  	IN portflags) then 	driveStrength:= 2;
-		  if (DS8mA		  	IN portflags) then 	driveStrength:= 3;
-		  if (DS10mA	  	IN portflags) then 	driveStrength:= 4;
-		  if (DS12mA	  	IN portflags) then 	driveStrength:= 5;
-		  if (DS14mA	  	IN portflags) then 	driveStrength:= 6;
-		  if (DS16mA	  	IN portflags) then 	driveStrength:= 7;
-		  if (driveStrength>7) then
-		  	GPIO_set_PAD(	 gpio,
-		  					(noPADslew IN portflags),
-		  					(noPADhyst IN portflags),
-							 drivestrength);
-		  
-		  if (PullDOWN 		IN portflags) then GPIO_set_PULLDOWN    (gpio,true); 
-		  if (PullUP   		IN portflags) then GPIO_set_PULLUP      (gpio,true); 
-(*		  if (PullEnable	IN portflags) then 
+	    begin
+          if (([OUTPUT,PWMSW,PWMHW,FRQHW] * portflags)<>[]) then
+          begin // OUTPUTS
+        	if (([PWMSW,PWMHW] * portflags)<>[]) then
+        	begin
+			  initok:=PWM_Setup(GPIO_struct); 
+		    end
+		    else
+		    begin
+			  if (([FRQHW] * portflags)<>[]) then
+			  begin
+				initok:=FRQ_Setup(GPIO_struct);
+			  end
+			  else
+			  begin // pure OUTPUT
+				GPIO_set_PINMODE(gpio,OUTPUT);
+				GPIO_Switch(GPIO_struct,(InitialHIGH 	 IN portflags) or
+										(ReversePolarity IN portflags) ); 
+			  end;
+		    end;
+		    GPIO_set_PAD	(gpio,portflags);
+		  end
+		  else
 		  begin
-		    if (ReversePolarity	IN portflags) then GPIO_set_PULLDOWN(gpio,true)
-		    								  else GPIO_set_PULLUP	(gpio,true); 	
-		  end; *)
-		  if (PWMSW			IN portflags) or (PWMHW IN portflags) 
-		    then initok:=pwm_Setup(GPIO_struct);
+		    GPIO_set_PINMODE(gpio,INPUT); 
+			GPIO_set_pull	(gpio,portflags,true);
+			GPIO_set_edge	(gpio,portflags,true); 
+		  end;
         end;		
 	  end;
-	end else Log_Writeln(LOG_ERROR,'GPIO_Setup: GPIO_struct is not initialized'); 
+	end else Log_Writeln(LOG_ERROR,'GPIO_Setup: GPIO_struct is not initialized');
+	GPIO_Setup:=initok; 
   end; // with
-  GPIO_Setup:=GPIO_struct.initok;
 end;
 
 procedure xyx(reg1,reg2,mask:longword); begin mmap_arr^[reg1]:=mask; mmap_arr^[reg2]:=mask; end;
@@ -10101,7 +10402,7 @@ begin
 	begin
 //GPIO_show_regs;	
 	  GPIO_ShowStruct(GPIO_struct);
-	  writeln('Start with ',cnt:0,' samples, GPIO',gpio:0,' Pin:',HWPin:0,' Mask:0x',Hex(mask_1Bit,8),' idxofs_1Bit:0x',Hex(idxofs_1Bit,2),')');
+	  writeln('Start with ',cnt:0,' samples, GPIO',gpio:0,' Pin:',HWPin:0,' Mask:0x',HexStr(mask_1Bit,8),' idxofs_1Bit:0x',HexStr(idxofs_1Bit,2),')');
       s:=now; // start measuring time 
 	  repeat 
 	    {$warnings off} 
@@ -10149,7 +10450,7 @@ procedure GPIO_set_BIT(regidx,gpio:longword;setbit,readmodifywrite:boolean); { s
 var idx,mask:longword;
 begin
   GPIO_get_mask_and_idx(regidx,gpio,idx,mask);
-//Writeln('GPIO_set_BIT: GPIO'+Num2Str(gpio,0)+' level: '+Bool2Str(setbit)+' Reg: 0x'+Hex(regidx,8)+' idx: 0x'+Hex(idx,8)+' mask: 0x'+Hex(mask,8));   
+//Writeln('GPIO_set_BIT: GPIO'+Num2Str(gpio,0)+' level: '+Bool2Str(setbit)+' Reg: 0x'+HexStr(regidx,8)+' idx: 0x'+HexStr(idx,8)+' mask: 0x'+HexStr(mask,8));   
   if setbit then BCM_SETREG(idx,    mask ,false,readmodifywrite)
             else BCM_SETREG(idx,not(mask),true, readmodifywrite);
 end;
@@ -10204,6 +10505,7 @@ begin
 end;
 
 procedure GPIO_set_PULLUPORDOWN(gpio:longword; enable,pullup:boolean); // pulldown: pullup=false;
+// natural pull of the GPIO (0-8 pull high, 9-27 pull low)
 // approximately 50KΩ
 var idx,mask:longword;
 begin 
@@ -10236,10 +10538,10 @@ procedure GPIO_PWM_Test(gpio:longint; HWPWM:boolean; freq_Hz:real; dutyrange,sta
 const maxcnt=2; 
 var i,cnt:longint; GPIO_struct:GPIO_struct_t;
 begin
-  if HWPWM then  GPIO_SetStruct(GPIO_struct,1,gpio,'HW PWM_TEST',[PWMHW])
+  if HWPWM	then GPIO_SetStruct(GPIO_struct,1,gpio,'HW PWM_TEST',[PWMHW])
 			else GPIO_SetStruct(GPIO_struct,1,gpio,'SW PWM_TEST',[PWMSW]);
-  pwm_SetStruct (GPIO_struct,PWM_MS_MODE,freq_Hz,dutyrange,startval); // ca. 50Hz (50000/1000) -> divisor: 384	
-  pwm_SetClock  (GPIO_struct);
+  PWM_SetStruct (GPIO_struct,PWM_MS_MODE,freq_Hz,dutyrange,startval); // ca. 50Hz (50000/1000) -> divisor: 384	
+  PWM_setClock  (GPIO_struct);
   if GPIO_Setup (GPIO_struct) then
   begin
     GPIO_ShowConnector; GPIO_ShowStruct(GPIO_struct); 		
@@ -10247,16 +10549,16 @@ begin
 	repeat
 	  if (i>(dutyrange-1)) then 
 	  begin 
-	    pwm_Write(GPIO_struct,dutyrange-1);	
+	    PWM_Write(GPIO_struct,dutyrange-1);	
 		writeln('Loop(',cnt,'/',dutyrange,'): reached max. pwm value: ',dutyrange-1); sleep(30); 
 		GPIO_ShowStruct(GPIO_struct); 
 		i:=0; inc(cnt);
-	  end else pwm_Write(GPIO_struct,i);
+	  end else PWM_Write(GPIO_struct,i);
 //    if (i=(dutyrange div 2)) then readln;  // for measuring with osci
 	  if HWPWM then begin inc(i); sleep(10); end else begin inc(i,10); sleep(10); end;	// ms
 	until (cnt>maxcnt);
-	pwm_Write     (GPIO_struct,0);	// set last value to 0
-	pwm_SetStruct (GPIO_struct); 	// reset to PWM default values
+	PWM_Write     (GPIO_struct,0);	// set last value to 0
+	PWM_SetStruct (GPIO_struct); 	// reset to PWM default values
     sleep(100); // let SW Thread time to terminate
   end else Log_Writeln(LOG_ERROR,'GPIO_PWM_Test: GPIO'+Num2Str(GPIO_struct.gpio,0)+' Init has failed'); 	
 end;
@@ -10397,7 +10699,7 @@ begin
 	      else setval:=0;	 
       end; // with		
 //    writeln('setval2: ',setval,' #######################################');
-	  pwm_Write(SERVO_struct.HWAccess,setval);
+	  PWM_Write(SERVO_struct.HWAccess,setval);
 //    writeln('SyncWaitTime(ms):',round((abs(angle_old-angle_current)/60)*speed60Deg));
 	  if syncwait then 
 	    delay_msec(round((abs(angle_old-angle_current)/60)*speed60Deg));
@@ -10419,8 +10721,8 @@ begin
   begin
     SERVO_SetStruct(SERVO_struct,dcmin,dcmid,dcmax,angmin,angmid,angmax,speed);
     GPIO_SetStruct (SERVO_struct.HWAccess,nr,_gpio,desc,flgs);
-    pwm_SetStruct  (SERVO_struct.HWAccess,PWM_MS_MODE,freq,maxval,dcmid);
-    pwm_SetClock   (SERVO_struct.HWAccess);
+    PWM_SetStruct  (SERVO_struct.HWAccess,PWM_MS_MODE,freq,maxval,dcmid);
+    PWM_setClock   (SERVO_struct.HWAccess);
   end; // with
 end;
 
@@ -10557,16 +10859,16 @@ begin
       begin
 	  	EnterCriticalSection(ENC_CS); 		
           case ctrsel of
-        	0:	 val:=counter;
-	    	1:	 val:=cycles;
-	    	2:	 val:=switchcounter;
-	    	3:	 if (countermax<>0) then val:=counter/countermax;
-	    	4:	 val:=TurnRateStruct.fTurnRate_Hz;
-	    	5:	 val:=switchlastpresstime;	// no reset last value
-			6:	 begin val:=switchlastpresstime; switchlastpresstime:=0; end;
-			7:	 val:=ord(kbdupcnt);
-			8:	 val:=ord(kbddwncnt);
-			9:	 val:=ord(kbdswitch);
+        	  0: val:=counter;
+	    	  1: val:=cycles;
+	    	  2: val:=switchcounter;
+	    	  3: if (countermax<>0) then val:=counter/countermax;
+	    	  4: val:=TurnRateStruct.fTurnRate_Hz;
+	    	  5: val:=switchlastpresstime;	// no reset last value
+			  6: begin val:=switchlastpresstime; switchlastpresstime:=0; end;
+			  7: val:=ord(kbdupcnt);
+			  8: val:=ord(kbddwncnt);
+			  9: val:=ord(kbdswitch); 
 	    	else val:=counter;
 	      end; // case
 	    end; // with
@@ -10576,11 +10878,11 @@ begin
   ENC_GetVal:=val;  
 end;
 
-function  ENC_GetVal       (hdl:byte):real; begin ENC_GetVal:=       ENC_GetVal(hdl,0); end;
-function  ENC_GetCycles    (hdl:byte):real; begin ENC_GetCycles:=    ENC_GetVal(hdl,1); end;
-function  ENC_GetValPercent(hdl:byte):real; begin ENC_GetValPercent:=ENC_GetVal(hdl,3); end;
-function  ENC_GetSwitch    (hdl:byte):real; begin ENC_GetSwitch:=    ENC_GetVal(hdl,2); end;
-function  ENC_GetSwPtime   (hdl:byte):real; begin ENC_GetSwPtime:=   ENC_GetVal(hdl,5); end;
+function  ENC_GetVal       (hdl:byte):real;		begin ENC_GetVal:=       ENC_GetVal(hdl, 0); end;
+function  ENC_GetCycles    (hdl:byte):real;		begin ENC_GetCycles:=    ENC_GetVal(hdl, 1); end;
+function  ENC_GetValPercent(hdl:byte):real;		begin ENC_GetValPercent:=ENC_GetVal(hdl, 3); end;
+function  ENC_GetSwitch    (hdl:byte):real;		begin ENC_GetSwitch:=    ENC_GetVal(hdl, 2); end;
+function  ENC_GetSwPtime   (hdl:byte):real;		begin ENC_GetSwPtime:=   ENC_GetVal(hdl, 5); end;
 
 procedure ENC_IncSwCnt (var ENCInfo:ENC_CNT_struct_t; cnt:integer);
 begin inc(ENCInfo.switchcounter,cnt); end;
@@ -10720,7 +11022,7 @@ begin
 		  
 		  if sw_change or (swpress and not sw1stpress) then 
 			CNTInfo.switchlastpresstime:=MilliSecondsBetween(now,dt2); // last switch press time
-		  
+		  		  
 		end; 
 		delta:=0;	  
 		if seq<>seqold then  
@@ -11179,7 +11481,7 @@ procedure I2C_Show_struct(busnum:byte);
 begin
   with I2C_buf[busnum] do
   begin
-    Log_Writeln(LOG_DEBUG,'I2C Struct[0x'+Hex(busnum,2)+']:');
+    Log_Writeln(LOG_DEBUG,'I2C Struct[0x'+HexStr(busnum,2)+']:');
 	Log_Writeln(LOG_DEBUG,' .hdl: '+Num2Str(hdl,0));
 	Log_Writeln(LOG_DEBUG,' .buf: 0x'+HexStr(buf)); 
   end;  
@@ -11199,7 +11501,7 @@ var _ok:boolean;
 begin 
   _ok:=((busnum<=I2C_max_bus) and (baseadr>=$03) and (baseadr<=$77));
   if not _ok then 
-    LOG_Writeln(LOG_ERROR,'I2C_ChkBusAdr['+Hex(busnum,2)+'/0x'+Hex(baseadr,2)+']: not valid');
+    LOG_Writeln(LOG_ERROR,'I2C_ChkBusAdr['+HexStr(busnum,2)+'/0x'+HexStr(baseadr,2)+']: not valid');
   I2C_ChkBusAdr:=_ok; 
 end; 
 
@@ -11297,12 +11599,12 @@ begin
 	      I2C_bus[busnum].I2C_funcs:=I2C_GetFuncs(busnum);	      
 	     {$R+}
       	  if not RPI_I2C_ChkFuncs(busnum,I2C_FUNC_I2C) then
-			LOG_Writeln(LOG_ERROR,'I2C_start[0x'+Hex(busnum,2)+']: no I2C_FUNC_I2C');
+			LOG_Writeln(LOG_ERROR,'I2C_start[0x'+HexStr(busnum,2)+']: no I2C_FUNC_I2C');
 	    end;
       end;
     {$ENDIF}
     if (hdl<0) and (busnum=RPI_I2C_busgen) then 
-      LOG_Writeln(LOG_ERROR,'I2C_start[0x'+hex(busnum,2)+']: '+_I2C_path);
+      LOG_Writeln(LOG_ERROR,'I2C_start[0x'+HexStr(busnum,2)+']: '+_I2C_path);
   end; // with
 end;
 
@@ -11333,7 +11635,7 @@ begin
     if (hdl>=0) then
     begin
       test:=false; lgt:=len;
-	  info:='I2C_bus_read[0x'+hex(busnum,2)+'/0x'+hex(baseadr,2);
+	  info:='I2C_bus_read[0x'+HexStr(busnum,2)+'/0x'+HexStr(baseadr,2);
 	  if cmds<>'' then info:=info+'/0x'+HexStr(cmds);
 	  info:=info+']: ';
 //	  writeln(info+' 0x'+HexStr(cmds));
@@ -11451,7 +11753,7 @@ begin
       if (rslt<0) then
       begin
     	SetLength(buf,			0);
-    	LOG_Writeln(LOG_ERROR,	'I2C_bus_WrRd[0x'+hex(busnum,2)+'/0x'+hex(baseadr,2)+']: failed to read device: '+LNX_ErrDesc(fpgeterrno));
+    	LOG_Writeln(LOG_ERROR,	'I2C_bus_WrRd[0x'+HexStr(busnum,2)+'/0x'+HexStr(baseadr,2)+']: failed to read device: '+LNX_ErrDesc(fpgeterrno));
     	ERR_MGMT_UPD(errhdl,	_IOC_READ, RDlen,		 false);
 //		ERR_MGMT_UPD(errhdl,	_IOC_WRITE,Length(WRbuf),false);
       end
@@ -11468,7 +11770,7 @@ begin
   except
 	On E_rpi_hal_Exception 		:Exception do 
 	begin
-	  LOG_Writeln(LOG_ERROR,	'I2C_bus_WrRd[0x'+hex(busnum,2)+'/0x'+hex(baseadr,2)+']: exception: '+E_rpi_hal_Exception.Message); 
+	  LOG_Writeln(LOG_ERROR,	'I2C_bus_WrRd[0x'+HexStr(busnum,2)+'/0x'+HexStr(baseadr,2)+']: exception: '+E_rpi_hal_Exception.Message); 
 	  rslt:=					-1;
 	end;
   end;
@@ -11507,7 +11809,7 @@ begin
       {$ENDIF}    
 		if rslt<0 then
     	begin
-          LOG_Writeln(LOG_ERROR,'I2C_bus_SEGMENTS[0x'+hex(busno,2)+'/0x'+hex(iomsgs[0].addr,2)+']: failed to read device: '+LNX_ErrDesc(fpgeterrno));
+          LOG_Writeln(LOG_ERROR,'I2C_bus_SEGMENTS[0x'+HexStr(busno,2)+'/0x'+HexStr(iomsgs[0].addr,2)+']: failed to read device: '+LNX_ErrDesc(fpgeterrno));
           ERR_MGMT_UPD(hdl,_IOC_READ,datlen,false);
 		  I2C_buf[busno].buf:='';
     	end
@@ -11568,7 +11870,7 @@ begin
   	begin
 	  with iomsgs[i-1] do
   	  begin
-		writeln((i-1):2,' addr:0x',Hex(addr,2),' ptr:0x',Hex(bptr,8),' len:',Num2Str(len,2),' flags:0x',Hex(flags,4));	
+		writeln((i-1):2,' addr:0x',HexStr(addr,2),' ptr:0x',HexStr(bptr),' len:',Num2Str(len,2),' flags:0x',HexStr(flags,4));	
 	  end; // with
   	end;
   end; // with
@@ -11592,7 +11894,7 @@ procedure I2C_ZIP_Test;
 const adr=$70; lgt=2;
 var rslt:integer; zipdata:I2C_rdwr_zip_data_t; sh:string;
 begin
-//writeln('Funcs: 0x'+Hex(RPI_I2C_GetFuncs(RPI_I2C_busgen),8)); I2C_ShowFuncs(RPI_I2C_busgen); 
+//writeln('Funcs: 0x'+HexStr(RPI_I2C_GetFuncs(RPI_I2C_busgen),8)); I2C_ShowFuncs(RPI_I2C_busgen); 
 rslt:=I2C_bus_WrRd(RPI_I2C_busgen,adr,'',0, sh,0, lgt,NO_ERRHNDL);
 writeln(rslt,' ',HexStr(I2C_buf[RPI_I2C_busgen].buf));
 writeln;
@@ -11620,14 +11922,14 @@ begin
     lgt:=len; 
     if len>c_max_Buffer then 
     begin
-      LOG_Writeln(LOG_ERROR,'I2C_string_read[0x'+hex(busnum,2)+'/0x'+hex(baseadr,2)+'/0x'+HexStr(cmds)+']: Length exceed buflgt, got: '+Num2Str(len,0)+' max: '+Num2Str(c_max_Buffer,0));
+      LOG_Writeln(LOG_ERROR,'I2C_string_read[0x'+HexStr(busnum,2)+'/0x'+HexStr(baseadr,2)+'/0x'+HexStr(cmds)+']: Length exceed buflgt, got: '+Num2Str(len,0)+' max: '+Num2Str(c_max_Buffer,0));
       buf:='';
 	  exit(-1);
 	  lgt:=c_max_Buffer;
     end;
-//  writeln('I2C_string_read1: I2Caddr:0x'+Hex(baseadr,2)+' reg:0x'+HexStr(cmds)+' busnum:0x'+Hex(busnum,2)+' lgt:0x'+Hex(lgt,2));
+//  writeln('I2C_string_read1: I2Caddr:0x'+HexStr(baseadr,2)+' reg:0x'+HexStr(cmds)+' busnum:0x'+HexStr(busnum,2)+' lgt:0x'+HexStr(lgt,2));
     rslt:=I2C_bus_read(busnum,baseadr,cmds,lgt,errhdl); 
-//  writeln('I2C_string_read2: I2Caddr:0x'+Hex(baseadr,2)+' reg:0x'+HexStr(cmds)+' busnum:0x'+Hex(busnum,2)+' lgt:0x'+Hex(lgt,2)+' rslt:'+Num2Str(rslt,0));  
+//  writeln('I2C_string_read2: I2Caddr:0x'+HexStr(baseadr,2)+' reg:0x'+HexStr(cmds)+' busnum:0x'+HexStr(busnum,2)+' lgt:0x'+HexStr(lgt,2)+' rslt:'+Num2Str(rslt,0));  
 	outs:=buf;
 	oldI2C_string_read:=rslt;
   end; // with
@@ -11697,7 +11999,7 @@ begin
         {$warnings off} rslt:=fpIOctl(hdl,I2C_SLAVE,pointer(baseadr)); {$warnings on}
         if rslt<0 then
         begin
-          LOG_Writeln(LOG_ERROR,'I2C_bus_write[0x'+hex(busnum,2)+'/0x'+hex(baseadr,2)+']: failed to open device: '+LNX_ErrDesc(fpgeterrno));
+          LOG_Writeln(LOG_ERROR,'I2C_bus_write[0x'+HexStr(busnum,2)+'/0x'+HexStr(baseadr,2)+']: failed to open device: '+LNX_ErrDesc(fpgeterrno));
           ERR_MGMT_UPD(errhdl,_IOC_NONE,lgt,false);
 	      exit(rslt);
         end;
@@ -11706,14 +12008,14 @@ begin
 //    I2C_Display_struct(busnum,'I2C_bus_write:');
       if rslt<0 then
       begin
-        LOG_Writeln(LOG_ERROR,'I2C_bus_write[0x'+hex(busnum,2)+'/0x'+hex(baseadr,2)+']: failed to write to device: '+LNX_ErrDesc(fpgeterrno));
+        LOG_Writeln(LOG_ERROR,'I2C_bus_write[0x'+HexStr(busnum,2)+'/0x'+HexStr(baseadr,2)+']: failed to write to device: '+LNX_ErrDesc(fpgeterrno));
         ERR_MGMT_UPD(errhdl,_IOC_WRITE,lgt,false);
       end
       else
       begin
 	    ERR_MGMT_UPD(errhdl,_IOC_WRITE,lgt,true);
         if (rslt<lgt) then
-	      LOG_Writeln(LOG_ERROR,'I2C_bus_write[0x'+hex(busnum,2)+'/0x'+hex(baseadr,2)+']: short write, errnum: '+Num2Str(rslt,0)+' expected: '+Num2Str(lgt+1,0)+' got: '+Num2Str(rslt,0));
+	      LOG_Writeln(LOG_ERROR,'I2C_bus_write[0x'+HexStr(busnum,2)+'/0x'+HexStr(baseadr,2)+']: short write, errnum: '+Num2Str(rslt,0)+' expected: '+Num2Str(lgt+1,0)+' got: '+Num2Str(rslt,0));
       end;
     end;
   end; // with
@@ -11727,7 +12029,7 @@ function  oldI2C_string_write(busnum,baseadr:word; datas:string; errhdl:integer)
 begin   
   if length(datas)>=c_max_Buffer then 
   begin
-    LOG_Writeln(LOG_ERROR,'I2C_string_write['+Hex(busnum,2)+'/'+Hex(baseadr,2)+'/'+HexStr(datas)+']: data length:'+Num2Str(length(datas),0)+' exceeds buffer size:'+Num2Str(c_max_Buffer,0));
+    LOG_Writeln(LOG_ERROR,'I2C_string_write['+HexStr(busnum,2)+'/'+HexStr(baseadr,2)+'/'+HexStr(datas)+']: data length:'+Num2Str(length(datas),0)+' exceeds buffer size:'+Num2Str(c_max_Buffer,0));
 	exit(-1);
   end;	 
   I2C_buf[busnum].buf:=datas; 
@@ -11828,7 +12130,7 @@ begin
   begin
     HW_IniInfoStruct(DeviceStruct); data:=''; present:=false; _lvl:=LOG_ERROR;
     HW_SetInfoStruct(DeviceStruct,I2CDev,rpi_I2C_busgen,i2c_unvalid_addr,dsc);
-    info:=dsc+'[0x'+Hex(bus,2)+'/0x'+Hex(adr,2);
+    info:=dsc+'[0x'+HexStr(bus,2)+'/0x'+HexStr(adr,2);
     if cmds<>'' then info:=info+'/0x'+HexStr(cmds);
     info:=info+']: ';    
 //  writeln('info:',info);
@@ -11888,7 +12190,7 @@ begin
   with DeviceStruct do
   begin
 	if present	then r:=I2C_HWSpeedT(BusNum,HWaddr,lgt,loops,cmds,dsc)
-				else LOG_Writeln(LOG_ERROR,'I2C_HWSpeedT[0x'+Hex(BusNum,2)+'/0x'+Hex(HWaddr,2)+']: '+dsc+' not present');
+				else LOG_Writeln(LOG_ERROR,'I2C_HWSpeedT[0x'+HexStr(BusNum,2)+'/0x'+HexStr(HWaddr,2)+']: '+dsc+' not present');
   end; // with
   I2C_HWSpeedT:=r;
 end;
@@ -11946,9 +12248,9 @@ const errlvl=LOG_WARNING;
 begin
   with spi_strct do
   begin
-    Log_Writeln(errlvl,'SPI Struct:    0x'+Hex(longword(addr(spi_strct)),8)+' struct size: 0x'+Hex(sizeof(spi_strct),4));
-    Log_Writeln(errlvl,' .tx_buf_ptr:  0x'+Hex(tx_buf_ptr,8));
-    Log_Writeln(errlvl,' .rx_buf_ptr:  0x'+Hex(rx_buf_ptr,8));
+    Log_Writeln(errlvl,'SPI Struct:    0x'+HexStr(longword(addr(spi_strct)),8)+' struct size: 0x'+HexStr(sizeof(spi_strct),4));
+    Log_Writeln(errlvl,' .tx_buf_ptr:  0x'+HexStr(tx_buf_ptr,8));
+    Log_Writeln(errlvl,' .rx_buf_ptr:  0x'+HexStr(rx_buf_ptr,8));
     Log_Writeln(errlvl,' .len:           '+Num2Str(len,0));
     Log_Writeln(errlvl,' .speed_hz:      '+Num2Str(speed_hz,0));
     Log_Writeln(errlvl,' .delay_usecs:   '+Num2Str(delay_usecs,0));
@@ -11983,7 +12285,7 @@ begin
 	  Log_Writeln(errlvl,' .spi_cs_change: '+Num2Str(spi_cs_change,0));
       Log_Writeln(errlvl,' .spi_LSB_FIRST: '+Num2Str(spi_LSB_FIRST,0));
       Log_Writeln(errlvl,' .spi_mode:      '+Num2Str(spi_mode,0));
-      Log_Writeln(errlvl,' .spi_IOC_mode:0x'+Hex(spi_IOC_mode,8));
+      Log_Writeln(errlvl,' .spi_IOC_mode:0x'+HexStr(spi_IOC_mode,8));
  //   Log_Writeln(errlvl,' .dev_GPIO_int:  '+Num2Str(dev_GPIO_int,0));
       Log_Writeln(errlvl,' .dev_GPIO_en:   '+Num2Str(dev_GPIO_en,0));
 	  Log_Writeln(errlvl,' .dev_GPIO_ook:  '+Num2Str(dev_GPIO_ook,0));
@@ -11999,11 +12301,11 @@ begin
   begin
     eidx:=endidx; if eidx>maxshowbuf then eidx:=maxshowbuf; // just show the beginning of the buffer
     SAY(errlvl,'SPI Buffer['+Num2Str(busnum,0)+'/'+Num2Str(devnum,0)+']:');
-    SAY(errlvl,' .reg:         0x'+Hex(reg,4));
+    SAY(errlvl,' .reg:         0x'+HexStr(reg,4));
     if (posidx<=eidx) and (eidx>0) then
     begin
 	  sh:=' .buf['+Num2Str(posidx,2)+'..'+Num2Str(eidx,2)+']:  0x';
-      for i:= posidx to (eidx+1)*2 do sh:=sh+Hex(ord(buf[i]),2); sh:=sh+' ... ';                                                              
+      for i:= posidx to (eidx+1)*2 do sh:=sh+HexStr(ord(buf[i]),2); sh:=sh+' ... ';                                                              
       for i:= posidx to (eidx+1) do sh:=sh+StringPrintable(buf[i]);
       SAY(errlvl,sh);
     end
@@ -12078,7 +12380,7 @@ var cdiv:word; hz:longword;
 begin
   cdiv:=SPI_ClockDivider(spi_hz);
   hz:=SPI_GetFreq(spi_hz);
-  SAY(LOG_INFO,'SPI_ClkWrite: '+Num2Str((hz/1000),0,0)+'kHz cdiv:0x'+Hex(cdiv,4)+' cdivold:0x'+Hex(BCM_GETREG(SPI0_CLK),8));
+  SAY(LOG_INFO,'SPI_ClkWrite: '+Num2Str((hz/1000),0,0)+'kHz cdiv:0x'+HexStr(cdiv,4)+' cdivold:0x'+HexStr(BCM_GETREG(SPI0_CLK),8));
   BCM_SETREG(SPI0_CLK,cdiv,false,false);
   SPI_ClkWrite:=hz;
 end;
@@ -12098,7 +12400,7 @@ function  SPI_Mode(spifd:cint; mode:longword; pvalue:pointer):integer;
 var rslt:integer;
 begin
   rslt:=-1; {$IFDEF UNIX} if spifd>=0 then rslt:=fpioctl(spifd,mode,pvalue); {$ENDIF}   
-  if rslt<0 then Log_Writeln(LOG_ERROR,'SPI_Mode Mode: 0x'+Hex(mode,8)+' spifd:'+Num2Str(spifd,0)+' err:'+LNX_ErrDesc(fpgeterrno));
+  if rslt<0 then Log_Writeln(LOG_ERROR,'SPI_Mode Mode: 0x'+HexStr(mode,8)+' spifd:'+Num2Str(spifd,0)+' err:'+LNX_ErrDesc(fpgeterrno));
   SPI_Mode:=rslt;
 end;
 
@@ -12214,7 +12516,7 @@ begin
 	    end;
       end; // with
     end;
-  end else LOG_Writeln(LOG_ERROR,'SPI_Transfer[0x'+Hex(busnum,2)+'/0x'+Hex(devnum,2)+']: invalid busnum/devnum');
+  end else LOG_Writeln(LOG_ERROR,'SPI_Transfer[0x'+HexStr(busnum,2)+'/0x'+HexStr(devnum,2)+']: invalid busnum/devnum');
  except
    On E_rpi_hal_Exception :Exception do writeln('SPI_Transfer: ',E_rpi_hal_Exception.Message); 
  end;
@@ -12225,7 +12527,7 @@ function  SPI_Write(busnum,devnum:byte; basereg,data:word):integer;
 var rslt:integer; xfer:spi_ioc_transfer_t; buf:array[0..1] of byte;
 begin
   rslt:=-1; 
-Log_Writeln(LOG_WARNING,'SPI_write Reg: 0x'+Hex(basereg,4)+' Data: 0x'+Hex(data,4));
+Log_Writeln(LOG_WARNING,'SPI_write Reg: 0x'+HexStr(basereg,4)+' Data: 0x'+HexStr(data,4));
   if (busnum<=spi_max_bus) and (devnum<=spi_max_dev) then
   begin
     SPI_Struct_Init(busnum,devnum,xfer,addr(buf),addr(buf),2);
@@ -12246,7 +12548,7 @@ Log_Writeln(LOG_WARNING,'SPI_write Reg: 0x'+Hex(basereg,4)+' Data: 0x'+Hex(data,
     writeln('SPI_WRITE: result',rslt);
       ERR_MGMT_UPD(spi_dev[busnum,devnum].errhndl,_IOC_WRITE,2,true);
     end;
-  end else LOG_Writeln(LOG_ERROR,'SPI_Write[0x'+Hex(busnum,2)+'/0x'+Hex(devnum,2)+']: invalid busnum/devnum');
+  end else LOG_Writeln(LOG_ERROR,'SPI_Write[0x'+HexStr(busnum,2)+'/0x'+HexStr(devnum,2)+']: invalid busnum/devnum');
   SPI_Write:=rslt;
 end;
 
@@ -12266,17 +12568,17 @@ begin
     if rslt<0 then
     begin
 	  b:=$ff;
-//    Log_Writeln(LOG_ERROR,'SPI_read Reg: 0x'+Hex(reg,4)+' err: '+LNX_ErrDesc(fpgeterrno));
+//    Log_Writeln(LOG_ERROR,'SPI_read Reg: 0x'+HexStr(reg,4)+' err: '+LNX_ErrDesc(fpgeterrno));
 	  ERR_MGMT_UPD(spi_dev[busnum,devnum].errhndl,_IOC_READ,1,false);
     end
     else 
     begin 
 	  SetLength(xbuf.buf,rslt);
       b:=byte(xbuf.buf[1]); 
-//    Log_Writeln(LOG_ERROR,'SPI_read Reg: 0x'+Hex(basereg,4)+' Data: 0x'+HexStr(xbuf.buf)+' rslt:'+Num2Str(rslt,0));
+//    Log_Writeln(LOG_ERROR,'SPI_read Reg: 0x'+HexStr(basereg,4)+' Data: 0x'+HexStr(xbuf.buf)+' rslt:'+Num2Str(rslt,0));
       ERR_MGMT_UPD(spi_dev[busnum,devnum].errhndl,_IOC_READ,1,true);	
     end;
-  end else LOG_Writeln(LOG_ERROR,'SPI_Read[0x'+Hex(busnum,2)+'/0x'+Hex(devnum,2)+']: invalid busnum/devnum');
+  end else LOG_Writeln(LOG_ERROR,'SPI_Read[0x'+HexStr(busnum,2)+'/0x'+HexStr(devnum,2)+']: invalid busnum/devnum');
   SPI_Read:=b;
 end;
 
@@ -12292,7 +12594,7 @@ begin
       b:=ord(spi_buf[busnum,devnum].buf[spi_buf[busnum,devnum].posidx]);
     end;
     inc(spi_buf[busnum,devnum].posidx);
-  end else LOG_Writeln(LOG_ERROR,'SPI_BurstRead[0x'+Hex(busnum,2)+'/0x'+Hex(devnum,2)+']: invalid busnum/devnum');
+  end else LOG_Writeln(LOG_ERROR,'SPI_BurstRead[0x'+HexStr(busnum,2)+'/0x'+HexStr(devnum,2)+']: invalid busnum/devnum');
   SPI_BurstRead:=b;
 end;
 
@@ -12300,7 +12602,7 @@ procedure SPI_BurstRead2Buffer(busnum,devnum,basereg:byte; len:longword);
 { full duplex, see example spidev_fdx.c}
 var rslt:integer; xfer : array[0..1] of spi_ioc_transfer_t;
 begin
-//  Log_Writeln(LOG_DEBUG,'SPI_BurstRead2Buffer devnum:0x'+Hex(devnum,4)+' reg:0x'+Hex(start_reg,4)+' len:0x'+Hex(len,8));
+//  Log_Writeln(LOG_DEBUG,'SPI_BurstRead2Buffer devnum:0x'+HexStr(devnum,4)+' reg:0x'+HexStr(start_reg,4)+' len:0x'+HexStr(len,8));
   rslt:=-1;
   if (busnum<=spi_max_bus) and (devnum<=spi_max_dev) then
   begin
@@ -12315,7 +12617,7 @@ begin
 	  if LOG_GetLogLevel<=LOG_DEBUG then show_spi_struct(xfer[1]);
  	  if LOG_GetLogLevel<=LOG_DEBUG then show_spi_dev_info_struct(busnum,devnum); *)
 
-//    Log_Writeln(LOG_DEBUG,'fpioctl('+Num2Str(spi_bus[busnum].spi_fd,0)+', 0x'+Hex(SPI_IOC_MESSAGE(2),8)+', 0x'+Hex(longword(addr(xfer)),8)+')'); 
+//    Log_Writeln(LOG_DEBUG,'fpioctl('+Num2Str(spi_bus[busnum].spi_fd,0)+', 0x'+HexStr(SPI_IOC_MESSAGE(2),8)+', 0x'+HexStr(longword(addr(xfer)),8)+')'); 
       {$IFDEF UNIX}
 	    rslt:=fpioctl(spi_dev[busnum,devnum].spi_fd,SPI_IOC_MESSAGE(2),addr(xfer)); { full duplex }
       {$ENDIF} 
@@ -12333,7 +12635,7 @@ begin
 //	  if LOG_Get_Level<=LOG_DEBUG then show_spi_buffer(spi_buf[devnum]);
 	  (* if LOG_GetLogLevel<=LOG_DEBUG then show_spi_struct(rfm22_stat[devnum]); *)
     end;
-  end else LOG_Writeln(LOG_ERROR,'SPI_BurstRead2Buffer[0x'+Hex(busnum,2)+'/0x'+Hex(devnum,2)+']: invalid busnum/devnum');
+  end else LOG_Writeln(LOG_ERROR,'SPI_BurstRead2Buffer[0x'+HexStr(busnum,2)+'/0x'+HexStr(devnum,2)+']: invalid busnum/devnum');
 //  Log_Writeln(LOG_DEBUG,'SPI_BurstRead2Buffer (end)');
 end;
 
@@ -12341,7 +12643,7 @@ procedure SPI_BurstWriteBuffer(busnum,devnum,basereg:byte; len:longword);
 // Write 'len' Bytes from Buffer SPI Dev startig at address 'reg'
 var rslt:integer; xfer : spi_ioc_transfer_t;
 begin
-//  Log_Writeln(LOG_DEBUG,'SPI_BurstWriteBuffer devnum:0x'+Hex(devnum,4)+' reg:0x'+Hex(start_reg,4)+' xferlen:0x'+Hex(xferlen,8));
+//  Log_Writeln(LOG_DEBUG,'SPI_BurstWriteBuffer devnum:0x'+HexStr(devnum,4)+' reg:0x'+HexStr(start_reg,4)+' xferlen:0x'+HexStr(xferlen,8));
   rslt:=-1;
   if (busnum<=spi_max_bus) and (devnum<=spi_max_dev) then
   begin
@@ -12353,7 +12655,7 @@ begin
 // 	  if LOG_Get_Level<=LOG_DEBUG then show_spi_struct(xfer);
 // 	  if LOG_Get_Level<=LOG_DEBUG then show_spi_dev_info_struct(busnum,devnum);
 // 	  if LOG_Get_Level<=LOG_DEBUG then show_spi_buffer(busnum,devnum);
-// 	  if LOG_Get_Level<=LOG_DEBUG then Log_Writeln(LOG_DEBUG,'fpioctl('+Num2Str(spi_bus[busnum].spi_fd,0)+', 0x'+Hex(SPI_IOC_MESSAGE(1),8)+', 0x'+Hex(longword(addr(xfer)),8)+')'); 
+// 	  if LOG_Get_Level<=LOG_DEBUG then Log_Writeln(LOG_DEBUG,'fpioctl('+Num2Str(spi_bus[busnum].spi_fd,0)+', 0x'+HexStr(SPI_IOC_MESSAGE(1),8)+', 0x'+HexStr(longword(addr(xfer)),8)+')'); 
 	  {$IFDEF UNIX}
 	    rslt:=fpioctl(spi_dev[busnum,devnum].spi_fd,SPI_IOC_MESSAGE(1),addr(xfer)); 
 	  {$ENDIF}
@@ -12361,12 +12663,12 @@ begin
 	            else inc(spi_buf[busnum,devnum].posidx,rslt-1); //rslt-1 wg. reg + buffer content
 //	  if LOG_Get_Level<=LOG_DEBUG then show_spi_buffer(busnum,devnum);
     end;
-  end else LOG_Writeln(LOG_ERROR,'SPI_BurstWriteBuffer[0x'+Hex(busnum,2)+'/0x'+Hex(devnum,2)+']: invalid busnum/devnum');
+  end else LOG_Writeln(LOG_ERROR,'SPI_BurstWriteBuffer[0x'+HexStr(busnum,2)+'/0x'+HexStr(devnum,2)+']: invalid busnum/devnum');
 end;
 
 procedure SPI_StartBurst(busnum,devnum:byte; reg:word; writeing:byte; len:longint);
 begin
-//Log_Writeln(LOG_DEBUG,'StartBurst StartReg: 0x'+Hex(reg,4)+' writing: '+Bool2Str(writeing<>0));
+//Log_Writeln(LOG_DEBUG,'StartBurst StartReg: 0x'+HexStr(reg,4)+' writing: '+Bool2Str(writeing<>0));
   if (busnum<=spi_max_bus) and (devnum<=spi_max_dev) then
   begin
     if (spi_dev[busnum,devnum].spi_fd>=0) then 
@@ -12387,7 +12689,7 @@ begin
 	    //inc(spi_buf[busnum,devnum].posidx); //1. Byte in Read Buffer is startregister -> position to 1. register content 
 	  end;
     end;
-  end else LOG_Writeln(LOG_ERROR,'SPI_StartBurst[0x'+Hex(busnum,2)+'/0x'+Hex(devnum,2)+']: invalid busnum/devnum');
+  end else LOG_Writeln(LOG_ERROR,'SPI_StartBurst[0x'+HexStr(busnum,2)+'/0x'+HexStr(devnum,2)+']: invalid busnum/devnum');
 end;
 
 procedure SPI_EndBurst(busnum,devnum:byte);
@@ -12397,7 +12699,7 @@ begin
   begin
     spi_buf[busnum,devnum].endidx:=0; 
     spi_buf[busnum,devnum].posidx:=1; // initiate BurstRead2Buffer
-  end else LOG_Writeln(LOG_ERROR,'SPI_EndBurst[0x'+Hex(busnum,2)+'/0x'+Hex(devnum,2)+']: invalid busnum/devnum');
+  end else LOG_Writeln(LOG_ERROR,'SPI_EndBurst[0x'+HexStr(busnum,2)+'/0x'+HexStr(devnum,2)+']: invalid busnum/devnum');
 end;
 
 function  xxSPI_Dev_Init(busnum,devnum:byte):boolean;
@@ -12427,12 +12729,12 @@ begin
       end;
 	  if (spi_fd<0) then 
 	  begin
-	    Log_Writeln(LOG_ERROR,'SPI_Dev_Init[0x'+Hex(busnum,2)+'/'+Hex(devnum,2)+']: '+spi_path);
+	    Log_Writeln(LOG_ERROR,'SPI_Dev_Init[0x'+HexStr(busnum,2)+'/'+HexStr(devnum,2)+']: '+spi_path);
 	    if LOG_Level<=LOG_DEBUG then SPI_show_dev_info_struct(busnum,devnum);
 	  end
 	  else ok:=true;
     end; // with
-  end else LOG_Writeln(LOG_ERROR,'SPI_Dev_Init[0x'+Hex(busnum,2)+'/0x'+Hex(devnum,2)+']: invalid busnum/devnum');
+  end else LOG_Writeln(LOG_ERROR,'SPI_Dev_Init[0x'+HexStr(busnum,2)+'/0x'+HexStr(devnum,2)+']: invalid busnum/devnum');
 //SPI_show_dev_info_struct(spi_dev[devnum], devnum);
   xxSPI_Dev_Init:=ok;
 end;
@@ -12461,7 +12763,7 @@ begin
 	    {$IFDEF UNIX} 
 	      if spi_fd<0 then spi_fd:=fpOpen(spi_path,O_RdWr); 	 
 		  res:=fpioctl(spi_fd,SPI_IOC_WR_MODE,@spi_mode);
-		  if (res=-1) then Log_Writeln(Log_ERROR,'SPI_Dev_Init: can''t set SPI mode 0x'+Hex(spi_mode,8)+' '+LNX_ErrDesc(fpgeterrno));   	      	      
+		  if (res=-1) then Log_Writeln(Log_ERROR,'SPI_Dev_Init: can''t set SPI mode 0x'+HexStr(spi_mode,8)+' '+LNX_ErrDesc(fpgeterrno));   	      	      
 	      res:=fpioctl(spi_fd,SPI_IOC_WR_BITS_PER_WORD,@spi_bpw);
 		  if (res=-1) then Log_Writeln(Log_ERROR,'SPI_Dev_Init: can''t set bits per word '+Num2Str(spi_bpw,0)+' '+LNX_ErrDesc(fpgeterrno));            
 		  res:=fpioctl(spi_fd,SPI_IOC_WR_MAX_SPEED_HZ,@spi_speed);
@@ -12479,18 +12781,76 @@ begin
       end;
 	  if (spi_fd<0) then 
 	  begin
-	    Log_Writeln(LOG_WARNING,'SPI_Dev_Init[0x'+Hex(busnum,2)+'/'+Hex(devnum,2)+']: '+spi_path);
+	    Log_Writeln(LOG_WARNING,'SPI_Dev_Init[0x'+HexStr(busnum,2)+'/'+HexStr(devnum,2)+']: '+spi_path);
 	    if LOG_Level<=LOG_DEBUG then SPI_show_dev_info_struct(busnum,devnum);
 	  end
 	  else ok:=true;
     end; // with
-  end else LOG_Writeln(LOG_ERROR,'SPI_Dev_Init[0x'+Hex(busnum,2)+'/0x'+Hex(devnum,2)+']: invalid busnum/devnum');
+  end else LOG_Writeln(LOG_ERROR,'SPI_Dev_Init[0x'+HexStr(busnum,2)+'/0x'+HexStr(devnum,2)+']: invalid busnum/devnum');
 //SPI_show_dev_info_struct(spi_dev[devnum], devnum);
   SPI_Dev_Init:=ok;
 end;
 
 function  SPI_Dev_Init(busnum,devnum:byte):boolean;
 begin SPI_Dev_Init:=SPI_Dev_Init(busnum,devnum,8,0,SPI_MODE_0,spi_bus[busnum].spi_maxspeed,0); end;
+
+procedure SPI_AdrMuxInit(CSnum,adr0gpio,adr1gpio:longint);
+// SPI and chip select pins
+// https://www.raspberrypi.org/forums/viewtopic.php?f=44&t=30765
+var i:integer;
+begin
+  if (CSnum<=spi_max_dev) then
+  begin
+	with SPI_AddrMux[CSnum] do
+  	begin
+  	  AdrCSgpio[0]:=adr0gpio; 	AdrCSgpio[1]:=adr1gpio;
+      AdrMuxEnable:=((GPIO_MAP_GPIO_NUM_2_HDR_PIN(AdrCSgpio[0])>0) and 
+    				 (GPIO_MAP_GPIO_NUM_2_HDR_PIN(AdrCSgpio[1])>0));
+      if AdrMuxEnable then
+      begin // using valid HWpins only
+	  	for i:= 0 to 1 do
+	    begin
+	  	  LOG_Writeln(LOG_WARNING,'SPI_AdrMuxInit['+Num2Str(i,0)+']: using GPIO#'+Num2Str(AdrCSgpio[i],0));
+		  GPIO_set_OUTPUT(AdrCSgpio[i]);	 
+		  GPIO_set_pin   (AdrCSgpio[i], true);	// active low -> deselect	  
+	  	end; // for
+	  end;
+  	end; // with
+  end else LOG_Writeln(LOG_ERROR,'SPI_AdrMuxInit: CS'+Num2Str(CSnum,0)+' not valid');
+end;
+
+procedure SPI_AdrMux(CSnum,adr:byte);
+// for using e.g. 74HC139 Dual 2-to-4 line decoder/demultiplexer
+// connect CS0 to 1E (Pin 1); GPIO<0> to 1A0 (Pin 2); GPIO<1> to 1A1 (Pin 3) 
+// connect CS1 to 2E (Pin15); GPIO<2> to 2A0 (Pin14); GPIO<3> to 2A1 (Pin13) 
+// using only 2 GPIOs: short 1A0 and 2A0; 1A1 and 2A1
+begin
+  if (CSnum<=spi_max_dev) then
+  begin
+	with SPI_AddrMux[CSnum] do
+  	begin
+	  if AdrMuxEnable then
+	  begin
+	  	case adr of // using negative logic (active low)
+		  0: begin GPIO_set_pin(AdrCSgpio[1],true);  GPIO_set_pin(AdrCSgpio[0],true);  end;
+		  1: begin GPIO_set_pin(AdrCSgpio[1],true);  GPIO_set_pin(AdrCSgpio[0],false); end;
+		  2: begin GPIO_set_pin(AdrCSgpio[1],false); GPIO_set_pin(AdrCSgpio[0],true);  end;
+		  3: begin GPIO_set_pin(AdrCSgpio[1],false); GPIO_set_pin(AdrCSgpio[0],false); end;
+		  else LOG_Writeln(LOG_ERROR,'SPI_AdrMux[CS'+Num2Str(CSnum,0)+'/'+Num2Str(adr,0)+']: not valid');
+	  	end; // case
+	  end else LOG_Writeln(LOG_ERROR,'SPI_AdrMux['+Num2Str(CSnum,0)+'/'+Num2Str(adr,0)+']: not enabled, GPIOs not defined');
+  	end; // with
+  end else LOG_Writeln(LOG_ERROR,'SPI_AdrMux: CS'+Num2Str(CSnum,0)+' not valid');
+end;
+
+procedure SPI_AdrMux(adr:byte);
+// select adr (0..7) before calling e.g. SPI_Transfer ...
+begin 
+  case adr of
+	0..3: SPI_AdrMux(0,(adr and $03));	// CS0
+	4..7: SPI_AdrMux(1,(adr and $03)); 	// CS1
+  end; // case
+end;
 
 procedure SPI_Start(busnum:byte);
 var devnum:byte;
@@ -12503,15 +12863,17 @@ begin
 	  spi_maxspeed:=SPI_GetSpeed(busnum);
 	  SPI_useCS:=false;
 	  InitCriticalSection(SPI_CS);
-      for devnum:=0 to spi_max_dev do SPI_Dev_Init(busnum,devnum);
+      for devnum:=0 to spi_max_dev do 
+    	SPI_Dev_Init(busnum,devnum);
     end;
-  end else LOG_Writeln(LOG_ERROR,'SPI_Start[0x'+Hex(busnum,2)+']: invalid busnum');
+  end else LOG_Writeln(LOG_ERROR,'SPI_Start[0x'+HexStr(busnum,2)+']: invalid busnum');
 end;
 
 procedure SPI_Start;  
 var i:integer; 
 begin 
-  for i:=0 to spi_max_bus do SPI_Start(i);  
+  for i:=0 to spi_max_dev do SPI_AdrMuxInit(i,-1,-1);
+  for i:=0 to spi_max_bus do SPI_Start(i); 
 end;
 
 procedure SPI_Bus_Close(busnum:byte);
@@ -12533,12 +12895,13 @@ begin
         spi_fd:=-1; 
       end;
 	end; // for
-  end else LOG_Writeln(LOG_ERROR,'SPI_Bus_Close[0x'+Hex(busnum,2)+']: invalid busnum');
+  end else LOG_Writeln(LOG_ERROR,'SPI_Bus_Close[0x'+HexStr(busnum,2)+']: invalid busnum');
 end;
 
 procedure SPI_Bus_Close_All; 
 var i:integer; 
 begin 
+  for i:=0 to spi_max_dev do SPI_AdrMuxInit(i,-1,-1);
   for i:=0 to spi_max_bus do SPI_Bus_Close(i); 
 end;
 
@@ -12591,7 +12954,7 @@ const RF22_REG_01_VERSION_CODE = $01; busnum=0; devnum=0;
       $06 : t:='SI443x_B1';
       else  t:='RFM_UNKNOWN';
     end;
-    GDVC:='0x'+Hex(b,2)+' '+t;
+    GDVC:='0x'+HexStr(b,2)+' '+t;
   end;
 begin
   writeln('Chip-Type: '+
@@ -12616,6 +12979,7 @@ function RPI_hdrpincount:byte;  	begin RPI_hdrpincount:=connector_pin_count; end
 function RPI_freq :string; 			begin RPI_freq :=cpu_fmin+';'+cpu_fcur+';'+cpu_fmax+';Hz'; end;
 function RPI_status_led_GPIO:byte;	begin RPI_status_led_GPIO:=status_led_GPIO; end;
 function RPI_snr :string;  			begin RPI_snr :=cpu_snr;  end;
+function RPI_whoami:string;  		begin RPI_whoami:=whoami; end;
 
 function  RPI_I2C_BRadj(i2c_speed_kHz:longint):longint;	
 // https://periph.io/platform/raspberrypi/ 
@@ -12807,7 +13171,7 @@ begin
           rslt:=-1;
 		  exit(rslt);
         end;
-        if testrun then writeln('poll() stdin read 0x',Hex(buf[0],2));
+        if testrun then writeln('poll() stdin read 0x',HexStr(buf[0],2));
       end;  
       flush (stdout);
     end;
@@ -12960,222 +13324,6 @@ begin
 end;
 
 {$ENDIF}
-
-procedure BB_OOK_PIN(state:boolean);
-// this procedure, uses a gpio pin for OOK (OnOffKeying). 
-begin
-//Writeln('BB_OOK_PIN(state: '+Bool2Str(state)+' Pin: '+Num2Str(BB_pin,0));
-  Log_Writeln(LOG_DEBUG,'BB_OOK_PIN(state: '+Bool2Str(state)+' Pin: '+Num2Str(BB_pin,0));
-  if BB_pin>0	then GPIO_set_PIN(BB_pin,state) 
-				else LOG_WRITELN(LOG_ERROR,'BB_OOK_PIN: unknown GPIO number '+Num2Str(BB_pin,0));
-end;
-
-procedure BB_BitBang(codestring,Pat:string; periodusec_short,periodusec_long,periodusec_sync,repl:longint); // Pat: '0,HpLPHpLP;1,HPLpHPLp;X,HpLPHPLp;S,HpLS'
-  procedure play(str:string);
-  var i:integer;
-  begin
-    for i := 1 to length(str) do
-	begin
-	  case str[i] of
-	    'L','l' : BB_OOK_PIN(false);
-		'H','h' : BB_OOK_PIN(true);
-		'p'		: delay_us(periodusec_short);	
-		'P'		: delay_us(periodusec_long);	
-		'S'		: delay_us(periodusec_sync);	
-		' ' 	: begin { do nothing, just for formatting reasons } end; 
-		else	  LOG_WRITELN(LOG_ERROR,'BB_BitBang: wrong pattern: '+str[i]+' playstr '+str);
-	  end;
-	end;
-  end;
-var   i,j:integer; H,L,X,S,sh1,sh2:string;
-begin
-  H:=''; L:=''; X:=''; S:=''; 
-  for i := 1 to Anz_Item(Pat,';','') do
-  begin
-    sh1:=Select_Item(Pat,';','',i); sh2:=Select_Item(sh1,',','',2); sh1:=Select_Item(sh1,',','',1);
-	if sh1='0' then L:=sh2; if sh1='1' then H:=sh2; if sh1='X' then X:=sh2; if sh1='S' then S:=sh2;
-  end;
-  for i := 1 to repl do
-  begin
-    for j := 1 to Length(codestring) do
-    begin
-      case codestring[j] of
-        '0' : play(L);
-		'1' : play(H);
-		'X' : play(X);
-		'S' : play(S);
-		' ' : begin { do nothing, just for formatting reasons } end; 
-		else  LOG_WRITELN(LOG_ERROR,'BB_BitBang: wrong pattern: '+codestring[j]+' in '+codestring);
-	  end;
-    end;
-  end;
-end; { BB_BitBang }
-
-procedure BB_SendCode(switch_type:T_PowerSwitch; adr,id,desc:string; ein:boolean);
-{ https://github.com/tandersson/rf-bitbanger/blob/master/rfbb_cmd/rfbb_cmd.c }
-var   s,pat:string; ok:boolean; periodusec_short,periodusec_long,periodusec_sync,repl:longint;
-begin
-  s:=FilterChar(adr,'01'); pat:=''; ok:=false; repl:=10; periodusec_short:=340; periodusec_long:=3*periodusec_short; periodusec_sync:=32*periodusec_short;
-  LOG_Writeln(LOG_DEBUG,'BB_SendCode on:'+Bool2Str(ein)+' TYP:'+GetEnumName(TypeInfo(T_PowerSwitch),ord(switch_type))+' ADR:'+adr+' DESC:'+desc);
-//Writeln              ('BB_SendCode on:'+Bool2Str(ein)+' TYP:'+GetEnumName(TypeInfo(T_PowerSwitch),ord(switch_type))+' ADR:'+adr+' DESC:'+desc);  
-  if s<>'' then
-  begin
-    LED_Status(false); 
-	BB_OOK_PIN(false);	
-    case switch_type of
-	  ELRO,Sartano:	begin // This is tested, I have an ELRO PowerSwitch
-					  ok:=true; pat:='0,HpLPHPLp;1,HpLPHpLP;S,HpLS';
-					  repl:=15; periodusec_short:=320; periodusec_long:=3*periodusec_short; periodusec_sync:=31*periodusec_short; 
-					  if ein then s:=s+'10' else s:=s+'01'; s:=s+'S'; // ein: '00' ???
-					end;
-	  nexa: 		begin {	This is not tested, I don't have a nexa PowerSwitch
-							http://elektronikforumet.syntaxis.se/wiki/index.php/RF_Protokoll_-_Nexa/Proove_%28%C3%A4ldre,_ej_sj%C3%A4lvl%C3%A4rande%29
-							The bit coding used by the encoder chips, for example M3E. from MOSDESIGN SEMICONDUCTOR, allows for trinary codes, ie '0','1' and 'X' (OPEN/FLOATING). 
-							However, it seems that only '0' and 'X' is currently used in the NEXA/PROOVE remotes. 
-							The high level in the ASCII-graphs below denotes the transmission of the 433 MHz carrier. The low level means no carrier.}
-					  ok:=true; pat:='0,HpLPHpLP;1,HPLpHPLp;X,HpLPHPLp;S,HpLS';	
-					  repl:=10; periodusec_short:=340; periodusec_long:=3*periodusec_short; periodusec_sync:=32*periodusec_short;
-					  if ein then s:=s+'10' else s:=s+'01'; s:=s+'S'; 
-					  s:=StringReplace(s,'1','X',[rfReplaceAll,rfIgnoreCase]);
-					end;
-	  Intertechno:	begin { This is not tested, I don't have a Intertechno PowerSwitch
-							CONRAD-Intertechno: http://blog.sui.li/2011/04/12/low-cost-funksteckdosen-arduino/ }
-					  ok:=true; pat:='0,HpLPHpLP;1,HPLpHpLP;S,HpLS'; 	
-					  repl:=10; periodusec_short:=320; periodusec_long:=3*periodusec_short; periodusec_sync:=32*periodusec_short;
-					  if ein then s:=s+'1'  else s:=s+'0';  s:=s+'S'; 
-					end;
-	  else          LOG_Writeln(LOG_ERROR,'BB_SendCode: unknown switchtype: '+GetEnumName(TypeInfo(T_PowerSwitch),ord(switch_type)));
-    end;
-	if ok then BB_BitBang(s, Pat, periodusec_short, periodusec_long, periodusec_sync, repl); 
-	BB_OOK_PIN(false); 	
-    LED_Status(true);
-	sleep(1);	
-  end;
-end;
-
-procedure BB_SetPin(gpio:longint); 
-begin 
-  BB_pin:=gpio; 
-  Log_Writeln(LOG_DEBUG,'BB_SetPin: '+Num2Str(BB_pin,0)); 
-  if (BB_pin>0) then GPIO_set_OUTPUT(BB_pin); 
-//writeln('BB_SetPin: ',BB_pin);
-end;
-
-function  BB_GetPin:longint; begin BB_GetPin:=BB_pin; end;
-
-procedure BB_InitPin(id:string); // e.g. id:'TLP434A' or id:'13'  (direct RPI Pin on HW Header P1 )
-var devnum:byte; BBPin:longint; sh:string; 
-begin
-  sh:=Upper(id);
-  if not Str2Num(Select_Item(sh,',','',1),BBpin) then BBpin:=-1;
-  devnum:=0;
-  if (sh='TLP434A') 	then devnum:=1;
-  if (sh='TX433N') 		then devnum:=1;
-  if (sh='TWS-BS') 		then devnum:=1; // from Sparkfun WRL-10534 
-  if (sh='RFM22B')	 	then devnum:=2;
-  case devnum of
-	 1 : 					BBpin:=GPIO_MAP_HDR_PIN_2_GPIO_NUM(IO1_Pin_on_RPI_Header,	RPI_gpiomapidx);  
-	 2 : 					BBpin:=GPIO_MAP_HDR_PIN_2_GPIO_NUM(OOK_Pin_on_RPI_Header,	RPI_gpiomapidx); 
-	else if BBpin>0 then	BBpin:=GPIO_MAP_HDR_PIN_2_GPIO_NUM(BBpin, 					RPI_gpiomapidx); 
-  end;
-  BB_SetPin(BBpin);
-end;
-
-procedure ELRO_TEST;
-// Set your ELRO PowerSwitch to the following System- and Unit_A-Code
-const id_c='ELRO-A'; SystemCode_c='10001'; Unit_A_c='10000'; Unit_B_c='01000'; Unit_C_c='00100'; Unit_D_c='00010'; Unit_E_c='00001'; 
-var cnt:integer; oldpin:longint;
-begin
-  oldpin:=BB_GetPin;															// save it
-  BB_SetPin(GPIO_MAP_HDR_PIN_2_GPIO_NUM(IO1_Pin_on_RPI_Header,RPI_gpiomapidx)); // set the pin to OOK Pin for the piggyback-board Transmitter Chip (433.92 Mhz)
-  writeln('Start  ELRO_TEST');
-  for cnt := 1 to 15 do
-  begin
-    writeln(cnt:2,'. EIN: '+id_c); LED_Status(true); BB_SendCode(ELRO,SystemCode_c+Unit_A_c,id_c,'ELRO Switch A, System-Code: ON  OFF OFF OFF ON   Unit-Code: ON  OFF OFF OFF OFF', true);  sleep(1500); LED_Status(false); 
-	writeln(cnt:2,'. AUS: '+id_c); LED_Status(true); BB_SendCode(ELRO,SystemCode_c+Unit_A_c,id_c,'ELRO Switch A, System-Code: ON  OFF OFF OFF ON   Unit-Code: ON  OFF OFF OFF OFF', false); sleep(2000); LED_Status(false); 
-	writeln; writeln;
-  end;
-  writeln('End   ELRO_TEST');
-  BB_SetPin(oldpin);															// restore it
-end;
-
-procedure MORSE_speed(speed:integer); // 1..5, -1=default_speed
-//WpM:WordsPerMinute; BpM:Buchstaben/Letter pro Minute
-begin
-  MORSE_dit_lgt			:= 120;	//  10WpM=50BpM	-> 120ms // default
-  case speed of
-      1 : MORSE_dit_lgt	:=1200;	//  1WpM=  5BpM	->1200ms 
-	  2 : MORSE_dit_lgt	:= 240;	//  5WpM= 25BpM	-> 240ms
-	  3 : MORSE_dit_lgt	:= 150;	//  8WpM		-> 150ms 
-	  4 : MORSE_dit_lgt	:= 120;	// 10WpM= 50BpM	-> 120ms
-	  5 : MORSE_dit_lgt	:=  60;	// 20WpM=100BpM	->  60ms
-  end;
-end;
-
-procedure MORSE_tx(s:string);
-// http://de.wikipedia.org/wiki/Morsezeichen
-// http://en.wikipedia.org/wiki/MORSE_code
-const test=true; CH_c = 'c'; 
-  MORSE_char : array [01..26,01..02] of string = 
-  ( ('.-',  'A') , ('-...','B') , ('-.-.','C') , ('-..', 'D') , ('.',   'E') , 
-    ('..-.','F') , ('--.', 'G') , ('....','H') , ('..',  'I') , ('.---','J') ,
-    ('-.-', 'K') , ('.-..','L') , ('--',  'M') , ('-.',  'N') , ('---', 'O') ,
-    ('.--.','P') , ('--.-','Q') , ('.-.', 'R') , ('...', 'S') , ('-',   'T') ,
-    ('..-', 'U') , ('...-','V') , ('.--', 'W') , ('-..-','X') , ('-.--','Y') ,
-    ('--..','Z') );
- 
-  MORSE_digit : array [01..10,01..02] of string = 
-  ( ('-----','0') , ('.----','1') , ('..---','2') , ('...--', '3') , ('....-','4') ,
-    ('.....','5') , ('-....','6') , ('--...','7') , ('---..', '8') , ('----.','9') );
-
-  sc1_count = 27;
-  MORSE_sc1 : array [01..sc1_count,01..02] of string = 
-  ( ('----',  CH_c),
-    ('.-.-.-','.') , ('--..--',',') ,  ('---...', ':') , ('-.-.-.',';') , ('..--..','?') ,   
-    ('-.-.--','!') , ('-....-','-') ,  ('..--.-', '_') , ('-.--.', '(') , ('-.--.-',')') , 
-	('.----.',''''), ('-...-', '=') ,  ('.-.-.',  '+') , ('-..-.', '/') , ('.--.-.','@') ,
-	('.-...', '&') , ('.-..-.','"') ,  ('...-..-','$') ,
-    ('.-.-',  'Ä') , ('---.',  'Ö') ,  ('..--',   'Ü') , ('...--..','ß'), ('.--.-', 'À') ,
-	('.--.-', 'Å') , ('.-..-', 'È') ,  ('--.--',  'Ñ') 
-  );
-
-var sh,sh2:string; n : longint; dit_lgt,dah_lgt,symbol_end,letter_end,word_end:word;
-
-  procedure MORSE_wait(w:word); begin delay_msec(w) end;
-  procedure dit; begin BB_OOK_PIN(AN); MORSE_wait(dit_lgt); BB_OOK_PIN(AUS); end; 
-  procedure dah; begin BB_OOK_PIN(AN); MORSE_wait(dah_lgt); BB_OOK_PIN(AUS); end; 
-  procedure sig (ch:char); begin if test then write(ch); if ch='.' then dit else dah; end;
-  
-  function  sc1 (s:string):string; var sh:string; j:longint; begin sh:=''; for j := 1 to sc1_count do if s=MORSE_sc1[j,2] then sh:=MORSE_sc1[j,1]; sc1:=sh; end;
-  procedure mors(s1,s2:string);    var n : longint; begin if test then begin if s1=CH_c then write('CH') else write(s1); write(' '); end; for n := 1 to Length(s2) do begin sig(s2[n]); if n<Length(s2) then MORSE_wait(symbol_end); end; if test then writeln; end;
-  
-begin
-  dit_lgt:=MORSE_dit_lgt; dah_lgt:=3*dit_lgt; symbol_end:=dit_lgt; letter_end:=dah_lgt; word_end:=7*dit_lgt; // define timing, depending on external variable MORSE_dit_lgt set by procedure MORSE_speed
-  LOG_Writeln(LOG_DEBUG,'Morse: '+s);
-  if test then  writeln('Morse: '+s);
-  sh:=Upper(s);
-//sh:=StringReplace(sh,'CH',CH_c,[rfReplaceAll]); // replace 'CH' with one character
-  for n := 1 to Length(sh) do
-  begin
-    case sh[n] of
-	  ' '	   : begin MORSE_wait(word_end); if test then writeln; end;
-      'A'..'Z' : begin sh2:=MORSE_char [ord(sh[n])-ord('A')+1,1]; mors(sh[n],sh2); MORSE_wait(letter_end); end;
-	  '0'..'9' : begin sh2:=MORSE_digit[ord(sh[n])-ord('0')+1,1]; mors(sh[n],sh2); MORSE_wait(letter_end); end;
-	  else       begin sh2:=sc1(sh[n]);                           mors(sh[n],sh2); MORSE_wait(letter_end); end;
-	end;
-  end;
-  if test then writeln;
-end;
-
-procedure MORSE_test;
-var oldpin:longint;
-begin
-  oldpin:=BB_GetPin;						// save it
-  BB_SetPin(RPI_status_led_GPIO); 			// set the pin to Rpi Status LED
-  MORSE_speed(3);							// 3: 8WpM	-> 150ms 
-  MORSE_tx('Hello this is a Morse Test.');	// The Status LED should blink (morse) now
-  BB_SetPin(oldpin);						// restore it
-end;
 
 function  SearchValIdx(var InpArr:array of real; srchval,Epsilon:real):longint;
 // in: search a value 'srchval' in an array. 
@@ -14482,7 +14630,8 @@ begin
 
   with IP_Infos do
   begin
-  	idx:=0; init:=false; samesubnet:=false; hostname:=''; devlst:='';
+  	idx:=0; init:=false; samesubnet:=false; hostname:=''; 
+  	devlst:=''; 		 hostapd_extdev:=ifeth_c;
 	IPInfo_Init(ifwlan_c,	IP_Info[0]);	IP_Info[0].alias:=ifwlan_c;
 	IPInfo_Init(ifeth_c,	IP_Info[1]);	IP_Info[1].alias:=ifeth_c;
 	IPInfo_Init(ifuap_c,	IP_Info[2]);	IP_Info[2].alias:=ifuap_c;
@@ -14531,9 +14680,7 @@ begin
   AddExitProc(@RPI_hal_exit);
   inivar;
   Get_CPU_INFO_Init; 
-  BB_pin:=RPI_status_led_GPIO;
 //RPI_ShutDownInit(-1);			// just init data struct, no HW-Pin
-  MORSE_speed(-1);				// set to default speed 10WpM=50BpM	-> 120ms 
   IO_Init_Const;
   RPI_HW_initpart:=[];
   if RPI_Init_Allowed then RPI_HW_Start;

@@ -74,7 +74,7 @@ const SPI_READ_CMD=$41;
 var b:byte;
 begin
   b:=0;
-  if devadr>$03 then Log_Writeln(LOG_ERROR,'pfio_spi_read: devadr '+Hex(devadr,2)+' not valid')
+  if devadr>$03 then Log_Writeln(LOG_ERROR,'pfio_spi_read: devadr '+HexStr(devadr,2)+' not valid')
   else
     begin
     if pfio_avail(devadr) then
@@ -90,7 +90,7 @@ end;
 procedure pfio_spi_write(devadr:byte; reg,data:word);
 const SPI_WRITE_CMD=$40;
 begin
-  if devadr>$03 then Log_Writeln(LOG_ERROR,'pfio_spi_write: devadr '+Hex(devadr,2)+' not valid')
+  if devadr>$03 then Log_Writeln(LOG_ERROR,'pfio_spi_write: devadr '+HexStr(devadr,2)+' not valid')
                 else if pfio_avail(devadr) then 
 				spi_transfer(pfio_busnum_default,pfio_devnum_default, 
 							 char(SPI_WRITE_CMD or (devadr shl 1))+
@@ -99,11 +99,11 @@ end;
 
 procedure pfio_showregs(devadr:byte);
 begin
-  writeln('IOCON  0x'+Hex(pfio_spi_read(devadr, pfio_IOCON), 2));
-  writeln('GPIOA  0x'+Hex(pfio_spi_read(devadr, pfio_GPIOA), 2));
-  writeln('IODIRA 0x'+Hex(pfio_spi_read(devadr, pfio_IODIRA),2));
-  writeln('IODIRB 0x'+Hex(pfio_spi_read(devadr, pfio_IODIRB),2));
-  writeln('GPPUB  0x'+Hex(pfio_spi_read(devadr, pfio_GPPUB), 2));
+  writeln('IOCON  0x'+HexStr(pfio_spi_read(devadr, pfio_IOCON), 2));
+  writeln('GPIOA  0x'+HexStr(pfio_spi_read(devadr, pfio_GPIOA), 2));
+  writeln('IODIRA 0x'+HexStr(pfio_spi_read(devadr, pfio_IODIRA),2));
+  writeln('IODIRB 0x'+HexStr(pfio_spi_read(devadr, pfio_IODIRB),2));
+  writeln('GPPUB  0x'+HexStr(pfio_spi_read(devadr, pfio_GPPUB), 2));
 end;
 
 procedure pfio_init(devadr:byte);
@@ -155,10 +155,10 @@ begin
                  else new_pin_values := old_pin_values and (not pin_bit_mask);
   if (LOG_Level>=LOG_DEBUG) then
   begin
-    Log_Writeln(LOG_DEBUG,'digital_write: pin number '+Hex(pin_number,2)+' value '+Hex(value,2));
-    Log_Writeln(LOG_DEBUG,'pin bit mask:   0x'+Hex(pin_bit_mask,2));
-    Log_Writeln(LOG_DEBUG,'old pin values: 0x'+Hex(old_pin_values,2));
-    Log_Writeln(LOG_DEBUG,'new pin values: 0x'+Hex(new_pin_values,2));
+    Log_Writeln(LOG_DEBUG,'digital_write: pin number '+HexStr(pin_number,2)+' value '+HexStr(value,2));
+    Log_Writeln(LOG_DEBUG,'pin bit mask:   0x'+HexStr(pin_bit_mask,2));
+    Log_Writeln(LOG_DEBUG,'old pin values: 0x'+HexStr(old_pin_values,2));
+    Log_Writeln(LOG_DEBUG,'new pin values: 0x'+HexStr(new_pin_values,2));
     Log_Writeln(LOG_DEBUG,'');
   end;
   pfio_write_output(devadr,new_pin_values);
@@ -183,7 +183,7 @@ procedure pfio_RELAY(devadr, num:byte; state:boolean);
 begin
   case num of
      1..2 : pfio_write_output(devadr, SetBitINByte(pfio_read_output(devadr),num,state));
-	else LOG_WRITELN(LOG_ERROR,'pfio_RELAY: num '+Hex(num,2)+' not valid');
+	else LOG_WRITELN(LOG_ERROR,'pfio_RELAY: num '+HexStr(num,2)+' not valid');
   end;	
 end;
 
@@ -191,7 +191,7 @@ procedure pfio_OUTPUT(devadr, num:byte; state:boolean);
 begin
   case num of
      1..8 : pfio_write_output(devadr, SetBitINByte(pfio_read_output(devadr),num,state));
-	else LOG_WRITELN(LOG_ERROR,'pfio_OUTPUT: num '+Hex(num,2)+' not valid');
+	else LOG_WRITELN(LOG_ERROR,'pfio_OUTPUT: num '+HexStr(num,2)+' not valid');
   end;	
 end;
 
@@ -207,7 +207,7 @@ begin
   for cnt := 1 to 10 do
   begin
     b:=pfio_read_input(devadr);
-    write  ('Input port: 0x'+Hex(b,2)); if b>0 then write(' Button pressed S'+Num2Str(pfio_button_pressed(b),0)); writeln;
+    write  ('Input port: 0x'+HexStr(b,2)); if b>0 then write(' Button pressed S'+Num2Str(pfio_button_pressed(b),0)); writeln;
 	delay_msec(1000); // ms
   end;
 end;
