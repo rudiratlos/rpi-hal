@@ -1,7 +1,7 @@
-unit rpi_hal; // V5.1 // 2019-06-30
+unit rpi_hal; // V5.2 // 2020-01-15
 { RPI_hal:
 * Free Pascal Hardware abstraction library for the Raspberry Pi
-* Copyright (c) 2012-2019 Stefan Fischer
+* Copyright (c) 2012-2020 Stefan Fischer
 ***********************************************************************
 *
 * RPI_hal is free software: you can redistribute it and/or modify
@@ -40,7 +40,7 @@ unit rpi_hal; // V5.1 // 2019-06-30
   {$MACRO ON}
   {$HINTS OFF}
 Interface 
-uses {$IFDEF UNIX}    cthreads,initc,ctypes,unixtype,cmem,BaseUnix,Unix,unixutil,errors, {$ENDIF} 
+uses {$IFDEF UNIX}    cthreads,initc,ctypes,unixtype,BaseUnix,Unix,unixutil,errors, {$ENDIF} 
      {$IFDEF WINDOWS} windows, {$ENDIF} 
 	 crt,typinfo,sysutils,dateutils,Classes,Process,math,inifiles,md5;  	 
 const
@@ -62,21 +62,22 @@ const
   rpi_fw_dev=			'/dev/vcio';
   rpi_cpu_temp_dev_c=	'/sys/class/thermal/thermal_zone0/temp'; 
 //http://makezine.com/2016/03/02/raspberry-pi-3-not-halt-catch-fire/
-  RPI_TempAlarmCelsius_c=  85;	// 85'C according to spec (max. temp)  
-  RPI_CTempWarn_c= 		0.906;	// 82'C rpi start to throttle@82Deg
-  RPI_CTempCool_c=		0.588;	// factor of RPI_TempAlarmCelsius_c -> 85*0.58=50
-  RPI_CTempHot_c=		0.953;	 
+  RPI_TempAlarmCelsius_c=   85;	// 85'C according to spec (max. temp), 82'C rpi start to throttle@82Deg 
+  RPI_CTempCool_c=		0.6824;	// factor for 58'C
+  RPI_CTempWarn_c= 		0.8824;	// factor for 75'C
+  RPI_CTempHot_c=		0.9412;	// factor for 80'C
  
   LF      = #$0A; CR   = #$0D; STX      = #$02; ETX = #$03;	ESC=#27;
   Cntrl_Z = #$1A; BELL =   #7; EOL_char =   LF; HT  = #$09; // HT=TAB
   yes_c='TRUE,YES,1,JA,AN,EIN,HIGH,ON'; nein_c='FALSE,NO,0,NEIN,AUS,LOW,OFF';
   CompanyShortName='BASIS';
-  DfltSect_c='DEFAULT'; HomeSect_c='HOME';
+  DfltSect_c='DEFAULT'; HomeSect_c='HOME'; noSect_c='UNKNOWN';
   UAgentDefault='Mozilla/5.0 (Macintosh; Intel Mac OS X 10.10; rv:36.0) Gecko/20100101 Firefox/36.0';
 //https://curl.haxx.se/docs/manpage.html
   CURLTimeOut_c= '300'; CURLPorts_c='49152-63000';
   CURLFTPDefaults_c='--retry 3 --retry-delay 5 --ftp-pasv --ftp-skip-pasv-ip --disable-epsv --connect-timeout '+CURLTimeOut_c+' --local-port '+CURLPorts_c;
-  CURLSSLDefaults_c='-k --ssl --ssl-allow-beast';
+//CURLSSLDefaults_c='-k --ssl --ssl-allow-beast'; // does not work on webgo24
+  CURLSSLDefaults_c='-k --insecure';
   CURLpfext_c='.prog';
   cryptext_c= '.cpt';
   curlprogsync_ms_c=3000;		// > 9 
@@ -128,6 +129,7 @@ options fbtft_device name=adafruit13m debug=3 speed=16000000 gpios=dc:9
   letsencryptdir_c=	'/etc/letsencrypt/live';
   
   LNX_ShadowFile=		'/etc/shadow';
+  LNX_DevTree=			'/proc/device-tree';
   
   ifuap_c=				'ap0';
   ifeth_c=				'eth0';
@@ -136,6 +138,7 @@ options fbtft_device name=adafruit13m debug=3 speed=16000000 gpios=dc:9
   ovpn_dev_c=			'tun0';
   noip_c=				'noIPAdr'; 
   noMAC_c=				'noMAC';
+  noData_c=				'noData';
   unknown_c=			'unknown';
   exit_c=				'<exit>';
   none_c=				'<none>';
@@ -154,11 +157,14 @@ options fbtft_device name=adafruit13m debug=3 speed=16000000 gpios=dc:9
   plld_freq_c			= 500000000; // PLLD ( 500Mhz ClkSrc=6)
   HDMI_freq_c			= 216000000; // HDMI ( 216Mhz ClkSrc=7, auxiliary) 
   
-  gpiomax_reg_c			=54; // max. gpio count (GPIO0-53) pls. see (BCM2709) 2012 Datasheet page 102ff 
+  gpiomax_2711_reg_c	=58; // max. gpio count (GPIO0-57) (BCM2711)
+  gpiomax_2708_reg_c	=54; // max. gpio count (GPIO0-53) pls. see (BCM2709) 2012 Datasheet page 102ff 
   GPIO_PWM0	   			=18; // GPIO18 PWM0 	on Connector Pin12
   GPIO_PWM1				=19; // GPIO19 PWM1 	on Connector Pin35  (RPI2)
   GPIO_PWM0A0		   	=12; // GPIO12 PWM0 	on Connector Pin32  (RPI2)
   GPIO_PWM1A0			=13; // GPIO13 PWM1 	on Connector Pin33  (RPI2)
+  GPIO_PWM0Audio		=40; // GPIO40 PWM0		on Audio
+  GPIO_PWM1Audio		=45; // GPIO45 PWM1		on Audio
   GPIO_FRQ04_CLK0		= 4; // GPIO4  GPCLK0 	on Connector Pin7
   GPIO_FRQ05_CLK1		= 5; // GPIO5  GPCLK1 	on Connector Pin29  (reserved for system use)
   GPIO_FRQ06_CLK2		= 6; // GPIO6  GPCLK2 	on Connector Pin31
@@ -171,7 +177,7 @@ options fbtft_device name=adafruit13m debug=3 speed=16000000 gpios=dc:9
   GPIO_FRQ44_CLK1		=44; // GPIO44 GPCLK1	Compute module only (reserved for system use)
   
   GPIO_path_c='/sys/class/gpio';
-  mdl=9;
+  mdl=16; // was 9;
   wid1=12;
   gpiomax_map_idx_c=2;
   max_pins_c = 40;
@@ -274,10 +280,15 @@ options fbtft_device name=adafruit13m debug=3 speed=16000000 gpios=dc:9
   GPAREN			= GPIO_BASE+$1f; // Pin Async. RisigngEdge Detection 
   GPAFEN			= GPIO_BASE+$22; // Pin Async. FallingEdge Detection 
   GPPUD				= GPIO_BASE+$25; // Pin Pull-up/down Enable 
-  GPPUDCLK			= GPIO_BASE+$26; // Pin Pull-up/down Enable Clock 
+  GPPUDCLK			= GPIO_BASE+$26; // Pin Pull-up/down Enable Clock
   GPTEST			= GPIO_BASE+$29;
+  GPPUPPDN			= GPIO_BASE+$39; // Pin Pull-up/down Enable 2711 pins 15:0
+  GPPUPPDN1			= GPIO_BASE+$3a; // Pin Pull-up/down Enable 2711 pins 31:16
+  GPPUPPDN2			= GPIO_BASE+$3b; // Pin Pull-up/down Enable 2711 pins 47:32
+  GPPUPPDN3			= GPIO_BASE+$3c; // Pin Pull-up/down Enable 2711 pins 57:48
+  
   GPIOONLYREAD		= GPLEV;		 // 2x 32Bit Register, which are ReadOnly
-  GPIO_BASE_LAST	= GPTEST;
+  GPIO_BASE_LAST	= GPPUPPDN3;
 
   TIMR_BASE			= (TIMR_BASE_OFS+$400) div BCM270x_RegSizInByte; // Docu Page 196 
   APMLOAD			= TIMR_BASE+0;// 0x00	
@@ -533,9 +544,6 @@ options fbtft_device name=adafruit13m debug=3 speed=16000000 gpios=dc:9
   ERR_AutoResetMSec	=2000;	// AutoReset of Errors in msec. 0=noReset
   NO_ERRHNDL		=  -1;
   NO_TEST        	= NO_ERRHNDL;
-
-  RTC_RD_TIME 		= $40247009; 	//-2145095671;
-  RTC_SET_TIME 		= $4024700A;	// 1076129802;
   
 //consts for rpi fw mbx access (/dev/vcio)
 //source: https://github.com/raspberrypi/linux/blob/rpi-4.9.y/include/soc/bcm2835/raspberrypi-firmware.h
@@ -699,6 +707,8 @@ options fbtft_device name=adafruit13m debug=3 speed=16000000 gpios=dc:9
   
   RPI_hal_dscl=	20;
   
+  HeapStatMax_c=20;
+  
   CLOCK_REALTIME=0; 		// Taken from linux/time.h // Posix timers
   
   CertPublic=1; CertPrivKey=2; CertCA=3; CertCombined=4;
@@ -711,23 +721,27 @@ options fbtft_device name=adafruit13m debug=3 speed=16000000 gpios=dc:9
   PID_twiddle_tolerance=0.00001;		 PID_twiddle_saveattol=PID_twiddle_tolerance*100;
   PID_twiddle_tolNOTsav=0;	 
   PID_nk15=15;
-  
+
   IP_infomax_c=3;
-  oldvalcnt_c= 3;
-    
+  IP_infoNOadapt_c=-1;
+  IP_infoWLAN0idx_c=0;
+  IP_infoETH0idx_c=1;
+  IP_infoUAP0idx_c=2;
+  IP_infoWLAN1idx_c=3;
+   
 type
   E_rpi_hal_Exception= class(Exception);
-  t_ErrorLevel=   (	LOG_NHdr,LOG_WHITE,LOG_BLACK,LOG_BLUE,LOG_GREEN,LOG_LHTGRN,LOG_YELLOW,LOG_ORANGE,LOG_RED,
+  t_ErrorLevel=   (	LOG_NHdr,LOG_WHITE,LOG_BLACK,LOG_BLUE,LOG_GREEN,LOG_LHTGRN,LOG_YELLOW,LOG_ORANGE,LOG_RED,LOG_MAGENTA,
   					LOG_All,LOG_DEBUG,LOG_INFO,LOG_NOTICE,LOG_WARNING,LOG_ERROR,LOG_URGENT,LOG_NONE,LOG_NONE2); 
 //t_port_flags order is important, do not change. Ord(t_port_flags) will be used to set ALT-Bits in GPFSELx Registers.
 // ORD:				   0,     1,   2,   3,   4,   5,   6,   7,    8,    9      10
   t_port_flags  = (	INPUT,OUTPUT,ALT5,ALT4,ALT0,ALT1,ALT2,ALT3,PWMHW,PWMSW,control,
-					FRQHW,Simulation,PullUP,PullDOWN,RisingEDGE,FallingEDGE,
+					FRQHW,Simulation,PullUP,PullDOWN,RisingEDGE,FallingEDGE,NOpull,
 					DS2mA,DS4mA,DS6mA,DS8mA,DS10mA,DS12mA,DS14mA,DS16mA,noPADhyst,noPADslew,
-					ReversePOLARITY,InitialHIGH,WRthrough,IOCheck,UseCSec,I2C,
+					ReversePOLARITY,InitialHIGH,WRthrough,IOasync,IOCheck,UseCSec,UseCSecWR,UseCSecRD,I2C,
 					Bit5,Bit6,Bit7,Bit8,StopBit1,StopBit1H,StopBit2,HShw,HSsw,
 					ParityNONE,ParityODD,ParityEVEN,ParityMark,ParitySpace,withSTTY,
-					TTYstartCursor,TTYstopCursor,TTYclearScreen); 					
+					TTYstartCursor,TTYstopCursor,TTYclearScreen,QRshowCode); 					
   s_port_flags  = set of t_port_flags;
   
   t_initpart	= (	InitHaltOnError,InitGPIO, (* InitGPIOonly,*) InitRPIfw,InitI2C,InitSPI,
@@ -737,13 +751,21 @@ type
   t_IOBusType	= (	UnknDev,I2CDev,SPIDev);
   t_PowerSwitch	= ( ELRO,Sartano,Nexa,Intertechno,FS20);
   t_rpimaintflags=(	UseENCrypt,UpdExec,UpdPKGGet,UpdPKGcopy,UseDECrypt,UpdPKGInst,UpdPKGInstV,
-  					UpdUpld,UpdDwnld,UpdProtoHTTP,UpdProtoRAW,UAgent,UpdNoRedoRequest,
-  					UpdNOP,UpdSSL,UpdVerbose,UpdForce,UpdUpdate,UpdNoProgressBar,UpdLogAppend,UpdNoFTPDefaults, //UpdSUDO,
+  					UpdUpld,UpdDwnld,UpdProtoHTTP,UpdProtoHTTPS,UpdProtoRAW,UAgent,UpdNoRedoRequest,
+  					UpdNOP,UpdSSL,UpdVerbose,UpdQuiet,UpdForce,UpdUpdate,UpdNoProgressBar,UpdLogAppend,UpdNoFTPDefaults, //UpdSUDO,
   					UpdErrVerbose,UpdNoCreateDir,UpdNewerOnly,UpdCleanUP,UpdKeepFile,
-  					UpdNoWDOGprevent,UpdNoZIP,UpdFollowLink,UpdVerify,UpdDBG1,UpdDBG2,UpdnoMD5Chk,
+  					UpdNoWDOGprevent,UpdNoZIP,UpdFollowLink,UpdVerify,UpdDBG1,UpdDBG2,UpdnoMD5Chk,UpdOnlyMD5Chk,
   					UPDStop,UPDDisable,UPDEnable,UPDStart,UPDReStart,UpdShowThInfo,SysV,Systemd,
   					WDOG_Close,WDOG_Retrig,WDOG_GTO,WDOG_STO,WDOG_BSTAT,WDOG_GSup,WDOG_Pause,WDOG_Resume);  
   s_rpimaintflags=set of t_rpimaintflags;
+  
+  t_RPI_config	= (	GET_CAN_EXPAND,EXPAND_FS,GET_HOSTNAME,SET_HOSTNAME,GET_BOOT_CLI,GET_AUTOLOGIN,
+  					SET_BOOT_CLI,SET_BOOT_CLIA,SET_BOOT_GUI,SET_BOOT_GUIA,GET_BOOT_WAIT,SET_BOOT_WAIT,
+  					GET_SPLASH,SET_SPLASH,GET_OVERSCAN,SET_OVERSCAN,GET_PIXDUB,SET_PIXDUB,GET_CAMERA,SET_CAMERA,
+  					GET_SSH,SET_SSH,GET_VNC,SET_VNC,GET_SPI,SET_SPI,GET_I2C,SET_I2C,GET_SERIAL,GET_SERIALHW,SET_SERIAL,
+  					GET_1WIRE,SET_1WIRE,GET_RGPIO,SET_RGPIO,GET_PI_TYPE,GET_OVERCLOCK,SET_OVERCLOCK,
+  					GET_GPU_MEM,GET_GPU_MEM_256,GET_GPU_MEM_512,GET_GPU_MEM_1K,SET_GPU_MEM,
+  					GET_HDMI_GROUP,GET_HDMI_MODE,SET_HDMI_GP_MOD,GET_WIFI_CTRY,SET_WIFI_CTRY,WLAN_INTERFACES);
   
   t_Manu_flag=	  (	unknownManufacturer,Bosch,HDI,AMS,HTD,MCP,IDT);
   
@@ -769,25 +791,22 @@ type
   
   TProcedureNoArgCall=	procedure;
   TProcedureOneArgCall=	procedure(i:integer);
+  TProcedureCOneArgCall=procedure(i:cint); cdecl;
   TFunctionOneArgCall=	function (i:integer):integer;
   TcFunctionOneArgCall=	function (i:cint):cint;
   TThFunctionOneArgCall=function (ptr:pointer):ptrint;
   TFunctionThreeArgCall=function (lvl:t_ErrorLevel; msgtype:MSG_Type_t; msg:string):longint;
   
-  STAT_struct_aold_t = record
-	_val:		real;
-	_valtimd:	int64;	
-  end;
   STAT_struct_t = record
-    arr_siz:	longint;
+  	idx:		longint;
 	tim_avg,
 	dif_val_pms,
 	old_val,
 	val_avg,
 	old_avg,
-	ist_val	: 	 real;
-	old_val_cnt: integer;
-	aold:		 array[-1..(oldvalcnt_c-1)] of STAT_struct_aold_t; // -1: last avg
+	ist_val: 	 real;
+	val_arr:	 array of real;
+	tim_arr:	 array of real;
   end;
   
   isr_t = record
@@ -833,6 +852,12 @@ type
     ThCtl:Thread_Ctrl_t; 
   end;
   
+  STR_prot_t=record
+    STR_CS:	TRTLCriticalSection;
+    STR:	string;
+    STR_modified:boolean;
+  end;
+  
   ERR_MGMT_t = record
     addr:word;
 	RDerr,WRerr,CMDerr,MAXerr,AutoReset_ms:longword;
@@ -854,6 +879,7 @@ type
   	retival_msec,
   	LastBootStat,
   	ival_sec:	longint;
+  	LastChanceHandler_ptr:TProcedureNoArgCall;
     info:		watchdog_info_t;
     devpath:	string;
     ThreadCtrl:	Thread_Ctrl_t;
@@ -866,12 +892,19 @@ type
   end;
   
   RPI_Temps_t=record
-    TempIdx:	longint;				// points to max temp
+//  Temp_CS:	TRTLCriticalSection;
+//    TempIdx:	longint;				// points to max temp
+    TempMaxObsTS,	TempMinObsTS:TDateTime;
+    TempMaxObserved,TempMinObserved,
+    TempCOOL,TempWARN,TempHOT,
   	TempMax:	real;
+  	TempMaxLvl:	t_ErrorLevel;
+  	TempMaxObservedNEW,TempMinObservedNEW:boolean;
+  	LastUpdate:	TDateTime;
     Temp:		array[1..2] of real;	// CPU GPU Temp
     TempLvl:	array[1..2] of t_ErrorLevel;
     TempUnit:	array[1..2] of string;	// 'C &#x2103;
-    TempInfo:	string;
+//  TempInfo:	string;
   end;
   
   RPI_FW_API_t = record
@@ -899,10 +932,6 @@ type
 	end_tag:	longword;
   end;
   
-  rtc_time_t = record
-    tm_sec,tm_min,tm_hour,tm_mday,tm_mon,tm_year,tm_wday,tm_yday,tm_isdst:longint;
-  end;
-  
   HW_Usage_t = record
   	usecnt,usetimesec:longword;
   	dat:TDateTime;
@@ -928,6 +957,7 @@ type
   I2C_databuf_t = record
 	buf: 	string[c_max_Buffer];
 	hdl: 	cint;
+	reperr:	boolean;
   end;
   
   I2C_msg_ptr = ^I2C_msg_t;
@@ -1178,11 +1208,15 @@ PID_Twiddle_t = record
 	PID_Time,
 	PID_LastTime: 		timespec;
     PID_Ks,
-    PID_Integrated, 	
-    PID_PrevInput,
-    PID_MinOutput,  	
-    PID_MaxOutput,
-    PID_Delta,
+    PID_Integrated, 
+    PID_IntegratedWindupResetValue,
+    PID_SetPoint,		// r(t): SP:SetPoint:Führungsgröße
+    PID_ProcessValue,	// y(t): PV:ProcessValue:Regelgröße
+    PID_ControlOut,		// u(t): ControlOut:Stellgröße
+    PID_MinOutput0,		// ControlOut at 0
+    PID_MinOutput,  	// ControlOut minimum, if ON
+    PID_MaxOutput,		// ControlOut maximum, if ON
+    PID_Error,
     PID_LastError,
     PID_LastSampleTime,
     PID_SampleTime,	
@@ -1227,26 +1261,38 @@ PID_Twiddle_t = record
    
   IP_Info_t = record
     stat,wireless:boolean;
+    timestamp:TDateTime;
 	alias,iface,ip4addr,ip6addr,hwaddr,gwaddr,nsaddr,domain,
-	link,ssid,signal,DNSname:string;
+	link,ssid,signal,chan,freq,DNSname:string;
   end;
   
   IP_Infos_t = record
 	idx:		longint;
     init,
     samesubnet:	boolean;
-    devlst,ip4ext,
+    devlst,ip4ext,ip6ext,
     hostapd_extdev,
     hostname:	string;
     IP_Info: 	array[0..IP_infomax_c] of IP_Info_t;
   end;
-  
+
   AlignmentSize_t = record
     c:char;
 //    a:array[1..16] of byte;	// force data alignment to 32 byte
     b:array[1..15] of byte;
   end;
-         
+  
+  HeapStat_t = record
+  	lvl:			T_ErrorLevel;
+	HeapStatAlloc: 	array[0..HeapStatMax_c] of longint;
+	name:			string;
+  end;
+  
+  ERR_Rec_t = record
+	step:		longint; 
+	title,msg:	string;
+  end;
+      
 var
   dummy:AlignmentSize_t; // requires {$PACKRECORDS 32} 
 msg:RPI_MBX_msg_t;	// 32 byte aligned
@@ -1261,15 +1307,14 @@ msg:RPI_MBX_msg_t;	// 32 byte aligned
   wdog:watchdog_struct_t;
   SDcard_root_hdl:byte;
   RPI_bType:byte;
-  rtc_time:rtc_time_t; 
-  LNX_UsrAuthModDateTime,RPI_ProgramStartTime:TDateTime;
+  LNX_UsrAuthModDateTime,RPI_ProgramStartTime,RPI_BootTime:TDateTime;
   _TZLocal:longint; _TZOffsetString:string[10];
   IniFileDesc:T_IniFileDesc;
   RpiMaintCmd:TIniFile;
-  PtrRPI_SignalRoutine:TcFunctionOneArgCall;
   MSG_HUB_ptr,CURL_ProgressUpdateHook_ptr:TFunctionThreeArgCall;
-  ERR_step:longint; ERR_title,ERR_msg:string;
-
+  RPI_SignalHandlerHook_ptr:TProcedureCOneArgCall;
+  SD_speedRD:string;
+  
   USBDEVFS_RESET,
   SPI_IOC_RD_MODE,SPI_IOC_WR_MODE,SPI_IOC_RD_LSB_FIRST,SPI_IOC_WR_LSB_FIRST,
   SPI_IOC_RD_BITS_PER_WORD,SPI_IOC_WR_BITS_PER_WORD,SPI_IOC_RD_MAX_SPEED_HZ,
@@ -1277,14 +1322,16 @@ msg:RPI_MBX_msg_t;	// 32 byte aligned
   WDIOC_SETTIMEOUT,WDIOC_GETTIMEOUT,WDIOC_KEEPALIVE,WDIOC_GETBOOTSTATUS,
   WDIOC_GETSUPPORT,WDIOC_GETSTATUS:longword;
   
-  RPI_ShutDown_RebootCall,RPI_ShutDown_Call:TProcedureNoArgCall;
+  RPI_ShutDown_RebootCall,RPI_ShutDown_Call,WDOG_LastChance_ptr:TProcedureNoArgCall;
   RPI_ShutDownMin_ms,RPI_ShutDownDebounce_ms:word; 
   RPI_ShutDown_struct:GPIO_struct_t;
   RPI_HW_initpart:s_initpart;
   
   HAT_Info:			HAT_Struct_t;
   IP_Infos:			IP_Infos_t;
+  HS,WS,DS: 		HeapStat_t;
   RPI_Temps:		RPI_Temps_t;
+  
   CertPack:		array[CertPackRPIMaint..
   					 	CertPackLast]	of cert_pack_t;
     
@@ -1301,6 +1348,8 @@ msg:RPI_MBX_msg_t;	// 32 byte aligned
   TRIG_struct: 	array					of TRIG_struct_t;
   SERVO_struct: array					of SERVO_struct_t;
   ERR_MGMT: 	array					of ERR_MGMT_t;
+  
+  NGINX_TestContent:TStringList;
   
 procedure AlignShow; 
 function  RPI_HW_Start:boolean; // start all. GPIO,I2C and SPI
@@ -1332,6 +1381,26 @@ function  _IO  (typ:char; nr:word):longword;
 function  _IOR (typ:char; nr,size:word):longword;
 function  _IOW (typ:char; nr,size:word):longword;
 function  _IOWR(typ:char; nr,size:word):longword;
+
+function  BIT_Get(v:byte;		  i:byte):boolean;
+function  BIT_Get(v:word;		  i:byte):boolean;
+function  BIT_Get(v:longword;	  i:byte):boolean;
+function  BIT_Get(v:qword; 		  i:byte):boolean;
+
+procedure BIT_Clr(var v:byte;	  i:byte);
+procedure BIT_Clr(var v:word;	  i:byte);
+procedure BIT_Clr(var v:longword; i:byte);
+procedure BIT_Clr(var v:qword;	  i:byte);
+
+procedure BIT_Set(var v:byte;	  i:byte);
+procedure BIT_Set(var v:word;	  i:byte);
+procedure BIT_Set(var v:longword; i:byte);
+procedure BIT_Set(var v:qword;	  i:byte); 
+
+procedure BIT_Put(var v:byte; 	  i:byte; b:boolean); 
+procedure BIT_Put(var v:word;	  i:byte; b:boolean); 
+procedure BIT_Put(var v:longword; i:byte; b:boolean); 
+procedure BIT_Put(var v:qword;	  i:byte; b:boolean);
 
 function  MSK_Get8		(bitnum:byte):byte; 
 function  MSK_Get16_8	(bitnum:byte; var idxofs:byte):byte;
@@ -1453,11 +1522,11 @@ function  ENC_GetHdl		(descr:string):byte;
 procedure ENC_InfoInit		(var CNTInfo:ENC_CNT_struct_t);
 function  ENC_Setup(hdl:integer; stick2minmax:boolean; ctrpreset,ctrmax,stepspercycle:longword; beepergpio:integer):boolean;
 procedure ENC_End			(hdl:integer);
-function  ENC_GetVal		(hdl:byte; ctrsel:integer):real; 
-function  ENC_GetVal		(hdl:byte):real; 
-function  ENC_GetValPercent	(hdl:byte):real; 
-function  ENC_GetSwitch		(hdl:byte):real;
-function  ENC_GetCycles     (hdl:byte):real; 
+function  ENC_GetVal		(hdl:integer; ctrsel:integer):real; 
+function  ENC_GetVal		(hdl:integer):real; 
+function  ENC_GetValPercent	(hdl:integer):real; 
+function  ENC_GetSwitch		(hdl:integer):real;
+function  ENC_GetCycles     (hdl:integer):real; 
 function  ENC_GetCounter	(var ENCInfo:ENC_CNT_struct_t):boolean;
 procedure ENC_IncEncCnt		(var ENCInfo:ENC_CNT_struct_t; cnt:integer);
 procedure ENC_IncSwCnt		(var ENCInfo:ENC_CNT_struct_t; cnt:integer);
@@ -1515,7 +1584,13 @@ function  RPI_freq:string; // 700000;700000;900000;Hz
 function  RPI_Volt:string;	// core:1.2000V;sdram_c:1.2000V;sdram_i:1.2000V;sdram_p:1.2250V
 function  RPI_FREQs:string;	// arm:600000000;core:250000000;h264:250000000;isp:250000000;...
 function  RPI_whoami:string;
-function  RPI_Temp(logmsg:boolean):t_ERRORLevel;	//  TempInfo: CPU:41.8'C;GPU:50.464'C;WARN:65.0'C;ALARM:70.0'C;COOL:40.0'C	// temps in celsius
+function  RPI_ThrottleDesc:string; //under-voltage;arm frequency capped...
+procedure RPI_ThrottleGet;
+function  RPI_Temp(logmsg:boolean; var TempStruct:RPI_Temps_t):t_ERRORLevel;
+procedure RPI_TempMaxValuesCheckIn(var TempStruct:RPI_Temps_t; Tmin,Tmax:real; TminTS,TmaxTS:TDateTime);
+procedure RPI_TempInit(var TempStruct:RPI_Temps_t);
+procedure RPI_TempSaveLimits(var TempStruct:RPI_Temps_t; section:string);
+procedure RPI_TempLoadLimits(var TempStruct:RPI_Temps_t; section:string);
 function  RPI_revnum:real; // 0:error
 function  RPI_gpiomapidx:byte; // 1:rev1; 2:rev2; 3:B+; 0:error 
 function  RPI_cores:longint;
@@ -1529,6 +1604,7 @@ function  RPI_I2C_bus2nd:byte;  // 2.nd I2C bus
 function  RPI_I2C_GetSpeed(bus:byte):longword;
 function  RPI_I2C_GetFuncs(bus:byte):longword;
 function  RPI_I2C_ChkFuncs(bus:byte; funcs:longword):boolean;
+function  RPI_I2C_ChkDev(bus,adr:byte):integer;
 function  RPI_SPI_GetSpeed(bus:byte):longint;
 function  RPI_hdrpincount:byte; // connector_pin_count on HW Header
 function  RPI_GetBuildDateTimeString:string;
@@ -1542,6 +1618,8 @@ procedure RPI_MaintSetEnvDWN(DwnSrcDir,DwnlSrcFiles,DwnDstDir,DwnLogf:string);
 procedure RPI_MaintSetEnvUPD(UpdPkgSrcFile,UpdPkgDstDir,UpdPkgDstFile,UpdPkgMaintDir,UpdPkgLogf:string);
 function  RPI_Maint(UpdFlags:s_rpimaintflags; var CurlThCtl:Thread_Ctrl_t):integer;
 function  RPI_INFO_Split(info:string; var labl,valu:string):boolean;
+function  RPI_cxt_GPIOopts(flgs:s_port_flags):string;
+function  RPI_config(raspicmd:t_RPI_config; par1,par2:string; var resultstring:string):integer; 
 
 procedure HAT_EEprom_Map(tl:TStringList; hwname,uuid,vendor,product:string; prodid,prodver,gpio_drive,gpio_slew,gpio_hysteresis,back_power:word; useDefault,EnabIO:boolean);
 procedure HAT_EEprom_Map_Test; 
@@ -1554,9 +1632,9 @@ function  HAT_product:string;
 function  HAT_product_id:string; 
 function  HAT_product_ver:string;
 function  HAT_uuid:string; 
+function  HAT_custom(tl:TStringList; keys,dflts:string):string;
+function  HAT_custom(tl:TStringList; keys,dflts,tr1,tr2:string):string;
 procedure HAT_Info_Test;
-
-function  rtc_func(fkt:longint; fpath:string; var dattime:TDateTime) : longint;
 
 function  USB_Reset(buspath:string):integer; // e.g. USB_Reset('/dev/bus/usb/002/004');
 function  MapUSB(devpath:string):string;     // e.g. MapUSB('/dev/ttyUSB0') -> /dev/bus/usb/002/004
@@ -1649,10 +1727,15 @@ procedure LOG_LevelColor(enab:boolean);
 function  LOG_GetEndMsg(comment:string):string;
 function  LOG_GetVersion(version:real):string; 
 function  LOG_Get_LevelStringShort(lvl:T_ErrorLevel):string;
-procedure ERR_SetStep(nr:longint; title,msg:string);
-procedure ERR_SetStep(nr:longint; msg:string); 
-procedure ERR_SetStep(nr:longint); 
-function  ERR_string:string;
+
+function  ERR_string (var ERR_Rec:ERR_Rec_t):string;
+procedure ERR_SetStep(var ERR_Rec:ERR_Rec_t; errnr:longint); 
+procedure ERR_SetStep(var ERR_Rec:ERR_Rec_t; errnr:longint; errmsg:string); 
+procedure ERR_SetStep(var ERR_Rec:ERR_Rec_t; errnr:longint; errtitle,errmsg:string); 
+
+procedure DUMP_CallStack(hdr:string);
+procedure DUMP_ExceptionCallStack(hdr:string; E:Exception);
+procedure DUMP_ExceptionCallStack(hdr:string; E:Exception; haltprog:boolean);
 		
 procedure SAY   (typ:T_ErrorLevel; msg:string); // writes to STDOUT
 procedure SAY   (typ:T_ErrorLevel; const msg:string; const params:array of const);overload;
@@ -1661,13 +1744,18 @@ procedure SAY_Level(level:t_ErrorLevel);
 
 function  MSG_HUB(lvl:t_ErrorLevel; msgtype:MSG_Type_t; msg:string):longint;
 
+procedure Get_SDcard_RDSpeed;
+function  GetIPAdr(iface:string; var ipaddr:string; ip4:boolean):boolean;
+function  GetMACAdr(iface:string; var hwaddr:string):boolean;
 function  GetHostName:string;
 function  GetDomainName(iface:string):string;
 function  GetDomainName:string;
 function  GetMainDomainName:string;
 function  GetWLANSignal(iface:string):longint; 	// -1,0-100
 function  IP_iface(aliasname:string):string;
+function  IS_Online(ip4:boolean):boolean;
 function  MAC_Addr(iface:string; fmt:byte):string;
+function  MAC_isRPI(macsubstr:string):boolean;
 function  IP4_Addr(iface:string):string;
 function  IP6_Addr(iface:string):string;
 function  IP4_AddrExt:string;
@@ -1688,13 +1776,16 @@ function  LNX_GetProcessNumsByName(processname:string):string;
 procedure LNX_KillProcesses(processlist:string; signal:word);
 function  LNX_chmod(filename:string; mode:TMode):cint;
 function  LNX_chowngrp(filename:string; owner,group:string):integer;
+function  LNX_chowngrpmod(filename:string; owner,group:string; mode:TMode):integer;
 procedure LNX_GetUsrPwdString(StrList:TStringList; pwdfile,usrlst:string; carveflds:longint);
 function  LNX_UpdPwdFile(pwdfile,usr,pwd:string):integer;
 function  LNX_ChkUsrPwdValid(usr,pwd,pwddefault:string):integer;
 function  LNX_ChgUsrPwd(usr,usrreq,pwd,pwd2,pwddflt,pwdold:string; PWD_OLDsameNEW:boolean; var msg:string):integer;
 function  LNX_ChgUsrPwd(usr,pwd:string; var msg:string):integer;
 function  LNX_GetRandomAccessToken(typ:longint):string;
-function  LNX_GetTZList(ts:TStringList):integer;
+function  LNX_GetTZList(ts:TStringList; fmt:byte):integer;
+function  LNX_GetISOquery(ts:TStringList; opts:string):integer;
+function  LNX_GetBase64String(str:string):string;
 function  LNX_GetNewestFile(filnampat:string):string;
 function  LNX_LinkFile(filnam,linknam:string):integer;
 function  LNX_tarSAV(target,fillst:string; flags:s_rpimaintflags):longint;
@@ -1726,8 +1817,11 @@ function  Limits(var value:real; minvalue,maxvalue:real):real;
 procedure MinMax(value:longint; var minvalue,maxvalue:longint);
 procedure MinMax(value:longword; var minvalue,maxvalue:longword);
 procedure MinMax(value:real; var minvalue,maxvalue:real);
-procedure STAT_Init(var stats:STAT_struct_t; numoldval:word);
-procedure STAT_Calc(var stats:STAT_struct_t; newval:real; tim_us:int64);
+procedure STAT_Init(var stats:STAT_struct_t; arrsize:word);
+procedure STAT_Reset(var stats:STAT_struct_t);
+procedure STAT_Calc(var stats:STAT_struct_t; newval,tim_us:real);
+procedure HeapStatINI(var struct:HeapStat_t; HSname:string; indentcnt:byte; replvl:T_ErrorLevel);
+procedure HeapStat(var struct:HeapStat_t; idx:longint);
 
 function  CL_Compose(cmdLine:string):string; 	
 function  CL_Parse  (cmdLine:string):t_CLOptions; 
@@ -1776,6 +1870,7 @@ function  Num2StrFMT(num:real; nk:byte):string;
 function  Str2CP437(s:string):string;
 function  Str2TimeSpec(s:string; var ts:timespec):boolean; 
 function  Str2DateTime(tdstring,fmt:string; var dt:TDateTime):boolean;
+function  UnicodeStr2UTF8(unicodestr:string):string;
 function  Str2LogLvl(s:string):T_ErrorLevel;
 function  LogLvl2Str(lvl:T_ErrorLevel):string;
 function  GetLogLvls(tr:string):string;
@@ -1789,11 +1884,14 @@ function  StrHex(Hex_strng:string):string;
 function  AdjZahlDE(r:real;lgt,nk:byte):string;
 function  AdjZahl(s:string):string;
 function  adjL0(s:string):string;
+function  Adj_LF(strIN:string):string;
 function  FormatFileSize(const Size: Int64):string;
 function  scale(valin,min1,max1,min2,max2:real):real;
 function  Get_FixedStringLen(s:string;cnt:word;leading:boolean):string; 
 function  StringReverse(s:string):string;
 function  ShortString(fmt,maxlgt,divdr:longint; str:string):string;
+function  KEYpressedChar(ch:char):boolean;
+function  ESCpressed:boolean;
 procedure AskCR;
 procedure AskCR(msg:string);
 procedure AskCR(lvl:T_ErrorLevel; msg:string);
@@ -1822,9 +1920,12 @@ function  BS_CR  (s:string):string; // #$0d -> \r
 function  BS_CRLF(s:string):string; 
 function  BS_DoESC(s:string):string;
 function  BS_ALL (s:string):string;
+function  IPInfo_GetInterfaceName(intidx:longint):string;
 function  IPInfo_GetIdx(intface:string):longint;
+procedure IPInfo_GetOS;	// force OS read
 procedure IPInfo_GetOS(var IPInfos:IP_Infos_t);
 procedure IPInfoShow(lvl:T_ErrorLevel; var IPInfo:IP_Info_t);
+procedure IPInfosShow(lvl:T_ErrorLevel; var IPInfos:IP_Infos_t);
 function  GetPrintableChars(s:string; c1,c2:char):string;
 function  CamelCase(strng:string):string;
 function  GetRndTmpFileName(filhdr,extname:string):string;
@@ -1861,6 +1962,8 @@ function  TailFile(filname:string; LinesCount:longint):RawByteString;
 procedure TailFileFollow(filname:string; LinesCount:longint);
 procedure TL_prot_Init(var tlp:TL_prot_t);
 procedure TL_prot_Stop(var tlp:TL_prot_t);
+procedure STR_prot_Init(var slp:STR_prot_t);
+procedure STR_prot_Stop(var slp:STR_prot_t);
 function  Anz_Item(const strng,trenner,trenner2:string): longint;
 function  Select_Item(const strng,trenner,trenner2,dflt:string;itemno:longint) : string; 
 function  Select_Item(const strng,trenner,trenner2:string;itemno:longint) : string;
@@ -1878,6 +1981,7 @@ procedure StringListSnap(StrListIn,StrListOut:TStringList; srchstrng:string);
 function  SearchStringInListIdx(StrList:TStringList; srchstrng:string; occurance,StartIdx:longint):longint;
 function  SearchStringInList(StrList:TStringList; srchstrng:string):string;
 function  GiveStringListIdx(StrList:TStringList; srchstrng:string; var idx:longint; occurance:longint):boolean;
+function  GiveStringListIdx(StrList:TStringList; srchstrng:string; var idx:longint; occurance,StartIdx:longint):boolean;
 function  GiveStringListIdx(StrList:TStringList; srchstrngSTART,srchstrngEND:string; var idx:longint):boolean;
 function  GiveStringListIdx2(StrList:TStringList; srchstrng:string; var idxStart,idxEnd:longint):boolean;
 procedure MemCopy(src,dst:pointer; size:longint); 
@@ -1928,7 +2032,7 @@ procedure CURL_SetPara(var CurlThCtl:Thread_Ctrl_t; info,curlcmd,logfile,filenam
 function  CURL(var CurlThCtl:Thread_Ctrl_t):integer;
 procedure CURL_Test;
 procedure TimeElapsed_us_Test;
-procedure delay_nanos(Nanoseconds:longword);
+procedure delay_nanos(Nanoseconds:int64);
 procedure delay_us   (Microseconds:longword);	
 procedure delay_msec (Milliseconds:longword); 
 function  GetHighPrecisionCounter: Int64; 
@@ -1967,15 +2071,16 @@ function  MilliSecsBetween(td:TDateTime):int64;
 procedure PID_Test;
 
 function  PID_DetPara(StrList:TStringList; idxStart,idxEnd,smoothdata,smoothtdr,loctim,locist,locSetPoint:longint; StoerSprung,timadjfct:real; var Ks,Te,Tb,Tsum,SampleTimeAvg:PID_float_t; tst:boolean):integer;
-function  PID_GetPara(loglvl:t_ErrorLevel; Ks,Te,Tb,Tsum:PID_float_t; Method:PID_Method_t; var Ti,Td:PID_float_t; var K:PID_array_t):integer;
+function  PID_DetPara(loglvl:t_ErrorLevel; StrList:TStringList; idxStart,idxEnd,smoothdata,smoothtdr,loctim,locist,locSetPoint:longint; StoerSprung,timadjfct:real; var Ks,Te,Tb,Tsum,SampleTimeAvg:PID_float_t; tst:boolean; filout:string):integer;
+function  PID_GetPara(loglvl:t_ErrorLevel; Ks,Te,Tb,Tsum:PID_float_t; Method:PID_Method_t; var Ti,Td:PID_float_t; var K:PID_array_t; loginfo:string):integer;
 
-procedure PID_Init(var PID_Struct:PID_Struct_t; nr:longint; itermax:longword; enab_twiddle:boolean; Ks,MinOutput,MaxOutput,SampleTime_ms:PID_float_t; K,dK,tol:PID_array_t);
+procedure PID_Init(var PID_Struct:PID_Struct_t; nr:longint; itermax:longword; enab_twiddle:boolean; Ks,MinOutput0,MinOutput,MaxOutput,SampleTime_ms,WindupResetValue:PID_float_t; K,dK,tol:PID_array_t);
 procedure PID_Reset(var PID_Struct:PID_Struct_t);
-function  PID_Calc(var PID_Struct:PID_Struct_t; Setpoint,InputValue:PID_float_t; twiddle_postpone:boolean):PID_float_t;
-function  PID_Calc(var PID_Struct:PID_Struct_t; Setpoint,InputValue:PID_float_t):PID_float_t;
+function  PID_Calc(var PID_Struct:PID_Struct_t; SetPoint,ProcessValue:PID_float_t; Stoersprung:boolean):PID_float_t;
+function  PID_Calc(var PID_Struct:PID_Struct_t; SetPoint,ProcessValue:PID_float_t):PID_float_t;
 procedure PID_SetIntImprove(var PID_Struct:PID_Struct_t; On_:boolean);
 procedure PID_SetDifImprove(var PID_Struct:PID_Struct_t; On_:boolean);
-procedure PID_SetMinMaxLimit(var PID_Struct:PID_Struct_t; MinOutput,MaxOutput:PID_float_t);
+procedure PID_SetMinMaxLimit(var PID_Struct:PID_Struct_t; MinOutput0,MinOutput,MaxOutput:PID_float_t);
 procedure PID_SetSampleTimeAdjust(var PID_Struct:PID_Struct_t; On_:boolean); 
 procedure PID_SetSelfTuning(var PID_Struct:PID_Struct_t; On_:boolean); 
 procedure PID_InitTwiddle(var PID_Struct:PID_Struct_t);
@@ -1995,7 +2100,7 @@ function  PID_DetAvgs(IdxStart,IdxEnd:longint; var avgnumIst,avgnumPInc:longint)
 function  PID_FileLoad(StrList:TStringList; filnam,SearchCrit:string; var IdxStart,IdxEnd:longint):boolean;
 function  PID_sim(StrList:TStringList; simnr:integer):real;
 procedure PID_SimCSV(tl:TStringList; var pid:PID_Struct_t);
-procedure PID_Limit(var Value:PID_float_t; MinOut,MaxOut:PID_float_t);
+procedure PID_Limit(var Value:PID_float_t; MinOut0,MinOut,MaxOut:PID_float_t);
 procedure PID_TestSim;
 function  PID_Info(var PID_Struct:PID_Struct_t; fmt:longint):string;
 
@@ -2024,7 +2129,7 @@ var
     cpu_rev_num,cpu_freq,pll_freq:real;
     RPI_ShutDownGPIO,cpu_cores: longint;
 	eeprom_devadr:word; 
-	GPU_MEM_BASE:longword;
+	GPU_MEM_BASE,RPI_Throttle:longword;
 	oa,na:PSigActionRec;
 	RPIHDR_Desc:array[1..max_pins_c] of string[mdl];
 	
@@ -2035,14 +2140,72 @@ begin
   writeln('addr 0x'+HexStr(@msg),' (',PtrUInt(@msg),') aligned ',Aligned(@msg,32),' (',(PtrUint(@msg) mod 32),')'); 
 end;
 
-function  ERR_string:string;
-begin ERR_string:=ERR_title+'['+Num2Str(ERR_step,0)+']: '+ERR_msg; end;
-procedure ERR_SetStep(nr:longint); 
-begin ERR_step:=nr; end;
-procedure ERR_SetStep(nr:longint; msg:string); 
-begin ERR_step:=nr; ERR_msg:=msg; end;
-procedure ERR_SetStep(nr:longint; title,msg:string); 
-begin ERR_step:=nr; ERR_title:=title; ERR_msg:=msg; end;
+function  ERR_string(var ERR_Rec:ERR_Rec_t):string;
+begin 
+  with ERR_Rec do 
+  begin 
+	ERR_string:=title+'['+Num2Str(step,0)+']: '+msg; 
+  end; // with
+end;
+
+procedure ERR_SetStep(var ERR_Rec:ERR_Rec_t; errnr:longint); 
+begin ERR_Rec.step:=errnr; end;
+
+procedure ERR_SetStep(var ERR_Rec:ERR_Rec_t; errnr:longint; errmsg:string); 
+begin ERR_Rec.step:=errnr; ERR_Rec.msg:=errmsg; end;
+
+procedure ERR_SetStep(var ERR_Rec:ERR_Rec_t; errnr:longint; errtitle,errmsg:string); 
+begin ERR_Rec.step:=errnr; ERR_Rec.title:=errtitle; ERR_Rec.msg:=errmsg; end;
+
+procedure DUMP_CallStack(hdr:string);
+// https://wiki.lazarus.freepascal.org/Logging_exceptions
+const MaxDepth = 20;
+var I:Longint; prevbp:Pointer; CallerFrame,CallerAddress,bp:Pointer; _tl:TStringList;
+begin
+  _tl:=TStringList.create;
+  _tl.add(hdr+' ##############################+');
+  bp := get_frame;
+  // This trick skip SendCallstack item
+  // bp:= get_caller_frame(get_frame);
+  try
+    prevbp := bp - 1;
+    I := 0;
+    while bp > prevbp do begin
+       CallerAddress := get_caller_addr(bp);
+       CallerFrame := get_caller_frame(bp);
+       if (CallerAddress = nil) then Break;
+       _tl.add(BackTraceStrFunc(CallerAddress));
+       Inc(I);
+       if (I >= MaxDepth) or (CallerFrame = nil) then Break;
+       prevbp := bp;
+       bp := CallerFrame;
+     end;
+   except
+//	prevent endless dump if an exception occured
+   end;
+  _tl.add(hdr+' ##############################-');
+  LOG_ShowStringList(LOG_ERROR,_tl);
+  _tl.free;
+end;
+
+procedure DUMP_ExceptionCallStack(hdr:string; E:Exception; haltprog:boolean);
+// https://wiki.lazarus.freepascal.org/Logging_exceptions
+var i:integer; Frames:PPointer; _tl:TStringList;
+begin
+  _tl:=TStringList.create;
+  _tl.add(Trimme(hdr+' '+E.ClassName+' ##############################+',3));
+  _tl.add('Stacktrace: '+E.Message);
+//if (E<>nil) then _tl.add('Exception class: '+E.ClassName);
+  _tl.add(BackTraceStrFunc(ExceptAddr));
+  Frames:=ExceptFrames;
+  for i:= 0 to (ExceptFrameCount-1) do _tl.add(BackTraceStrFunc(Frames[i]));
+  _tl.add(Trimme(hdr+' '+E.ClassName+' ##############################-',3));
+  LOG_ShowStringList(LOG_ERROR,_tl);
+  _tl.free;
+  if haltprog then Halt; // End of program execution
+end;
+procedure DUMP_ExceptionCallStack(hdr:string; E:Exception);
+begin DUMP_ExceptionCallStack(hdr,E,true); end;
 	
 function  MOD_Euclid(a,b:longint):longint;
 var m:longint;
@@ -2119,19 +2282,20 @@ end;
 procedure SetTimeOut_us (ptspec_start,ptspec_end:Ptimespec; Retrig_us:int64);
 begin 
  try
-  SetTimeOut_ns(ptspec_start,ptspec_end,(Retrig_us*1000)); 
+  SetTimeOut_ns(ptspec_start,ptspec_end,int64(Retrig_us*1000)); 
  except
-  On E_rpi_hal_Exception :Exception do Writeln(LOG_ERROR,'SetTimeOut_us: ',Retrig_us,' ',E_rpi_hal_Exception.Message);
+  On E_rpi_hal_Exception :Exception do Writeln('SetTimeOut_us: ',Retrig_us,' ',E_rpi_hal_Exception.Message);
  end;
 end;
-procedure SetTimeOut_us (ptspec:Ptimespec; Retrig_us:int64);
+procedure SetTimeOut_us(ptspec:Ptimespec; Retrig_us:int64);
+// e.g usage: SetTimeOut_us(@Ptimespec,123);
 var tv_start:timespec; begin SetTimeOut_us(@tv_start,ptspec,Retrig_us); end;
 
 function  TimeElapsed_us(ptspec:Ptimespec; Retrig_us:int64):boolean;
 var ok:boolean; tv_now:timespec;
 begin 
   clock_gettime(CLOCK_REALTIME,@tv_now);
-  ok:=(ptspec^.tv_nsec<=tv_now.tv_nsec);
+  ok:=(ptspec^.tv_nsec<=tv_now.tv_nsec) and (ptspec^.tv_sec<=tv_now.tv_sec);
   if ok and (Retrig_us>=0) then SetTimeOut_us(@tv_now,ptspec,Retrig_us);
   TimeElapsed_us:=ok;
 end;
@@ -2147,11 +2311,12 @@ begin TimeElapsed_us:=TimeElapsed_us(ptspec,-1) end;
 {$ELSE}
   function  GetHighPrecisionCounter: Int64; var rslt:Int64; TV : TTimeVal; TZ : PTimeZone; begin TZ := nil; fpGetTimeOfDay(@TV, TZ); rslt := Int64(TV.tv_sec) * 1000000 + Int64(TV.tv_usec); GetHighPrecisionCounter:=rslt; end;
 
-  procedure delay_nanos(Nanoseconds:longword);
+  procedure delay_nanos(Nanoseconds:int64);
+  const nano_c:longword=1000000000;
   var sleeper,dummy : timespec;
   begin
-    sleeper.tv_sec  := 0;
-    sleeper.tv_nsec := Nanoseconds;
+    sleeper.tv_sec  := Nanoseconds div nano_c;
+    sleeper.tv_nsec := Nanoseconds mod nano_c; // 0-999999999
     fpnanosleep(@sleeper,@dummy);
   end;
 {$ENDIF}
@@ -2472,28 +2637,31 @@ end;
 function  LOG_Get_LevelStringShort(lvl:T_ErrorLevel):string;
 var  s:string;
 begin
-  s:=''; 
+  s:='UKN'; 
   case lvl of
-    LOG_WHITE,LOG_BLACK,LOG_BLUE,LOG_LHTGRN,
+(*  LOG_WHITE,LOG_BLACK,LOG_BLUE,LOG_LHTGRN,
   	LOG_GREEN,LOG_YELLOW,LOG_ORANGE,
-  	LOG_RED:	begin s:='COL'; end; 
-(*  LOG_RED:	begin s:='RED'; end;
-  	LOG_ORANGE:	begin s:='ORA'; end;
-  	LOG_YELLOW:	begin s:='YLW'; end;
-  	LOG_GREEN:	begin s:='GRN'; end;
-  	LOG_BLUE:	begin s:='BLU'; end;
-  	LOG_BLACK:	begin s:='BLK'; end;
-  	LOG_WHITE:	begin s:='WHT'; end; *)
+  	LOG_RED:	s:='COL'; *)
+    LOG_RED:	s:='RED';
+  	LOG_ORANGE:	s:='ORA';
+  	LOG_YELLOW:	s:='YLW';
+  	LOG_GREEN:	s:='GRN';
+  	LOG_LHTGRN:	s:='LGR';
+  	LOG_BLUE:	s:='BLU';
+  	LOG_BLACK:	s:='BLK';
+  	LOG_WHITE:	s:='WHT';
+  	LOG_MAGENTA:s:='MAG';
   	
-    LOG_ERROR:	begin s:='ERR'; end;
-    LOG_WARNING:begin s:='WRN'; end;
-    LOG_NOTICE:	begin s:='SUC'; end;
-    LOG_INFO:	begin s:='INF'; end;
-    LOG_DEBUG:	begin s:='DBG'; end;
-	LOG_URGENT:	begin s:='URG'; end;
-	LOG_ALL: 	begin s:='ALL'; end;
+    LOG_ERROR:	s:='ERR';
+    LOG_WARNING:s:='WRN';
+    LOG_NOTICE:	s:='SUC';
+    LOG_INFO:	s:='INF';
+    LOG_DEBUG:	s:='DBG';
+	LOG_URGENT:	s:='URG';
+	LOG_ALL: 	s:='ALL';
 	LOG_NONE2,
-	LOG_NONE: 	begin s:='NON'; end;
+	LOG_NONE: 	s:='NON';
+	else		s:=LogLvl2Str(lvl);
   end;
   LOG_Get_LevelStringShort:=s;
 end;
@@ -2511,6 +2679,37 @@ begin
  (*	s:=s+' '+host+' ['+processnr+'] '; *)
   s:=s+LOG_Get_LevelStringShort(typ)+' ';
   Get_LogString:=s;
+end;
+
+procedure HeapStatINI(var struct:HeapStat_t; HSname:string; indentcnt:byte; replvl:T_ErrorLevel);
+var _n:longint;
+begin
+  with struct do
+  begin
+    lvl:=replvl;
+    if (HSname<>'') then name:=HSname else name:='HeapStat';
+    name:=copy('          ',1,indentcnt)+name;
+	for _n:= 0 to HeapStatMax_c do HeapStatAlloc[_n]:=0; 
+	HeapStatAlloc[0]:=GetHeapStatus.TotalAllocated;
+  end; // with
+end;
+
+procedure HeapStat(var struct:HeapStat_t; idx:longint);
+begin
+  with struct do
+  begin
+    if (idx>=0) and (idx<=HeapStatMax_c) then
+    begin
+      HeapStatAlloc[idx]:=GetHeapStatus.TotalAllocated;
+  	  if (HeapStatAlloc[0]<>HeapStatAlloc[idx]) then 
+  	  begin
+(*  	    SetTextCol(lvl);
+  	  	writeln(Get_LogString('','','',lvl)+name+'[0/'+Num2Str(idx,2)+']: '+Num2Str(HeapStatAlloc[0],7)+' '+Num2Str(HeapStatAlloc[idx],7)+#$0d);   
+   	 	UnSetTextCol; *)
+   	  	HeapStatAlloc[0]:=HeapStatAlloc[idx];
+  	  end; 
+  	end else LOG_Writeln(LOG_ERROR,'HeapStat['+Num2Str(idx,0)+'/'+Num2Str(HeapStatMax_c,0)+']: increase const HeapStatMax_c');
+  end; // with
 end;
 
 function  FileAccessible(filnam:string):boolean;
@@ -2552,9 +2751,13 @@ begin
   if _LOG_LevelColor then 
   begin
 	case typ of
-        LOG_ERROR:	TextColor(red);
-      	LOG_WARNING:TextColor(yellow);
-      	LOG_NOTICE:	TextColor(green);
+        LOG_ERROR:		TextColor(red);
+      	LOG_WARNING:	TextColor(yellow);
+      	LOG_NOTICE:		TextColor(green);
+      	LOG_MAGENTA:	TextColor(magenta);
+      	LOG_WHITE:		TextColor(white);
+      	LOG_BLACK:		TextColor(black);
+      	LOG_BLUE:		TextColor(blue);      	
     end; // case
   end;
 end;
@@ -2568,6 +2771,10 @@ begin
   if (MSG_HUB_ptr<>nil) then res:=MSG_HUB_ptr(lvl,msgtype,msg) else res:=-1;
   MSG_HUB:=res;
 end;
+
+function Adj_LF(strIN:string):string; 
+begin Adj_LF:=StringReplace(strIN,#$0a,#$0d+#$0a,[rfReplaceAll]); end;
+
 // writes to STDOUT
 function  SAY_Level:t_ErrorLevel; 		 begin SAY_Level:=_SAY_Level; end;
 procedure SAY_LevelSave;    	 		 begin _SAY_OLD_Level:=_SAY_Level; end;
@@ -2629,10 +2836,31 @@ end;
 function  LOG_GetVersion(version:real):string; 		
 begin LOG_GetVersion:=ApplicationName+' V'+Num2Str(version,0,3)+' build '+RPI_GetBuildDateTimeString; end;
 
+function  BIT_Get(v:byte;		  i:byte):boolean; begin BIT_Get:=((v shr i) and 1)=1; end;
+function  BIT_Get(v:word;		  i:byte):boolean; begin BIT_Get:=((v shr i) and 1)=1; end;
+function  BIT_Get(v:longword;	  i:byte):boolean; begin BIT_Get:=((v shr i) and 1)=1; end;
+function  BIT_Get(v:qword; 		  i:byte):boolean; begin BIT_Get:=((v shr i) and 1)=1; end;
+
+procedure BIT_Clr(var v:byte;	  i:byte); begin v:=v and ((1 shl i) xor High(byte));     end;
+procedure BIT_Clr(var v:word;	  i:byte); begin v:=v and ((1 shl i) xor High(word));     end;
+procedure BIT_Clr(var v:longword; i:byte); begin v:=v and ((1 shl i) xor High(longword)); end;
+procedure BIT_Clr(var v:qword;	  i:byte); begin v:=v and ((1 shl i) xor High(qword));    end;
+
+procedure BIT_Set(var v:byte;	  i:byte); begin v:=v or  (1 shl i); end;
+procedure BIT_Set(var v:word;	  i:byte); begin v:=v or  (1 shl i); end;
+procedure BIT_Set(var v:longword; i:byte); begin v:=v or  (1 shl i); end;
+procedure BIT_Set(var v:qword;	  i:byte); begin v:=v or  (1 shl i); end;
+
+procedure BIT_Put(var v:byte; 	  i:byte; b:boolean); begin v:=(v and ((1 shl i) xor High(byte))) 	  or (byte(b) shl i); end;
+procedure BIT_Put(var v:word; 	  i:byte; b:boolean); begin v:=(v and ((1 shl i) xor High(word))) 	  or (word(b) shl i); end;
+procedure BIT_Put(var v:longword; i:byte; b:boolean); begin v:=(v and ((1 shl i) xor High(longword))) or (longword(b) shl i); end;
+procedure BIT_Put(var v:qword; 	  i:byte; b:boolean); begin v:=(v and ((1 shl i) xor High(qword))) 	  or (qword(b) shl i); end;
+
 function  MSK_Get8(bitnum:byte):byte; begin MSK_Get8:=(1 shl (bitnum and $07)); end; //IN:  bitnum 0-7
 
 function  MSK_Get16_8(bitnum:byte; var idxofs:byte):byte;
 //IN:  bitnum 0-15
+//IDX: 0:bitnum 0-7	1:bitnum 8-15	
 begin
   idxofs:=((bitnum and $0f) shr 3); 
   MSK_Get16_8:=(1 shl (bitnum mod 8));
@@ -2672,6 +2900,25 @@ begin
   end; // with
 end;
 
+procedure STR_prot_Init(var slp:STR_prot_t);
+begin
+  with slp do
+  begin
+	InitCriticalSection(STR_CS);
+	STR:='';
+	STR_modified:=true;
+  end; // with
+end;
+procedure STR_prot_Stop(var slp:STR_prot_t);
+begin
+  with slp do
+  begin  
+	DoneCriticalSection(STR_CS); 
+	STR:='';
+	STR_modified:=false;
+  end; // with
+end;
+
 function  LNX_ResolveIP2name(IP:string):string;
 var _tl:TStringList; idx:longint; sh:string;
 begin // todo
@@ -2680,7 +2927,7 @@ begin // todo
 	_tl:=TStringList.create;
   	if (call_external_prog(LOG_NONE,'arp -a',_tl)=0) then
   	begin
-	  idx:=SearchStringInListIdx(_tl,IP,1,0);
+	  idx:=SearchStringInListIdx(_tl,' ('+IP+') ',1,0);
 	  if (idx>=0) then
 	  begin // found e.g. rpi3b_1w.abc.def.com (10.8.81.132) at <incomplete> on wlan0
 		sh:=Trimme(Select_Item(_tl[idx],' (','',1),3);	// rpi3b_1w.abc.def.com 
@@ -2691,7 +2938,12 @@ begin // todo
   {$ENDIF}
   LNX_ResolveIP2name:=sh;
 end;
-    
+
+procedure LNX_WDOG_LastChanceHandler;
+begin
+  LOG_Writeln(LOG_WARNING,'LNX_WDOG_LastChanceHandler');
+end;
+
 function  LNX_WDOG_Thread(ptr:pointer):ptrint;
 var i64:int64; sh:string;
 begin
@@ -2712,6 +2964,7 @@ begin
 		  	  sh:='LNX_WDOG_Thread: WDOG will fire within '+Num2Str(i64,0)+'msec';
 		  	  if (i64>=1)	then LOG_Writeln(LOG_WARNING,sh)
 		  	  				else LOG_Writeln(LOG_ERROR,	 sh);
+		  	  if (LastChanceHandler_ptr<>nil) then LastChanceHandler_ptr;
 		  	end;
           	delay_msec(retival_msec);
 		  	if RetrigAsync then 
@@ -2740,7 +2993,7 @@ begin
 	Hndl:=-1; 			devpath:=wdoc_path_c;	RetrigAsync:=true; 
 	ival_sec:=15; 		retival_msec:=(ival_sec*1000) div 5; 
 	Thread_InitStruct	(ThreadCtrl);
-	LastBootStat:=0;
+	LastBootStat:=0;	LastChanceHandler_ptr:=@LNX_WDOG_LastChanceHandler;
 	NextTrigTime:=now;	SetTimeOut(WDOGFire,(ival_sec*1000));
 	with info do
 	begin
@@ -2794,7 +3047,7 @@ begin
 					  begin
 			  		  	c:='V'; res:=fpwrite(Hndl,c,1);	// disable WDOG
 			  		  	fpClose(Hndl);
-			  		  	SAY(LOG_INFO,'LNX_WDOG['+Num2Str(Hndl,0)+'/'+Num2Str(res,0)+']: closed ');
+			  		  	SAY(LOG_INFO,'LNX_WDOG['+Num2Str(Hndl,0)+'/'+Num2Str(res,0)+']: closed '+devpath);
 			  		  end else LOG_Writeln(LOG_ERROR,'WDOG no support WDIOF_MAGICCLOSE');
 			  		  Hndl:=-1;
 					end;
@@ -3007,12 +3260,121 @@ begin
   LNX_SetDateTimeUTC:=(call_external_prog(LOG_NONE,cmd)=0);
 end;
 
-function  LNX_GetTZList(ts:TStringList):integer;
+function  LNX_GetTZList(ts:TStringList; fmt:byte):integer;
+  function fmtentry(f1,f2:string):string; begin fmtentry:=f1+'*'+f2; end;
 var res:integer;
 begin
-  res:=call_external_prog(LOG_NONE,'timedatectl list-timezones',ts);
-  if (res=0) then ts.insert(0,'Etc/UTC') else ts.clear;
+  if (fmt=0) then
+  begin	// short list
+	res:=0; ts.clear;
+    ts.add(fmtentry('Etc/GMT+12','(GMT-12:00) International Date Line West'));
+    ts.add(fmtentry('Pacific/Midway','(GMT-11:00) Midway Island, Samoa'));
+    ts.add(fmtentry('Pacific/Honolulu','(GMT-10:00) Hawaii'));
+    ts.add(fmtentry('US/Alaska','(GMT-09:00) Alaska'));
+    ts.add(fmtentry('America/Los_Angeles','(GMT-08:00) Pacific Time (US & Canada)'));
+    ts.add(fmtentry('America/Tijuana','(GMT-08:00) Tijuana, Baja California'));
+    ts.add(fmtentry('US/Arizona','(GMT-07:00) Arizona'));
+    ts.add(fmtentry('America/Chihuahua','(GMT-07:00) Chihuahua, La Paz, Mazatlan'));
+    ts.add(fmtentry('US/Mountain','(GMT-07:00) Mountain Time (US & Canada)'));
+    ts.add(fmtentry('America/Managua','(GMT-06:00) Central America'));
+    ts.add(fmtentry('US/Central','(GMT-06:00) Central Time (US & Canada)'));
+    ts.add(fmtentry('America/Mexico_City','(GMT-06:00) Guadalajara, Mexico City, Monterrey'));
+    ts.add(fmtentry('Canada/Saskatchewan','(GMT-06:00) Saskatchewan'));
+    ts.add(fmtentry('America/Bogota','(GMT-05:00) Bogota, Lima, Quito, Rio Branco'));
+    ts.add(fmtentry('US/Eastern','(GMT-05:00) Eastern Time (US & Canada)'));
+    ts.add(fmtentry('US/East-Indiana','(GMT-05:00) Indiana (East)'));
+    ts.add(fmtentry('Canada/Atlantic','(GMT-04:00) Atlantic Time (Canada)'));
+    ts.add(fmtentry('America/Caracas','(GMT-04:00) Caracas, La Paz'));
+    ts.add(fmtentry('America/Manaus','(GMT-04:00) Manaus'));
+    ts.add(fmtentry('America/Santiago','(GMT-04:00) Santiago'));
+    ts.add(fmtentry('Canada/Newfoundland','(GMT-03:30) Newfoundland'));
+    ts.add(fmtentry('America/Sao_Paulo','(GMT-03:00) Brasilia'));
+    ts.add(fmtentry('America/Argentina/Buenos_Aires','(GMT-03:00) Buenos Aires, Georgetown'));
+    ts.add(fmtentry('America/Godthab','(GMT-03:00) Greenland'));
+    ts.add(fmtentry('America/Montevideo','(GMT-03:00) Montevideo'));
+    ts.add(fmtentry('America/Noronha','(GMT-02:00) Mid-Atlantic'));
+    ts.add(fmtentry('Atlantic/Cape_Verde','(GMT-01:00) Cape Verde Is.'));
+    ts.add(fmtentry('Atlantic/Azores','(GMT-01:00) Azores'));
+    ts.add(fmtentry('Africa/Casablanca','(GMT+00:00) Casablanca, Monrovia, Reykjavik'));
+    ts.add(fmtentry('Etc/UTC','(GMT+00:00) Greenwich Mean Time: Dublin, Edinburgh, Lisbon, London'));
+//	ts.add(fmtentry('Etc/Greenwich','(GMT+00:00) Greenwich Mean Time: Dublin, Edinburgh, Lisbon, London'));
+    ts.add(fmtentry('Europe/Berlin','(GMT+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna'));
+    ts.add(fmtentry('Europe/Belgrade','(GMT+01:00) Belgrade, Bratislava, Budapest, Ljubljana, Prague'));
+    ts.add(fmtentry('Europe/Brussels','(GMT+01:00) Brussels, Copenhagen, Madrid, Paris'));
+    ts.add(fmtentry('Europe/Sarajevo','(GMT+01:00) Sarajevo, Skopje, Warsaw, Zagreb'));
+    ts.add(fmtentry('Africa/Lagos','(GMT+01:00) West Central Africa'));
+    ts.add(fmtentry('Asia/Amman','(GMT+02:00) Amman'));
+    ts.add(fmtentry('Europe/Athens','(GMT+02:00) Athens, Bucharest, Istanbul'));
+    ts.add(fmtentry('Asia/Beirut','(GMT+02:00) Beirut'));
+    ts.add(fmtentry('Africa/Cairo','(GMT+02:00) Cairo'));
+    ts.add(fmtentry('Africa/Harare','(GMT+02:00) Harare, Pretoria'));
+    ts.add(fmtentry('Europe/Helsinki','(GMT+02:00) Helsinki, Kyiv, Riga, Sofia, Tallinn, Vilnius'));
+    ts.add(fmtentry('Asia/Jerusalem','(GMT+02:00) Jerusalem'));
+    ts.add(fmtentry('Europe/Minsk','(GMT+02:00) Minsk'));
+    ts.add(fmtentry('Africa/Windhoek','(GMT+02:00) Windhoek'));
+    ts.add(fmtentry('Asia/Kuwait','(GMT+03:00) Kuwait, Riyadh, Baghdad'));
+    ts.add(fmtentry('Europe/Moscow','(GMT+03:00) Moscow, St. Petersburg, Volgograd'));
+    ts.add(fmtentry('Africa/Nairobi','(GMT+03:00) Nairobi'));
+    ts.add(fmtentry('Asia/Tbilisi','(GMT+03:00) Tbilisi'));
+    ts.add(fmtentry('Asia/Tehran','(GMT+03:30) Tehran'));
+    ts.add(fmtentry('Asia/Muscat','(GMT+04:00) Abu Dhabi, Muscat'));
+    ts.add(fmtentry('Asia/Baku','(GMT+04:00) Baku'));
+    ts.add(fmtentry('Asia/Yerevan','(GMT+04:00) Yerevan'));
+    ts.add(fmtentry('Asia/Kabul','(GMT+04:30) Kabul'));
+    ts.add(fmtentry('Asia/Yekaterinburg','(GMT+05:00) Yekaterinburg'));
+    ts.add(fmtentry('Asia/Karachi','(GMT+05:00) Islamabad, Karachi, Tashkent'));
+    ts.add(fmtentry('Asia/Calcutta','(GMT+05:30) Chennai, Kolkata, Mumbai, New Delhi'));
+    ts.add(fmtentry('Asia/Calcutta','(GMT+05:30) Sri Jayawardenapura'));
+    ts.add(fmtentry('Asia/Katmandu','(GMT+05:45) Kathmandu'));
+    ts.add(fmtentry('Asia/Almaty','(GMT+06:00) Almaty, Novosibirsk'));
+    ts.add(fmtentry('Asia/Dhaka','(GMT+06:00) Astana, Dhaka'));
+    ts.add(fmtentry('Asia/Rangoon','(GMT+06:30) Yangon (Rangoon)'));
+    ts.add(fmtentry('Asia/Bangkok','(GMT+07:00) Bangkok, Hanoi, Jakarta'));
+    ts.add(fmtentry('Asia/Krasnoyarsk','(GMT+07:00) Krasnoyarsk'));
+    ts.add(fmtentry('Asia/Hong_Kong','(GMT+08:00) Beijing, Chongqing, Hong Kong, Urumqi'));
+    ts.add(fmtentry('Asia/Kuala_Lumpur','(GMT+08:00) Kuala Lumpur, Singapore'));
+    ts.add(fmtentry('Asia/Irkutsk','(GMT+08:00) Irkutsk, Ulaan Bataar'));
+    ts.add(fmtentry('Australia/Perth','(GMT+08:00) Perth'));
+    ts.add(fmtentry('Asia/Taipei','(GMT+08:00) Taipei'));
+    ts.add(fmtentry('Asia/Tokyo','(GMT+09:00) Osaka, Sapporo, Tokyo'));
+    ts.add(fmtentry('Asia/Seoul','(GMT+09:00) Seoul'));
+    ts.add(fmtentry('Asia/Yakutsk','(GMT+09:00) Yakutsk'));
+    ts.add(fmtentry('Australia/Adelaide','(GMT+09:30) Adelaide'));
+    ts.add(fmtentry('Australia/Darwin','(GMT+09:30) Darwin'));
+    ts.add(fmtentry('Australia/Brisbane','(GMT+10:00) Brisbane'));
+    ts.add(fmtentry('Australia/Canberra','(GMT+10:00) Canberra, Melbourne, Sydney'));
+    ts.add(fmtentry('Australia/Hobart','(GMT+10:00) Hobart'));
+    ts.add(fmtentry('Pacific/Guam','(GMT+10:00) Guam, Port Moresby'));
+    ts.add(fmtentry('Asia/Vladivostok','(GMT+10:00) Vladivostok'));
+    ts.add(fmtentry('Asia/Magadan','(GMT+11:00) Magadan, Solomon Is., New Caledonia'));
+    ts.add(fmtentry('Pacific/Auckland','(GMT+12:00) Auckland, Wellington'));
+    ts.add(fmtentry('Pacific/Fiji','(GMT+12:00) Fiji, Kamchatka, Marshall Is.'));
+    ts.add(fmtentry('Pacific/Tongatapu','(GMT+13:00) Nuku''alofa'));
+  end
+  else
+  begin	// 700 entries, to long for weppage (loadingtime)
+  	res:=call_external_prog(LOG_NONE,'timedatectl list-timezones',ts);
+  	ts.insert(0,'Etc/UTC');
+  end;
   LNX_GetTZList:=res;
+end;
+
+function  LNX_GetISOquery(ts:TStringList; opts:string):integer;
+// requires isoquery command (apt-get install isoquery)
+var res:integer;
+begin
+  res:=call_external_prog(LOG_NONE,'isoquery '+opts,ts);
+  LNX_GetISOquery:=res;
+end;
+
+function  LNX_GetBase64String(str:string):string;
+// IN:  fantasticjwt
+// OUT: ZmFudGFzdGljand0
+var cmd,sh:string;
+begin
+  cmd:='echo -n '+str+' | base64 | tr ''+/'' ''-_'' | tr -d ''=''';
+  call_external_prog(LOG_NONE,cmd,sh);
+  LNX_GetBase64String:=sh;
 end;
 
 function  LNX_GetRandomAccessToken(typ:longint):string;
@@ -3062,6 +3424,14 @@ begin
       res:=call_external_prog(LOG_NONE,cmd);
     end;
   LNX_chowngrp:=res;
+end;
+
+function  LNX_chowngrpmod(filename:string; owner,group:string; mode:TMode):integer;
+var res:integer;
+begin
+  res:=LNX_chowngrp(filename,owner,group);
+  if (res=0) then res:=LNX_chmod(filename,mode);
+  LNX_chowngrpmod:=res;
 end;
 
 procedure LNX_GetUsrPwdString(StrList:TStringList; pwdfile,usrlst:string; carveflds:longint);
@@ -3587,72 +3957,58 @@ begin
   end;
 end;
 
-procedure STAT_Init(var stats:STAT_struct_t; numoldval:word);
+procedure STAT_Reset(var stats:STAT_struct_t);
 var i:longint;
 begin
-  with STATS do
+  with stats do
   begin
-    arr_siz:=numoldval;
 	tim_avg:=0;
 	ist_val:=0;
-	old_val:=ist_val;
-	val_avg:=ist_val;
-	old_avg:=val_avg;
-	for i:=0 to arr_siz do 
-	begin
-	  with aold[i-1] do
-	  begin
-	  	_val:=	ist_val;
-	  	_valtimd:=0;
-	  end; // with
-	end; // for
-	old_val_cnt:=0;
+	old_val:=0;
+	val_avg:=0;
+	old_avg:=0;
+	for i:=1 to Length(val_arr) do val_arr[i-1]:=0;
+	for i:=1 to Length(tim_arr) do tim_arr[i-1]:=0;
 	dif_val_pms:=0;
+	idx:=0;
   end; // with
 end;
 
-procedure STAT_Calc(var stats:STAT_struct_t; newval:real; tim_us:int64);
-var i,cntok:integer;
+procedure STAT_Init(var stats:STAT_struct_t; arrsize:word);
+begin
+  with stats do
+  begin
+	SetLength(val_arr,arrsize); 
+	SetLength(tim_arr,arrsize);
+  end; // with
+  STAT_Reset(stats);
+end;
+
+procedure STAT_Calc(var stats:STAT_struct_t; newval:real; tim_us:real);
 begin
   with STATS do
   begin
-	old_val:=				ist_val; 
-	old_avg:=				val_avg;
-	ist_val:=				newval;
-	aold[-1]._val:=			val_avg;
-	aold[old_val_cnt]._val:=ist_val; 
-	aold[-1]._valtimd:=		round(tim_avg);
-	aold[old_val_cnt]._valtimd:=tim_us;
-	val_avg:=0; tim_avg:=0; cntok:=0;
+	old_val:=		ist_val; 
+	old_avg:=		val_avg;
+	ist_val:=		newval;
+	val_arr[idx]:=	newval; 
+	tim_arr[idx]:=	tim_us;
 	
-	for i:= 1 to arr_siz do 
+	val_avg:=		Mean(val_arr); 
+	tim_avg:=		Mean(tim_arr); 
+	
+	if (IsNaN(val_avg) or IsNaN(tim_avg)) then
 	begin
-	  if aold[i-1]._valtimd>0 then
-	  begin 
-		val_avg:=val_avg+aold[i-1]._val;
-	  	tim_avg:=tim_avg+aold[i-1]._valtimd; 
-		inc(cntok); 
-	  end;
+	  val_avg:=newval;
+	  tim_avg:=tim_us;  
 	end;
-	if cntok=0 	then 
-	begin
-	  val_avg:=ist_val;
-	  tim_avg:=aold[old_val_cnt]._valtimd;
-	end 
-	else 
-	begin
-	  val_avg:=			val_avg/cntok;
-	  tim_avg:=round(	tim_avg/cntok);
-	end;
-//	if aold[old_val_cnt]._valtimd<>0 
-//	  then dif_val_pms:=(val_avg-aold[-1]._val)/(aold[old_val_cnt]._valtimd/1000)
-//	  else dif_val_pms:=0;
-	if (tim_avg<>0) and (cntok>1)
-	  then dif_val_pms:=(val_avg-aold[-1]._val)/(tim_avg/1000)
+	
+	if (tim_avg<>0)
+	  then dif_val_pms:=(val_avg-old_avg)/(tim_avg/1000)
 	  else dif_val_pms:=0;
-	  	    
-	inc(old_val_cnt); if old_val_cnt>=arr_siz then old_val_cnt:=0;
-//	old_val_cnt:=(old_val_cnt+1) mod arr_siz;
+
+	inc(idx); 
+	if ((idx>=Length(val_arr)) or (idx>=Length(tim_arr))) then idx:=0;
   end; // with
 end;
 
@@ -3666,7 +4022,7 @@ begin
 end;
 function  Str2Bool(s:string):boolean; begin Str2Bool:=(Pos(Upper(s),yes_c)>0); end;
 
-function  Bool2Num(b:boolean) : byte;		 begin if b then Bool2Num:=1		else Bool2Num:=0;		end;
+function  Bool2Num(b:boolean) : byte;		 begin if b then Bool2Num:=1		else Bool2Num:=0;		 end;
 function  Bool2Dig(b:boolean) : string; 	 begin if b then Bool2Dig:='1'		else Bool2Dig:='0';      end;
 function  Bool2LVL(b:boolean) : string; 	 begin if b then Bool2LVL:='H'		else Bool2LVL:='L';      end;
 function  Bool2Str(b:boolean) : string; 	 begin if b then Bool2Str:='TRUE'	else Bool2Str:='FALSE';  end;
@@ -3799,11 +4155,11 @@ procedure IPInfo_Init(intface:string; var IPInfo:IP_Info_t);
 begin
   with IPInfo do
   begin  
-    iface:=intface;	
+    iface:=intface;		timestamp:=now;
 	ip4addr:=noip_c;	ip6addr:=noip_c;	gwaddr:=noip_c;	nsaddr:=noip_c;	
   	domain:='';			hwaddr:='';			link:='';	
   	ssid:='';			signal:='';			DNSname:='';
-  	stat:=false;		wireless:=false;
+  	stat:=false;		wireless:=false;	chan:=''; freq:='';
   end; // with
 end;
 
@@ -3826,9 +4182,29 @@ begin
 	if wireless then
 	begin
 	  SAY(lvl,'SSID:         '+ssid);
+	  SAY(lvl,'Channel:      '+chan);
+	  SAY(lvl,'Freq:         '+freq);
 	  SAY(lvl,'Signal:       '+signal);
 	end;
   end;
+end;
+
+procedure IPInfosShow(lvl:T_ErrorLevel; var IPInfos:IP_Infos_t);
+var i:longint;
+begin
+  with IPInfos do
+  begin
+    LOG_Writeln(lvl,'################################################');
+	LOG_Writeln(lvl,'idx:'+Num2Str(idx,0)+' init:'+Bool2Str(init)+' samesubnet:'+Bool2Str(samesubnet));
+	LOG_Writeln(lvl,'devlst: '+devlst+' ip4ext:'+ip4ext+' ip6ext:'+ip6ext);
+	LOG_Writeln(lvl,'hostapd_extdev: '+hostapd_extdev+' hostname:'+hostname);
+  	for i:= 0 to IP_infomax_c do 
+  	begin
+  	  LOG_Writeln(lvl,Num2Str(i,2)+' #############################################');
+  	  IPInfoShow(lvl,IP_Info[i]);
+  	end;
+  	LOG_Writeln(lvl,'################################################');
+  end; // with
 end;
 
 function  GetHostNameOS:string;
@@ -3852,6 +4228,7 @@ procedure IPInfo_GetOS(var IPInfo:IP_Info_t);
   end;
 var res:integer; n:longint; _tl:TStringList; sh:string;
 begin
+//LOG_Writeln(LOG_WARNING,'  IPInfo_GetOS+');
   _tl:=TStringList.create;   // echo wlan0 Link: `cat /sys/class/net/wlan0/carrier`
   with IPInfo do
   begin
@@ -3862,6 +4239,8 @@ begin
   	if wireless then
   	begin
 	sh:=sh+	'echo SSID: `iwgetid -r` ; '+
+			'echo Chan: `iwgetid -c | awk -F '':'' ''{print $2}''` ; '+
+			'echo Freq: `iwgetid -f | awk -F '':'' ''{print $2}''` ; '+
 			'echo Signal: `cat /proc/net/wireless | tail -1 | awk ''{print $3}''` ; ';
 //  	 wlan0: 0000   60.  -50.  -256        0      0      0     32      0        0
   	end;
@@ -3883,13 +4262,24 @@ begin
 		xx('domain ',		sh,2,domain);
 		xx(iface+' Link:',	sh,3,link);
 		xx('SSID: ',		sh,2,ssid);
-      	if wireless and (Pos('Signal: ',sh)>0) then 
-      	begin
-    	  signal:=		Trimme(Select_Item(sh,' ','',2),3);
-//		  writeln('sig:',signal,':',sh);
-    	  if (signal='') or (signal='tus')
-    	  	then signal:=	none_c
-    		else signal:=	StringReplace(signal,'.','%',[]);
+		if wireless then 
+		begin
+		  if (Pos('Freq: ',sh)>0) then 
+      	  begin
+      	 	freq:=			Trimme(Select_RightItems(sh,' ','',2),3);
+      	  end;
+		  if (Pos('Chan: ',sh)>0) then 
+      	  begin
+      	 	chan:=			Trimme(Select_RightItems(sh,' ','',2),3);
+      	  end;
+      	  if (Pos('Signal: ',sh)>0) then 
+      	  begin
+    	  	signal:=		Trimme(Select_RightItems(sh,' ','',2),3);
+//		  	writeln('sig:',signal,':',sh);
+    	  	if (signal='') or (signal='tus')
+    	  	  then signal:=	none_c
+    		  else signal:=	StringReplace(signal,'.','%',[]);
+      	  end;
       	end;
       end; // for
   	end else LOG_Writeln(LOG_ERROR,'GetIPInfos: '+Num2Str(res,0));
@@ -3902,19 +4292,23 @@ begin
 //	if stat then SAY(LOG_INFO,sh) else SAY(LOG_WARNING,sh);
 //	IPInfoShow(LOG_INFO,IPInfo);
   end; // with
+//LOG_Writeln(LOG_WARNING,'  IPInfo_GetOS-');
 end;
 
 procedure  IPInfo_GetOS(var IPInfos:IP_Infos_t);
 var ok:boolean; n,i1,i2,anz,_idx:longint; devnam:string;
 begin
   ok:=false;
+//LOG_Writeln(LOG_WARNING,'IPInfo_GetOS+');
   with IPInfos do
   begin
     if not init then 	// access HW
     begin
       hostname:=GetHostNameOS;
       if (call_external_prog(LOG_NONE,'ls -1r /sys/class/net/',devlst)<>0) then devlst:='';
-      if (call_external_prog(LOG_NONE,'dig +short myip.opendns.com @resolver1.opendns.com',ip4ext)<>0) then ip4ext:=noip_c;	
+// https://unix.stackexchange.com/questions/22615/how-can-i-get-my-external-ip-address-in-a-shell-script
+      if (call_external_prog(LOG_NONE,'dig @resolver1.opendns.com ANY myip.opendns.com -4 +short',ip4ext)<>0) then ip4ext:=noip_c;	
+      if (call_external_prog(LOG_NONE,'dig @resolver1.opendns.com ANY myip.opendns.com -6 +short',ip6ext)<>0) then ip6ext:=noip_c;	
 	  devlst:=StringReplace(devlst,LineEnding,',',[rfReplaceAll]);	// wlan0,lo,eth0,ap0
 // writeln('devlist:',devlst,':');
       samesubnet:=false;
@@ -3923,10 +4317,11 @@ begin
 	  begin
 	    devnam:=Trimme(Select_Item(devlst,',','',n),3);	// e.g. wlan0 or wlx?????
 	    _idx:=-1;
-	    if (Pos('wlan0',devnam)>0) or (Pos('wlx',devnam)>0)	then _idx:=0;
-	    if (Pos('wlan1',devnam)>0) 							then _idx:=3;
-	    if (Pos('eth',  devnam)>0) or (Pos('enx',devnam)>0)	then _idx:=1;
-	    if (devnam=ifuap_c)									then _idx:=2; // IP_infomax_c
+	    if (Pos('wlan0',devnam)>0) or (Pos('wlx',devnam)>0)	then _idx:=IP_infoWLAN0idx_c;
+	    if (Pos('wlan1',devnam)>0) 							then _idx:=IP_infoWLAN1idx_c;
+	    if (Pos('eth',  devnam)>0) or (Pos('enx',devnam)>0)	then _idx:=IP_infoETH0idx_c;
+	    if (devnam=ifuap_c)									then _idx:=IP_infoUAP0idx_c; // IP_infomax_c
+
 	    if (_idx>=0) and (_idx<=IP_infomax_c) then
 	    begin
 	      IP_Info[_idx].iface:=devnam;
@@ -3937,7 +4332,7 @@ begin
 		  	if IP_Info[_idx].stat then 
 		  	begin
 			  ok:=true;
-			  idx:=n;
+			  idx:=_idx;
 		  	end;
 		  end;
 // IPInfoShow(LOG_INFO,IP_Info[_idx]);
@@ -3947,11 +4342,11 @@ begin
 	end; // if
 
 	hostapd_extdev:=ifeth_c;
-	if (not IP_Info[1].stat) then
+	if (not IP_Info[IP_infoETH0idx_c].stat) then
 	begin
-	  if IP_Info[0].stat then hostapd_extdev:=IP_Info[0].iface;	// wlan0
-	  if IP_Info[3].stat then hostapd_extdev:=IP_Info[3].iface;	// wlan1
-	end else 				  hostapd_extdev:=IP_Info[1].iface; // eth0
+	  if IP_Info[IP_infoWLAN0idx_c].stat then hostapd_extdev:=IP_Info[IP_infoWLAN0idx_c].iface;	// wlan0
+	  if IP_Info[IP_infoWLAN1idx_c].stat then hostapd_extdev:=IP_Info[IP_infoWLAN1idx_c].iface;	// wlan1
+	end else 				  				  hostapd_extdev:=IP_Info[IP_infoETH0idx_c].iface;  // eth0
 	
 (*	for n:= 1 to 2 do
 	begin
@@ -3968,12 +4363,32 @@ begin
 
 //writeln('idx:',idx,' samesubnet:',samesubnet);
   end; // with
+//LOG_Writeln(LOG_WARNING,'IPInfo_GetOS-');
+end;
+
+procedure IPInfo_GetOS; 
+begin 
+  IP_Infos.init:=false;		// force OS read
+  IPInfo_GetOS(IP_Infos); 
+end; 
+
+function  IPInfo_GetInterfaceName(intidx:longint):string;
+var sh:string;
+begin
+  case intidx of
+	IP_infoWLAN0idx_c: 	sh:=ifwlan_c;
+	IP_infoWLAN1idx_c: 	sh:=ifwlan1_c;
+	IP_infoETH0idx_c: 	sh:=ifeth_c;
+	IP_infoUAP0idx_c: 	sh:=ifuap_c;
+	else sh:='';
+  end; // case
+  IPInfo_GetInterfaceName:=sh;
 end;
 
 function  IPInfo_GetIdx(intface:string):longint;
 var n,_idx:longint;
 begin
-  _idx:=0;
+  _idx:=IP_infoWLAN0idx_c;
   for n:= 0 to IP_infomax_c do
   begin
     with IP_Infos.IP_Info[n] do
@@ -3987,30 +4402,42 @@ end;
 function  IP_iface(aliasname:string):string;
 // IN: wlan0 OUT: wlan0 or wlxxxxxxx
 begin
-  IPInfo_GetOS(IP_Infos);
+//IPInfo_GetOS;
   IP_iface:=IP_Infos.IP_Info[IPInfo_GetIdx(aliasname)].iface;
 end;
 function  IP4_Addr(iface:string):string;
 begin
-  IPInfo_GetOS(IP_Infos);
+//IPInfo_GetOS;
   IP4_Addr:=IP_Infos.IP_Info[IPInfo_GetIdx(iface)].ip4addr;
 end;
 function  IP6_Addr(iface:string):string;
 begin
-  IPInfo_GetOS(IP_Infos);
+//IPInfo_GetOS;
   IP6_Addr:=IP_Infos.IP_Info[IPInfo_GetIdx(iface)].ip6addr;
+end;
+
+function  GetIPAdr(iface:string; var ipaddr:string; ip4:boolean):boolean;
+begin
+  if ip4 then ipaddr:=IP4_Addr(iface) else ipaddr:=IP6_Addr(iface);
+  GetIPAdr:=((ipaddr<>'') and (ipaddr<>noip_c));
+end;
+
+function  GetMACAdr(iface:string; var hwaddr:string):boolean;
+begin
+  hwaddr:=IP_Infos.IP_Info[IPInfo_GetIdx(iface)].hwaddr; 
+  GetMACAdr:=(hwaddr<>'');
 end;
 
 function  GetDomainName(iface:string):string;
 begin
-  IPInfo_GetOS(IP_Infos);
+//IPInfo_GetOS;
   GetDomainName:=IP_Infos.IP_Info[IPInfo_GetIdx(iface)].domain;
 end;
 
 function  GetDomainName:string;
 var sh:string;
 begin
-  IPInfo_GetOS(IP_Infos);
+//IPInfo_GetOS;
   with IP_Infos do
   begin
     if (idx>=0) and (idx<=IP_infomax_c) then sh:=IP_Infos.IP_Info[idx].domain else sh:='';
@@ -4029,8 +4456,20 @@ end;
 
 function  GetHostName:string; 
 begin 
-  IPInfo_GetOS(IP_Infos);
+//IPInfo_GetOS;
   GetHostName:=IP_Infos.hostname;
+end;
+
+function  IS_Online(ip4:boolean):boolean;
+var _ok:boolean;
+begin
+  _ok:=false;
+  with IP_Infos do
+  begin
+	if ip4 	then _ok:=(ip4ext<>noip_c)
+			else _ok:=(ip6ext<>noip_c);
+  end; // with
+  IS_Online:=_ok;
 end;
 
 function  GetWLANSignal(iface:string):longint; 	// -1,0-100
@@ -4049,6 +4488,99 @@ IPInfoShow(LOG_WARNING,IP_Infos.IP_Info[_idx]); *)
   GetWLANSignal:=_sig;
 end;
 
+function  RPI_cxt_GPIOopts(flgs:s_port_flags):string;
+// https://www.raspberrypi.org/documentation/configuration/config-txt/gpio.md
+var cmd:string;
+begin
+  cmd:=''; 
+  if (OUTPUT		IN flgs) then flgs:=flgs-[INPUT]; 
+  if (PullUP		IN flgs) then flgs:=flgs-[PullDOWN]; 
+	
+  if ((flgs*[INPUT,OUTPUT,ALT5,ALT4,ALT3,ALT2,ALT1,ALT0])=[])
+	then flgs:=flgs+[INPUT]; 
+
+  if (INPUT			IN flgs) then cmd:=cmd+'ip,';
+  if (OUTPUT		IN flgs) then cmd:=cmd+'op,';
+  if (ALT5			IN flgs) then cmd:=cmd+'a5,';
+  if (ALT4			IN flgs) then cmd:=cmd+'a4,';
+  if (ALT3			IN flgs) then cmd:=cmd+'a3,';
+  if (ALT2			IN flgs) then cmd:=cmd+'a2,';
+  if (ALT1			IN flgs) then cmd:=cmd+'a1,';
+  if (ALT0			IN flgs) then cmd:=cmd+'a0,';
+  if (NOpull 		IN flgs) then begin flgs:=flgs-[PullUP,PullDOWN]; cmd:=cmd+'np,'; end;
+  if (PullUP		IN flgs) then cmd:=cmd+'pu,';
+  if (PullDOWN		IN flgs) then cmd:=cmd+'pd,';
+
+  if (OUTPUT		IN flgs) then 
+	if (InitialHIGH IN flgs) then cmd:=cmd+'dh,' else cmd:=cmd+'dl,';
+
+  RPI_cxt_GPIOopts:=CSV_RemLastSep(cmd,',');
+end;
+
+function  RPI_config(raspicmd:t_RPI_config; par1,par2:string; var resultstring:string):integer; 
+// https://github.com/l10n-tw/rc_gui/blob/master/src/rc_gui.c
+// 0 is in general success / yes / selected, 1 is failed / no / not selected
+var res:integer; sh:string;
+begin
+  res:=0;
+  sh:=sudo+'raspi-config nonint ';
+  case raspicmd of
+	GET_CAN_EXPAND:	sh:=sh+'get_can_expand';
+	EXPAND_FS:		sh:=sh+'do_expand_rootfs';
+	GET_HOSTNAME:	sh:=sh+'get_hostname';
+	SET_HOSTNAME:	sh:=sh+'do_hostname '+par1;
+	GET_BOOT_CLI:	sh:=sh+'get_boot_cli';
+	GET_AUTOLOGIN:	sh:=sh+'get_autologin';
+	SET_BOOT_CLI:	sh:=sh+'do_boot_behaviour B1';
+	SET_BOOT_CLIA:	sh:=sh+'do_boot_behaviour B2';
+	SET_BOOT_GUI:	sh:=sh+'do_boot_behaviour B3';
+	SET_BOOT_GUIA:	sh:=sh+'do_boot_behaviour B4';
+	GET_BOOT_WAIT:	sh:=sh+'get_boot_wait';
+	SET_BOOT_WAIT:	sh:=sh+'do_boot_wait '+par1;
+	GET_SPLASH:		sh:=sh+'get_boot_splash';
+	SET_SPLASH:		sh:=sh+'do_boot_splash '+par1;
+	GET_OVERSCAN:	sh:=sh+'get_overscan';
+	SET_OVERSCAN:	sh:=sh+'do_overscan '+par1;
+	GET_PIXDUB:		sh:=sh+'get_pixdub';
+	SET_PIXDUB:		sh:=sh+'do_pixdub '+par1;
+	GET_CAMERA:		sh:=sh+'get_camera';
+	SET_CAMERA:		sh:=sh+'do_camera '+par1;
+	GET_SSH:		sh:=sh+'get_ssh';
+	SET_SSH:		sh:=sh+'do_ssh '+par1;
+	GET_VNC:		sh:=sh+'get_vnc';
+	SET_VNC:		sh:=sh+'do_vnc '+par1;
+	GET_SPI:		sh:=sh+'get_spi';
+	SET_SPI:		sh:=sh+'do_spi '+par1;
+	GET_I2C:		sh:=sh+'get_i2c';
+	SET_I2C:		sh:=sh+'do_i2c '+par1;
+	GET_SERIAL:		sh:=sh+'get_serial';
+	GET_SERIALHW:	sh:=sh+'get_serial_hw';
+	SET_SERIAL:		sh:=sh+'do_serial '+par1;
+	GET_1WIRE:		sh:=sh+'get_onewire';
+	SET_1WIRE:		sh:=sh+'do_onewire '+par1;
+	GET_RGPIO:		sh:=sh+'get_rgpio';
+	SET_RGPIO:		sh:=sh+'do_rgpio '+par1;
+	GET_PI_TYPE:	sh:=sh+'get_pi_type';
+	GET_OVERCLOCK:	sh:=sh+'get_config_var arm_freq /boot/config.txt';
+	SET_OVERCLOCK:	sh:=sh+'do_overclock '+par1;
+	GET_GPU_MEM:	sh:=sh+'get_config_var gpu_mem /boot/config.txt';
+	GET_GPU_MEM_256:sh:=sh+'get_config_var gpu_mem_256 /boot/config.txt';
+	GET_GPU_MEM_512:sh:=sh+'get_config_var gpu_mem_512 /boot/config.txt';
+	GET_GPU_MEM_1K:	sh:=sh+'get_config_var gpu_mem_1024 /boot/config.txt';
+	SET_GPU_MEM:	sh:=sh+'do_memory_split '+par1;
+	GET_HDMI_GROUP:	sh:=sh+'get_config_var hdmi_group /boot/config.txt';
+	GET_HDMI_MODE:	sh:=sh+'get_config_var hdmi_mode /boot/config.txt';
+	SET_HDMI_GP_MOD:sh:=sh+'do_resolution '+par1+' '+par2;
+	GET_WIFI_CTRY:	sh:=sh+'get_wifi_country';
+	SET_WIFI_CTRY:	sh:=sh+'do_wifi_country '+par1;
+	WLAN_INTERFACES:sh:=sh+'list_wlan_interfaces';
+	else 			res:=1;
+  end; // case
+  if (res=0) then res:=call_external_prog(LOG_NONE,sh,resultstring);
+//LOG_Writeln(LOG_WARNING,sh+': ('+Num2Str(res,0)+') '+resultstring);
+  RPI_config:=res;
+end;
+
 function  RPI_WLANavailChan(cntry:string):string;
 const _2Ghz='1|2|3|4|5|6|7|8|9|10|11|12|13|';
 	  _5Ghz='36|40|44|48|52|56|60|64|100|104|108|112|116|120|124|128|132|136|140|';
@@ -4065,7 +4597,7 @@ end;
 function MAC_Addr(iface:string; fmt:byte):string;
 var n:longint; sh:string;
 begin 
-  IPInfo_GetOS(IP_Infos);
+//IPInfo_GetOS;
   sh:=GetHexChar(IP_Infos.IP_Info[IPInfo_GetIdx(iface)].hwaddr);
   if (Length(sh)<12) then sh:=cpu_snr;
   case fmt of
@@ -4077,9 +4609,15 @@ begin
   MAC_Addr:=sh;  
 end;
 
+function  MAC_isRPI(macsubstr:string):boolean;
+begin
+  macsubstr:=FilterChar(upper(macsubstr),'0123456789abcdefABCDEF');
+  MAC_isRPI:=( (Pos('B827EB',macsubstr)=1) or (Pos('DCA632',macsubstr)=1) );
+end;
+
 function  IP4_AddrExt:string;
 begin
-  IPInfo_GetOS(IP_Infos);
+//IPInfo_GetOS;
   IP4_AddrExt:=IP_Infos.ip4ext;
 end;
 
@@ -4302,6 +4840,14 @@ begin
   FormatFileSize:=sh;
 end;
 
+function KEYpressedChar(ch:char):boolean;
+var _keypr:boolean;
+begin
+  if KeyPressed then _keypr:=(ReadKey=ch) else _keypr:=false;
+  KEYpressedChar:=_keypr;
+end;
+function ESCpressed:boolean; begin ESCpressed:=KEYpressedChar(ESC); end;
+
 procedure AskCR(lvl:T_ErrorLevel; msg:string); begin writeln; write(msg+'<CR>'); readln; end;
 procedure AskCR(msg:string); begin AskCR(LOG_INFO,msg); end;
 procedure AskCR; begin AskCR(''); end;
@@ -4363,6 +4909,27 @@ begin
   end;
   Str2DateTime:=_ok; 
 end; 
+
+function  UnicodeStr2UTF8(unicodestr:string):string;
+// unicodestr: 'H\u2082O' -> H2O (subscript 2)
+var anz,n:longint; lw:longword; _str,sh:string;
+begin
+  sh:=''; _str:=unicodestr;	// H\u2082O
+  anz:=Anz_Item(_str,'\u','');
+  for n:= 1 to anz do
+  begin
+	sh:=sh+Select_Item(_str,'\u','',1);					// H
+	_str:=Select_RightItems(unicodestr,'\u','',n+1);	// 2082O subscript2 O
+	if (Length(_str)>=4) then
+	begin
+	  if not Str2Num('$'+copy(_str,1,4),lw) then lw:=0; 
+	  sh:=sh+UTF8Encode(WideChar(lw));
+	  _str:=copy(_str,5,Length(_str));					// O
+	end;
+  end;
+//writeln(sh+' '+HexStr(sh));
+  UnicodeStr2UTF8:=sh;
+end;
 
 function  scale(valin,min1,max1,min2,max2:real):real;
 var r1,r2:real;
@@ -4972,7 +5539,7 @@ begin
   end;
   if occurance<0 then
   begin // von Ende-1 durchsuchen
-    n:=StrList.Count-1; 
+    n:=StartIdx; if (n<=0) or (n>=StrList.Count) then n:=StrList.Count-1; // new 20190709
     while (n>=0) and not found do
     begin
       if (Pos(srchstrng,StrList[n])>0) then begin inc(occhelp); if (occhelp=abs(occurance)) then begin found :=true; ret:=n; end; end;
@@ -4982,12 +5549,18 @@ begin
   SearchStringInListIdx:=ret;
 end;
 
-function  GiveStringListIdx(StrList:TStringList; srchstrng:string; var idx:longint; occurance:longint):boolean;
+function  GiveStringListIdx(StrList:TStringList; srchstrng:string; var idx:longint; occurance,StartIdx:longint):boolean;
 var ok:boolean;
 begin
-  idx:=SearchStringInListIdx(StrList, srchstrng, occurance,0); 
+  idx:=SearchStringInListIdx(StrList, srchstrng, occurance, StartIdx); 
   if (idx>=0) and (idx<StrList.count) then ok:=true else ok:=false;  
   GiveStringListIdx:=ok;
+end;
+function  GiveStringListIdx(StrList:TStringList; srchstrng:string; var idx:longint; occurance:longint):boolean;
+var StrtIdx:longint;
+begin 
+  StrtIdx:=0; if (occurance<0) then StrtIdx:=-1;
+  GiveStringListIdx:=GiveStringListIdx(StrList,srchstrng,idx,occurance,StrtIdx); 
 end;
 
 function  GiveStringListIdx(StrList:TStringList; srchstrngSTART,srchstrngEND:string; var idx:longint):boolean;
@@ -5862,7 +6435,7 @@ function  call_external_prog(typ:t_ErrorLevel; cmdline:string; var receivestring
 var exitCode:integer; receivelist:TStringList;
 begin
   receivelist:=TStringList.create;
-  exitCode:=call_external_prog(typ,cmdline,receivelist);
+  exitCode:=call_external_prog(typ,cmdline,receivelist,0);
 //showstringlist(receivelist);
   receivestring:=StringList2String(receivelist,LineEnding);
   receivelist.free;
@@ -6081,8 +6654,8 @@ begin
   begin
     res:=call_external_prog(LOG_NONE,'tail '+MD5filnam,MD5hash); 
     MD5hash:=Select_Item(Trimme(MD5hash,4),' ','',1);
-	ok:=(MD5hash<>'');
-SAY(LOG_WARNING,'MD5_HashGETFile'+Num2Str(res,0)+':'+MD5filnam+':'+MD5hash+':'+Bool2Str(ok));
+	ok:=(MD5hash<>''); if res>1 then ;
+//SAY(LOG_WARNING,'MD5_HashGETFile:'+Num2Str(res,0)+':'+MD5filnam+':'+MD5hash+':'+Bool2Str(ok));
   end;
   MD5_HashGETFile:=ok;
 end;
@@ -6630,7 +7203,7 @@ function  RPI_Maint(UpdFlags:s_rpimaintflags; var CurlThCtl:Thread_Ctrl_t):integ
 const test_c=false; test2_c=false; c_maxp=10; 
 type  t_parr = array[1..c_maxp] of string;
 var   p2:t_parr; j,res:integer; i64:int64; r,version_new_md5,version_old_md5:real; 
-	  noMD5Chk,test,test2:boolean;
+	  noMD5Chk,Reprt,test,test2:boolean;
 	  flgs:s_rpimaintflags; cmd:t_rpimaintflags; 
 	  tl:TStringList;
 	  sh,filnam,DfltMaintDir,cdmod,usrpwd,cmds,cmdsf,version,versold,
@@ -6694,14 +7267,17 @@ var   p2:t_parr; j,res:integer; i64:int64; r,version_new_md5,version_old_md5:rea
 begin
   DfltMaintDir:=	AppDataDir_c+'/'+ApplicationName+'/maint';	// /var/lib/<CompanyShortName>/<appname>/maint
   res:=-1; 
-  
-  test:=	(UpdDBG1 		IN UpdFlags); 
-  test2:=	(UpdDBG2 		IN UpdFlags);  // test2:=true;
-  noMD5Chk:=(UpdnoMD5Chk 	IN UpdFlags);
-  
-//test2:=true; // test:=true;
+
+  test:=		(UpdDBG1 		IN UpdFlags); 
+  test2:=		(UpdDBG2 		IN UpdFlags);  //test2:=true;
+  noMD5Chk:=	(UpdnoMD5Chk 	IN UpdFlags);
+  Reprt:=		(not (UpdQuiet 	IN UpdFlags));
+
+//test2:=true; test:=true;
   
   flgs:=UpdFlags+[UpdNOP]; 
+  if (UpdOnlyMD5Chk IN flgs) then flgs:=flgs-[UpdPKGGet];
+  
   FTPServer:=		RpiMaintCmd.ReadString('RPIMAINT','FTPSRV', '');	
   FTPUser:=  		RpiMaintCmd.ReadString('RPIMAINT','FTPUSR', '');		
   FTPPwd:=	 	 	RpiMaintCmd.ReadString('RPIMAINT','FTPPWD', '');	
@@ -6772,9 +7348,13 @@ begin
 					  
 					  p2[3]:='-T "{'+UplSrcFiles+'}"';
 					  i64:=GetFilePackSize(UplSrcFiles);
-					  if UpdProtoHTTP 	IN UpdFlags
-					    then p2[4]:='"http://'+FTPServer+UplDstDir+'"' // if you have multiple files, do not forget trailing /
-					    else p2[4]:='"ftp://'+ FTPServer+UplDstDir+'"';
+					  
+					  if (([UpdProtoHTTP,UpdProtoHTTPS] * UpdFlags) <> []) then
+					  begin
+					    if (UpdProtoHTTPS IN UpdFlags) then p2[4]:='https' else p2[4]:='http'
+					  end else p2[4]:='ftp';
+					  p2[4]:='"'+  p2[4] +'://'+FTPServer+UplDstDir+'"'; // if you have multiple files, do not forget trailing /
+					  
 					  parr_show('#1',p2);
 //writeln('UplDstDir:',p2[4],' UplSrcFiles:',UplSrcFiles);
 					  MSG_HUB(LOG_INFO,maintmsg,cmdsf+' '+FormatFileSize(i64));
@@ -6816,9 +7396,11 @@ begin
 	  				  end
 	  				  else
 	  				  begin
-	  				    if UpdProtoHTTP 	IN UpdFlags
-					      then sh:='http://'+FTPServer+PrepFilePath(DwnSrcDir+'/')+'{'+DwnSrcFiles+'}'
-					      else sh:='ftp://'+ FTPServer+PrepFilePath(DwnSrcDir+'/')+'{'+DwnSrcFiles+'}';
+						if (([UpdProtoHTTP,UpdProtoHTTPS] * UpdFlags) <> []) then
+					  	begin
+					      if (UpdProtoHTTPS IN UpdFlags) then sh:='https' else sh:='http'
+					  	end else sh:='ftp';
+					  	sh:=sh +'://'+FTPServer+PrepFilePath(DwnSrcDir+'/')+'{'+DwnSrcFiles+'}';					      
 					  end;
 					  if DwnDstDir='/dev/null' then cdmod:=''; if cdmod<>'' then ;
 //curl -u usr:pwd -v -k --ssl -o "./file1" -o "./file2" "ftp://www.xyz.com/dir/{file1,file2}" > "file.log" 2> "file.log.prog"
@@ -6878,6 +7460,7 @@ begin
 					  if (res=0) then MSG_HUB(LOG_NOTICE,maintmsg,cmdsf+' USB-Stick')
 					  			 else MSG_HUB(LOG_ERROR, maintmsg,cmdsf+' USB-Stick');
 	 				end;			
+	  UpdOnlyMD5Chk,
 	  UpdPKGGet:	begin // get a whole install package, check if download is needed
 					  say(LOG_Info,'enter maint step: '+cmds);
 	  				  if FTPServer='' then
@@ -6886,9 +7469,11 @@ begin
 	  				    break;
 	  				  end;
 	  				  SAY(LOG_INFO,cmdsf+' download md5 file');
-	  				  if UpdProtoHTTP 	IN UpdFlags
-					    then sh:='http://'+FTPServer+UpdPkgSrcFile
-					    else sh:='ftp://'+ FTPServer+UpdPkgSrcFile;				  
+					  if (([UpdProtoHTTP,UpdProtoHTTPS] * UpdFlags) <> []) then
+					  begin
+						if (UpdProtoHTTPS IN UpdFlags) then sh:='https' else sh:='http'
+					  end else sh:='ftp';
+					  sh:=sh+'://'+FTPServer+UpdPkgSrcFile;			  
 //curl -u usr:pwd <curldefaults> -v -k --ssl -o <dstfile>.md5 "ftp://ftp.host.com/<MaintUpdPkgSrcFile>.md5" > file.log 2> file.log.prog
 					  p2[1]:='curl'; 	
 					  if usrpwd<>'' 					  then p2[2]:='-u '+usrpwd;
@@ -6901,26 +7486,28 @@ begin
 					  p2[3]:='-o'; 			p2[4]:='"'+UpdPkgDstDirAndFile+'.md5"'; 
 					  p2[5]:='"'+sh+'.md5"';p2[6]:='';
 					  parr_show('#1',p2); 
-					  MSG_HUB(LOG_INFO,maintmsg,cmdsf+' md5');
+					  if Reprt then MSG_HUB(LOG_INFO,maintmsg,cmdsf+' md5');
 					  CURL_SetPara(CurlThCtl,cmdsf+' md5',cmdget(p2),FTPlogf,UpdPkgDstFile+'.md5',Get_Dirs(UpdPkgDstDirAndFile),0,UpdFlags);
 					  res:=CURL(CurlThCtl);
 					  if (res=0) then
 					  begin
 					    MD5_HashGETVersion(UpdPkgMD5FileOld,			versold,version_old_md5);
 					    MD5_HashGETVersion(UpdPkgDstDirAndFile+'.md5',	version,version_new_md5);	
-						say(LOG_NOTICE,cmdsf+' successfully downloaded '+UpdPkgDstFile+'.md5 ('+Num2Str(version_old_md5,0,3)+' '+Num2Str(version_new_md5,0,3)+')');					
-						if noMD5Chk or (not MD5Chk(LOG_INFO,LOG_WARNING,UpdPkgDstDirAndFile+'.md5',UpdPkgMD5FileOld)) then
+						say(LOG_NOTICE,cmdsf+' successfully downloaded '+UpdPkgDstFile+'.md5 ('+Num2Str(version_old_md5,0,3)+' '+Num2Str(version_new_md5,0,3)+')');
+                        if not MD5Chk(LOG_INFO,LOG_WARNING,UpdPkgDstDirAndFile+'.md5',UpdPkgMD5FileOld) then res:=-1;
+//						if (cmd=UpdOnlyMD5Chk) then LOG_Writeln(LOG_WARNING,'UpdOnlyMD5Chk: '+Num2Str(res,0));
+						if (cmd<>UpdOnlyMD5Chk) and (noMD5Chk or (res<0)) then
 						begin // get big file, there is a different package available
 						  SAY(LOG_INFO,cmdsf+' download tar ball');
 						  p2[4]:='"'+UpdPkgDstDirAndFile+'"'; p2[5]:='"'+sh+'"';
 						  parr_show('#2',p2);
-						  MSG_HUB(LOG_INFO,maintmsg,cmdsf+' '+version);
+						  if Reprt then MSG_HUB(LOG_INFO,maintmsg,cmdsf+' '+version);
 						  CURL_SetPara(CurlThCtl,cmdsf,cmdget(p2),FTPlogf,UpdPkgDstFile,Get_Dirs(UpdPkgDstDirAndFile),0,UpdFlags+[UpdLogAppend]);
 						  res:=CURL(CurlThCtl);
 						  if (res=0) then
 						  begin
 						    i64:=GetFilePackSize(UpdPkgDstFile);
-						    MSG_HUB(LOG_NOTICE,maintmsg,cmdsf+' '+FormatFileSize(i64)+' '+version);
+						    if Reprt then MSG_HUB(LOG_NOTICE,maintmsg,cmdsf+' '+FormatFileSize(i64)+' '+version);
 							say(LOG_NOTICE,cmdsf+' successfully downloaded '+FormatFileSize(i64)+' '+version+' '+UpdPkgDstFile);
 							parr_clean(p2); 
 							p2[1]:='md5sum'; p2[2]:=UpdPkgDstDirAndFile; 
@@ -6932,7 +7519,7 @@ begin
 							  if MD5Chk(LOG_INFO,LOG_ERROR,UpdPkgDstDirAndFile+'.md5',UpdPkgDstDirAndFile+'.md5.2') then 
 							  begin
 								res:=0; say(LOG_NOTICE,cmdsf+' valid md5 of '+UpdPkgDstFile);
-								MSG_HUB(LOG_NOTICE,maintmsg,cmdsf+' chk md5');
+								if Reprt then MSG_HUB(LOG_NOTICE,maintmsg,cmdsf+' chk md5');
 							  end
 							  else
 							  begin
@@ -6966,8 +7553,11 @@ begin
 						end
 						else 
 						begin
-						  res:=0; 
-						  say(LOG_Info,cmdsf+' valid md5 of '+UpdPkgDstFile+', file was already successfully transferred');
+						  if (cmd<>UpdOnlyMD5Chk) then 
+						  begin
+							res:=0; 
+							say(LOG_Info,cmdsf+' valid md5 of '+UpdPkgDstFile+', file was already successfully transferred');
+						  end;
 						end;
 					  end 
 					  else 
@@ -7115,7 +7705,7 @@ begin
   if FileExists(_tty) then
   begin
     sh:=Trimme('stty -F '+_tty+' '+Num2Str(baudr,0)+' '+_par,3);
-//	SAY(lvl,sh);
+SAY(lvl,sh);
     res:=call_external_prog(LOG_NONE,sh,sh);
   end else LOG_Writeln(LOG_ERROR,'TTY_sttySpeed: device does not exist: '+_tty);
   TTY_sttySpeed:=res;
@@ -7373,40 +7963,146 @@ begin
   TempLVLset:=lvl;
 end;
 
-function  RPI_Temp(logmsg:boolean):t_ERRORLevel;
-var _lvl:t_ERRORLevel; n:longint; tag:longword; sh,_unit:string; p:array[0..1] of longword;
+function  RPI_Temp(logmsg:boolean; var TempStruct:RPI_Temps_t):t_ERRORLevel;
+var n:longint; tag:longword; sh,_unit:string; p:array[0..1] of longword;
 begin
   with RPI_Temps do
   begin
-	_lvl:=LOG_NONE; _unit:=TempUnit[1]; TempIdx:=1; TempInfo:='';
-  	if RPI_FW_property(TAG_STATUS_REQUEST,TAG_GET_MAX_TEMPERATURE,addr(p),sizeof(p))>0
-	  then TempMax:=p[1]/1000 else TempMax:=RPI_TempAlarmCelsius_c; 
+//	EnterCriticalSection(Temp_CS); 
+	  TempMaxLvl:=LOG_NONE; _unit:=TempUnit[1]; //TempIdx:=1; //TempInfo:='';
+  	  if RPI_FW_property(TAG_STATUS_REQUEST,TAG_GET_MAX_TEMPERATURE,addr(p),sizeof(p))>0
+	  	then TempMax:=p[1]/1000 else TempMax:=RPI_TempAlarmCelsius_c; 
+	  	
+	  TempCOOL:=TempMax*RPI_CTempCool_c;
+	  TempWARN:=TempMax*RPI_CTempWarn_c;
+ 	  TempHOT:= TempMax*RPI_CTempHot_c;	  
   
-	for n:= 1 to 2 do
-  	begin
-	  Temp[n]:=NaN; TempLvl[n]:=LOG_NONE; 
-	  tag:=TAG_GET_TEMPERATURE; sh:='CPU';
-	  case n of
-		2: 	 begin sh:='GPU'; tag:=TAG_GET_TEMPERATURE; end; // missing fw tag for GPU temp
-	  end; // case
-      if RPI_FW_property(TAG_STATUS_REQUEST,tag,addr(p),sizeof(p))>0 then
-      begin
-		Temp[n]:=p[1]/1000;
-      	TempLvl[n]:=TempLVLset(Temp[n],TempMax);
-      	if TempLvl[n]>=_lvl then _lvl:=TempLvl[n];
-	  	TempInfo:=TempInfo+sh+':'+Num2Str((Temp[n]),0,1)+_unit+';';
-	  	if logmsg and (_lvl>=LOG_WARNING) then
-		  SAY(TempLvl[n],'RPI_TempAlarm['+sh+']: '+Num2Str(Temp[n],0,1)+_unit+' (AlarmTemp: '+Num2Str(TempMax*RPI_CTempHot_c,0,1)+_unit+')');
-      end else TempInfo:=TempInfo+sh+':--.-'+_unit+';';
-	end; // for 
-  
-	TempInfo:=TempInfo+'COOL:'+ Num2Str(TempMax*RPI_CTempCool_c,	0,1)+_unit+';';
-	TempInfo:=TempInfo+'WARN:'+ Num2Str(TempMax*RPI_CTempWarn_c,	0,1)+_unit+';';
- 	TempInfo:=TempInfo+'HOT:'+  Num2Str(TempMax*RPI_CTempHot_c,		0,1)+_unit+';';
-	TempInfo:=TempInfo+'ALARM:'+Num2Str(TempMax,					0,1)+_unit;
-//	TempInfo: CPU:41.8'C;GPU:--.-'C;COOL:40.0'C;WARN:65.0'C;HOT:75.0'C;ALARM:85.0'C	// temps in celsius
+	  for n:= 1 to 2 do
+  	  begin
+	  	Temp[n]:=NaN; TempLvl[n]:=LOG_NONE; 
+	  	tag:=TAG_GET_TEMPERATURE; sh:='CPU';
+	  	case n of
+		  2: 	 begin sh:='GPU'; tag:=TAG_GET_TEMPERATURE; end; // missing fw tag for GPU temp
+	  	end; // case
+      	if RPI_FW_property(TAG_STATUS_REQUEST,tag,addr(p),sizeof(p))>0 then
+      	begin
+		  Temp[n]:=p[1]/1000;
+		  if (Temp[n]>TempMaxObserved) then 
+		  begin
+		  	TempMaxObserved:=Temp[n];
+		  	TempMaxObsTS:=now;
+		  end;
+		  if (Temp[n]<TempMinObserved) then 
+		  begin
+		  	TempMinObserved:=Temp[n];
+		  	TempMinObsTS:=now;
+		  end;
+      	  TempLvl[n]:=TempLVLset(Temp[n],TempMax);
+      	  if TempLvl[n]>=TempMaxLvl then TempMaxLvl:=TempLvl[n];
+//	  	  TempInfo:=TempInfo+sh+':'+Num2Str((Temp[n]),0,1)+_unit+';';
+	  	  if logmsg and (TempMaxLvl>=LOG_WARNING) then
+		  	SAY(TempLvl[n],'RPI_TempAlarm['+sh+']: '+Num2Str(Temp[n],0,1)+_unit+' (AlarmTemp: '+Num2Str(TempWARN,0,1)+_unit+')');
+      	end; // else TempInfo:=TempInfo+sh+':--.-'+_unit+';';
+	  end; // for
+	  if not TempMaxObservedNEW then TempMaxObservedNEW:=(TempMaxObserved>TempStruct.TempMaxObserved);
+	  if not TempMinObservedNEW then TempMinObservedNEW:=(TempMinObserved<TempStruct.TempMinObserved);
+(*	  TempInfo:=TempInfo+'COOL:'+ Num2Str(TempCOOL,	0,1)+_unit+';';
+	  TempInfo:=TempInfo+'WARN:'+ Num2Str(TempWARN,	0,1)+_unit+';';
+ 	  TempInfo:=TempInfo+'HOT:'+  Num2Str(TempHOT,	0,1)+_unit+';';
+	  TempInfo:=TempInfo+'ALARM:'+Num2Str(TempMax,	0,1)+_unit;*)
+//	  TempInfo: CPU:41.8'C;GPU:--.-'C;COOL:40.0'C;WARN:65.0'C;HOT:75.0'C;ALARM:85.0'C	// temps in celsius
+	  LastUpdate:=now;
+	  TempStruct:=RPI_Temps; 	
+	  RPI_Temp:=TempMaxLvl;
+//	LeaveCriticalSection(Temp_CS);
   end; // with
-  RPI_Temp:=_lvl;
+end;
+
+procedure RPI_TempMaxValuesCheckIn(var TempStruct:RPI_Temps_t; Tmin,Tmax:real; TminTS,TmaxTS:TDateTime);
+begin
+  with TempStruct do
+  begin
+	TempMinObserved:=Tmin;  TempMinObsTS:=TminTS;
+	TempMaxObserved:=Tmax;	TempMaxObsTS:=TmaxTS;
+  end; // with
+end;
+
+procedure RPI_TempInit(var TempStruct:RPI_Temps_t);
+var i:longint;
+begin
+  with TempStruct do
+  begin
+//  InitCriticalSection(Temp_CS); TempInfo:=''; TempIdx:=1;
+  	TempMax:=RPI_TempAlarmCelsius_c; LastUpdate:=0;					
+    TempCOOL:=TempMax; TempWARN:=TempMax; TempHOT:=TempMax;  	
+    TempMaxObservedNEW:=false; TempMinObservedNEW:=false;
+	for i:= 1 to 2 do 
+	begin 
+	  Temp[i]:=0; TempLvl[i]:=LOG_NONE; TempUnit[i]:='''C'; 
+	end;
+	TempUnit[2]:='&#x2103;';
+	RPI_TempMaxValuesCheckIn(TempStruct,TempMax,0,LastUpdate,LastUpdate);	
+  end; // with
+end;
+
+procedure RPI_TempSaveLimits(var TempStruct:RPI_Temps_t; section:string);
+begin
+  with TempStruct do
+  begin 
+	if TempMinObservedNEW then
+	begin
+	  BIOS_SetIniString(section,'CPUtempMINobserved',Num2Str(TempMINObserved,0,2)+','+GetXMLTimeStamp(TempMinObsTS)+','+Select_Item(rpi_rev,';','',3));
+	  TempMinObservedNEW:=false;
+	end;
+	if TempMaxObservedNEW then
+	begin
+	  BIOS_SetIniString(section,'CPUtempMAXobserved',Num2Str(TempMaxObserved,0,2)+','+GetXMLTimeStamp(TempMaxObsTS)+','+Select_Item(rpi_rev,';','',3));
+	  TempMaxObservedNEW:=false;
+//	  BIOS_CacheUpdate(false);
+	end;
+  end; // with
+end;
+
+procedure RPI_TempLoadLimits(var TempStruct:RPI_Temps_t; section:string);
+var _tmpStruct:RPI_Temps_t; sh:string;
+begin
+  RPI_TempInit(_tmpStruct);
+  with _tmpStruct do
+  begin 
+//  CPUtempMAXobserved=68.00,2019-07-25T15:13:59.177+00:00,4B
+	sh:=BIOS_GetIniString(section,'CPUtempMAXobserved','',[]);
+	if (Select_Item(sh,',','',3)=Select_Item(rpi_rev,';','',3)) then
+  	begin
+	  if not Str2Num(Select_Item(sh,',','',1),TempMaxObserved) 
+		then TempMaxObserved:=0;
+	  if not GetUTCDateTimefromXMLTimeStamp(Select_Item(sh,',','',2),TempMaxObsTS) 
+		then TempMaxObsTS:=0;
+	  SAY(LOG_INFO,'TempMax:'+sh+':'+Num2Str(TempMaxObserved,0,2)+'@'+GetXMLTimeStamp(TempMaxObsTS));
+  	end 
+  	else 
+  	begin // not same cpu
+  	  TempMaxObserved:=0; TempMaxObsTS:=0;
+  	  LOG_Writeln(LOG_WARNING,'TempMax:'+sh+':'+Num2Str(TempMaxObserved,0,2)+'@'+GetXMLTimeStamp(TempMaxObsTS));
+  	end;
+
+//  CPUtempMINobserved=45.00,2019-07-25T13:13:59.177+00:00,4B  	
+	sh:=BIOS_GetIniString(section,'CPUtempMINobserved','',[]);
+	if (Select_Item(sh,',','',3)=Select_Item(rpi_rev,';','',3)) then
+  	begin
+	  if not Str2Num(Select_Item(sh,',','',1),TempMinObserved) 
+		then TempMinObserved:=RPI_TempAlarmCelsius_c;
+	  if not GetUTCDateTimefromXMLTimeStamp(Select_Item(sh,',','',2),TempMinObsTS) 
+		then TempMinObsTS:=0;
+	  SAY(LOG_INFO,'TempMin:'+sh+':'+Num2Str(TempMinObserved,0,2)+'@'+GetXMLTimeStamp(TempMinObsTS));
+  	end 
+  	else 
+  	begin // not same cpu
+  	  TempMinObserved:=RPI_TempAlarmCelsius_c; TempMinObsTS:=0;
+  	  LOG_Writeln(LOG_WARNING,'TempMin:'+sh+':'+Num2Str(TempMinObserved,0,2)+'@'+GetXMLTimeStamp(TempMinObsTS));
+  	end;  	
+  	
+  	RPI_TempMaxValuesCheckIn(TempStruct,TempMinObserved,TempMaxObserved,TempMinObsTS,TempMaxObsTS);	
+  end; // with
 end;
 
 function  RPI_Volt:string;	// core:1.2000V;sdram_c:1.2000V;sdram_i:1.2000V;sdram_p:1.2250V
@@ -7439,6 +8135,30 @@ begin
   RPI_FREQs:=sh;
 end;
 
+function  RPI_ThrottleDesc:string;
+// vcgencmd get_throttled
+var sh:string;
+begin
+  sh:='';
+  if BIT_Get(RPI_Throttle, 0) then sh:=sh+'under-voltage;';
+  if BIT_Get(RPI_Throttle, 1) then sh:=sh+'arm frequency capped;';
+  if BIT_Get(RPI_Throttle, 2) then sh:=sh+'currently throttled;';
+  if BIT_Get(RPI_Throttle,16) then sh:=sh+'under-voltage has occurred;';
+  if BIT_Get(RPI_Throttle,17) then sh:=sh+'arm frequency capped has occurred;';
+  if BIT_Get(RPI_Throttle,18) then sh:=sh+'throttling has occurred;';
+  RPI_ThrottleDesc:=CSV_RemLastSep(sh,';');
+end;
+
+procedure RPI_ThrottleGet;
+var val:longword; sh:string;
+begin
+  if (call_external_prog(LOG_NONE,'vcgencmd get_throttled',sh)=0) then 
+  begin // e.g. throttled=0x50005
+	if not Str2Num(Select_Item(RM_CRLF(sh),'throttled=','',2),val) then val:=0;
+  end;
+  RPI_Throttle:=val; 
+end;
+
 function  RPI_GPU_MEM_BASE:longword; begin RPI_GPU_MEM_BASE:=GPU_MEM_BASE; end;
 
 function  RPI_INFO_Split(info:string; var labl,valu:string):boolean;
@@ -7446,6 +8166,16 @@ begin // in: CPU:41.8'C out: labl:CPU value:41.8'C
   labl:=Trimme(Select_Item(info,':','',1),3);
   valu:=Trimme(Select_Item(info,':','',2),3);
   RPI_INFO_Split:=((labl<>'') and (valu<>''));
+end;
+
+procedure Get_SDcard_RDSpeed;
+var cmd,sh:string;
+begin
+//Timing buffered disk reads: 128 MB in  3.01 seconds =  42.47 MB/sec
+  cmd:='hdparm -t /dev/mmcblk0 2>/dev/null | grep -i "timing" | awk -F ''='' ''{print $2}''';
+  call_external_prog(LOG_NONE,cmd,sh);
+  sh:=Trimme(sh,3); // 42.47 MB/sec
+  if (sh<>'') then SD_speedRD:=sh;
 end;
 
 procedure Get_CPU_INFO_Init;   
@@ -7593,7 +8323,7 @@ begin
    cpu_snr:='';   cpu_hw:='';   cpu_proc:=''; cpu_rev:=''; cpu_mips:=''; cpu_feat:=''; cpu_rev_num:=0;
    cpu_fmin:='';  cpu_fcur:=''; cpu_fmax:=''; os_rev:='';  uname:=''; 	 cpu_machine:='';
    cpu_cores:=0;  I2C_busnum:=0; status_led_GPIO:=0;  	   whoami:='';
-   RPI_bType:=0;
+   RPI_bType:=0;  RPI_ThrottleGet;
    for lw:=1 to max_pins_c do RPIHDR_Desc[lw]:='';
    connector_pin_count:=40; 
    cpu_freq:= 700000000; pll_freq:=2000000000; 
@@ -7604,7 +8334,7 @@ begin
 	call_external_prog(LOG_NONE,proc2_c+'_min_freq',sh); cpu_fmin:=		RM_CRLF(sh);
 	call_external_prog(LOG_NONE,proc2_c+'_cur_freq',sh); cpu_fcur:=		RM_CRLF(sh);
 	call_external_prog(LOG_NONE,proc2_c+'_max_freq',sh); cpu_fmax:=		RM_CRLF(sh);
-	call_external_prog(LOG_NONE,'uname -a',			sh); uname:=   		RM_CRLF(sh);
+	call_external_prog(LOG_NONE,'uname -srvmo',		sh); uname:=   		RM_CRLF(sh);
 	call_external_prog(LOG_NONE,'uname -m',			sh); cpu_machine:=	RM_CRLF(sh);
 
     if not getvcgencmd('arm', cpu_freq)	then cpu_freq:= 700000000; 	
@@ -7660,23 +8390,32 @@ begin
   valu:=0;
   case modus of
 	 1,2 : valu:=PAGE_SIZE;
-	 3	 : begin // get peri base from device tree
+	 30	 : begin // OLD get peri base from device tree
 // e.g. for ZeroW:	7e0000002000000002000000...
 //		3B+:		7e0000003f00000001000000400000004000000000001000
 //		4B:			7e00000000000000fe000000018000007c00000000000000fc000000020000004000000000000000ff80000000800000
-			 call_external_prog(LOG_NONE,'xxd -ps -c250 /proc/device-tree/soc/ranges',sh);
+			 call_external_prog(LOG_NONE,'xxd -ps -c250 '+PrepFilePath(LNX_DevTree+'/soc/ranges'),sh);
 			 ofs:=8;
 			 if (Upper(RPI_hw)='BCM2711') then ofs:=16;	// rpi4
-//writeln('pbase: '+sh);
 			 if not Str2Num('$'+copy(sh,ofs+1,8),valu) then valu:=0;		// $20000000
 			 if (valu=0) then
 			 begin // old variant
 			   valu:=BCM2709_PBASE; // for BCM2709 and BCM2835
 			   if (Upper(RPI_hw)='BCM2708') then valu:=BCM2708_PBASE;	// for old RPI
 			   if (Upper(RPI_hw)='BCM2711') then valu:=BCM2711_PBASE;	// rpi4
-			 end;
-//			 writeln('PBase: 0x',HexStr(valu,8));		 
+			 end;		 
 		   end;
+	3	 : begin // NEW get peri base with iomem
+(*	cat /proc/iomem | grep gpio@
+	rpi4:	 fe200000-fe2000b3 : gpio@7e200000
+	rpi2-3x: 3f200000-3f2000b3 : gpio@7e200000
+	zerow:	 20200000-202000b3 : gpio@7e200000	*)
+			call_external_prog(LOG_NONE,'cat /proc/iomem | grep gpio@',sh); // 3f200000-3f2000b3 : gpio@7e200000
+			sh:=Select_Item(Trimme(sh,3),'-','',1);							// 3f200000
+			if Str2Num('$'+sh,valu) then valu:=valu-GPIO_BASE_OFS			// 3f000000
+									else valu:=RPI_mmap_get_info(30);
+//			writeln('PBase: 0x',HexStr(valu,8));
+		   end;	
 	 4   : begin {$IFDEF UNIX} valu:=1; {$ELSE} valu:=0; {$ENDIF} end;      (* if run_on_unix ->1 else 0 *)
 	 5   : if (Upper({$i %FPCTARGETCPU%})='ARM') then valu:=1 else valu:=0; (* if run_on_ARM  ->1 else 0 *)
 	 6	 : begin valu:=1; end;								// if RPI_Piggyback_board_available -> 1 dummy, for future use 
@@ -8086,6 +8825,46 @@ writeln;
 //if bcm2835_vc_get_temperature_max(lw) then writeln('GPUtempm:',lw); 
 end;
 
+function  RPI_I2C_ChkDev(bus,adr:byte):integer;
+// res=-1 not valid // res=0: adr not found // res=1: adr found // res=2: adr found, allocated by driver
+var i,j,nr:integer; tl:TStringList; sh:string;
+(*   0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f
+00:          -- -- -- -- -- -- -- -- -- -- -- -- -- 
+10: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+20: 20 -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+30: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+40: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+50: -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- 
+60: -- -- -- -- -- -- -- -- UU -- -- -- -- -- -- -- 
+70: 70 71 72 73 -- -- -- -- *)  
+begin
+  nr:=-1;
+  if (bus>=  0) and (bus<=  1) and
+  	 (adr>=$03) and (adr<=$77) then
+  begin
+	tl:=TStringList.create;
+	if (call_external_prog(LOG_NONE,'i2cdetect -y '+Num2Str(bus,0), tl)=0) then
+	begin
+//	  showstringlist(tl);
+	  i:=(adr div $10)*$10;	
+	  j:=(adr mod $10);	
+//	  writeln('RPI_I2C_ChkDev[0x'+HexStr(bus,2)+'/0x'+HexStr(adr,2)+']: 0x'+HexStr(i,2)+' 0x'+HexStr(j,2));
+	  i:=SearchStringInListIdx(tl,HexStr(i,2)+': ',1,0);
+	  if (i>=0) then // e.g. 60: -- -- -- -- -- -- -- -- UU -- -- -- -- -- -- -- 
+	  begin
+	  	sh:=Upper(Select_Item(Trimme(tl[i],4),' ','',(j+2)));
+//	  	writeln('RPI_I2C_ChkDev[0x'+HexStr(bus,2)+'/0x'+HexStr(adr,2)+']: '+sh);
+		if (sh='--')			then nr:=0;
+	  	if (sh=HexStr(adr,2))	then nr:=1;
+	  	if (sh='UU')			then nr:=2;
+	  end;
+	end;
+	tl.free;
+  end;
+//writeln('RPI_I2C_ChkDev[0x'+HexStr(bus,2)+'/0x'+HexStr(adr,2)+']: '+Num2Str(nr,0));
+  RPI_I2C_ChkDev:=nr;
+end;
+
 function RPI_I2C_GetSpeed(bus:byte):longword; 				begin RPI_I2C_GetSpeed:=I2C_bus[bus].I2C_speed; end;
 function RPI_I2C_GetFuncs(bus:byte):longword; 				begin RPI_I2C_GetFuncs:=I2C_bus[bus].I2C_funcs; end;
 function RPI_I2C_ChkFuncs(bus:byte; funcs:longword):boolean;begin RPI_I2C_ChkFuncs:=((RPI_I2C_GetFuncs(bus) and funcs)=funcs); end;
@@ -8117,8 +8896,9 @@ procedure GPIO_get_mask_and_idxOfs(regidx,gpio:longword; var idxofs:longint; var
 begin
   idxofs:=0; mask:=0;
   case regidx of  
-	GPFSEL : begin idxofs:=((gpio mod gpiomax_reg_c) div 10); mask:=(7 shl ((gpio mod 10)*3)); end;
-	else     begin idxofs:=((gpio mod gpiomax_reg_c) div 32); mask:=(1 shl ( gpio mod 32));    end;
+	GPFSEL:	 begin idxofs:=((gpio mod gpiomax_2708_reg_c) div 10); mask:=longword((7 shl ((gpio mod 10)*3))); end;
+	GPPUPPDN:begin idxofs:=((gpio mod gpiomax_2711_reg_c) div 16); mask:=longword((3 shl ((gpio mod 16)*2))); end;
+	else     begin idxofs:=((gpio mod gpiomax_2708_reg_c) div 32); mask:=(longword(1 shl ( gpio mod 32)));    end;
   end; // case
 end;
 
@@ -8156,8 +8936,7 @@ begin
     begin
 	  if and_mask then BCM_SETREG(regidx,BCM_GETREG(regidx) and newval) 
 				  else BCM_SETREG(regidx,BCM_GETREG(regidx) or  newval);
-    end
-	else BCM_SETREG(regidx,newval); 
+    end else BCM_SETREG(regidx,newval); 
   end;
 end;
 
@@ -8270,8 +9049,8 @@ function  GPIO_HWPWM_capable(gpio:longword; pwmnum:byte):boolean;
 var ok:boolean;
 begin
   ok:=false;
-  if not ok then ok:=((pwmnum=0) and ((gpio=GPIO_PWM0) or (gpio=GPIO_PWM0A0)));
-  if not ok then ok:=((pwmnum=1) and ((gpio=GPIO_PWM1) or (gpio=GPIO_PWM1A0)));
+  if not ok then ok:=((pwmnum=0) and ((gpio=GPIO_PWM0) or (gpio=GPIO_PWM0A0) or (gpio=GPIO_PWM0Audio)));
+  if not ok then ok:=((pwmnum=1) and ((gpio=GPIO_PWM1) or (gpio=GPIO_PWM1A0) or (gpio=GPIO_PWM1Audio)));
   GPIO_HWPWM_capable:=ok;
 end;
 
@@ -8281,7 +9060,8 @@ begin GPIO_HWPWM_capable:=(GPIO_HWPWM_capable(gpio,0) or GPIO_HWPWM_capable(gpio
 function  GPIO_FCTOK(gpio:longint; flags:s_port_flags):boolean;
 var _ok:boolean; 
 begin
-  _ok:=((gpio>=0) and (GPIO_MAP_GPIO_NUM_2_HDR_PIN(gpio)>=0));
+  _ok:=(((gpio>=0) and (GPIO_MAP_GPIO_NUM_2_HDR_PIN(gpio)>=0)) or 
+  		(gpio=GPIO_PWM0Audio) or (gpio=GPIO_PWM1Audio));
   if _ok and (PWMHW IN flags) then _ok:=GPIO_HWPWM_capable(gpio);
   if _ok and (FRQHW IN flags) then 
 	 _ok:=((gpio=GPIO_FRQ04_CLK0) or (gpio=GPIO_FRQ05_CLK1) or (gpio=GPIO_FRQ06_CLK2) or 
@@ -8344,33 +9124,165 @@ begin
 end;*)
 
 function GPIO_get_AltDesc(gpio:longint; altpin:byte; dfltifempty:string):string;
+// https://github.com/RPi-Distro/raspi-gpio/blob/master/raspi-gpio.c
+const altcnt_c=6;
+      Alt_2709_hdr_dsc_c: array[0..(gpiomax_2708_reg_c*altcnt_c-1)] of string[mdl] = 
+(//ALT 0		    1,				2,				3,				4,			5,
+    'SDA0'      , 'SA5'        , 'PCLK'      , 'AVEOUT VCLK'   , 'AVEIN VCLK' , '-'         ,
+    'SCL0'      , 'SA4'        , 'DE'        , 'AVEOUT DSYNC'  , 'AVEIN DSYNC', '-'         ,
+    'SDA1'      , 'SA3'        , 'LCD VSYNC' , 'AVEOUT VSYNC'  , 'AVEIN VSYNC', '-'         ,
+    'SCL1'      , 'SA2'        , 'LCD HSYNC' , 'AVEOUT HSYNC'  , 'AVEIN HSYNC', '-'         ,
+    'GPCLK0'    , 'SA1'        , 'DPI D0'    , 'AVEOUT VID0'   , 'AVEIN VID0' , 'ARM TDI'   ,
+    'GPCLK1'    , 'SA0'        , 'DPI D1'    , 'AVEOUT VID1'   , 'AVEIN VID1' , 'ARM TDO'   ,
+    'GPCLK2'    , 'SOE/ SE'    , 'DPI D2'    , 'AVEOUT VID2'   , 'AVEIN VID2' , 'ARM RTCK'  ,
+    'SPI0 CE1/' , 'SWE/ SRW/'  , 'DPI D3'    , 'AVEOUT VID3'   , 'AVEIN VID3' , '-'         ,
+    'SPI0 CE0/' , 'SD0'        , 'DPI D4'    , 'AVEOUT VID4'   , 'AVEIN VID4' , '-'         ,
+    'SPI0 MISO' , 'SD1'        , 'DPI D5'    , 'AVEOUT VID5'   , 'AVEIN VID5' , '-'         ,
+    'SPI0 MOSI' , 'SD2'        , 'DPI D6'    , 'AVEOUT VID6'   , 'AVEIN VID6' , '-'         ,
+    'SPI0 SCLK' , 'SD3'        , 'DPI D7'    , 'AVEOUT VID7'   , 'AVEIN VID7' , '-'         ,
+    'PWM0'      , 'SD4'        , 'DPI D8'    , 'AVEOUT VID8'   , 'AVEIN VID8' , 'ARM TMS'   ,
+    'PWM1'      , 'SD5'        , 'DPI D9'    , 'AVEOUT VID9'   , 'AVEIN VID9' , 'ARM TCK'   ,
+    'TXD0'      , 'SD6'        , 'DPI D10'   , 'AVEOUT VID10'  , 'AVEIN VID10', 'TXD1'      ,
+    'RXD0'      , 'SD7'        , 'DPI D11'   , 'AVEOUT VID11'  , 'AVEIN VID11', 'RXD1'      ,
+    'FL0'       , 'SD8'        , 'DPI D12'   , 'CTS0'          , 'SPI1 CE2/'  , 'CTS1'      ,
+    'FL1'       , 'SD9'        , 'DPI D13'   , 'RTS0'          , 'SPI1 CE1/'  , 'RTS1'      ,
+    'PCM CLK'   , 'SD10'       , 'DPI D14'   , 'I2CSL SDA MOSI', 'SPI1 CE0/'  , 'PWM0'      ,
+    'PCM FS'    , 'SD11'       , 'DPI D15'   , 'I2CSL SCL SCLK', 'SPI1 MISO'  , 'PWM1'      ,
+    'PCM DIN'   , 'SD12'       , 'DPI D16'   , 'I2CSL MISO'    , 'SPI1 MOSI'  , 'GPCLK0'    ,
+    'PCM DOUT'  , 'SD13'       , 'DPI D17'   , 'I2CSL CE/'     , 'SPI1 SCLK'  , 'GPCLK1'    ,
+    'SD0 CLK'   , 'SD14'       , 'DPI D18'   , 'SD1 CLK'       , 'ARM TRST'   , '-'         ,
+    'SD0 CMD'   , 'SD15'       , 'DPI D19'   , 'SD1 CMD'       , 'ARM RTCK'   , '-'         ,
+    'SD0 DAT0'  , 'SD16'       , 'DPI D20'   , 'SD1 DAT0'      , 'ARM TDO'    , '-'         ,
+    'SD0 DAT1'  , 'SD17'       , 'DPI D21'   , 'SD1 DAT1'      , 'ARM TCK'    , '-'         ,
+    'SD0 DAT2'  , 'TE0'        , 'DPI D22'   , 'SD1 DAT2'      , 'ARM TDI'    , '-'         ,
+    'SD0 DAT3'  , 'TE1'        , 'DPI D23'   , 'SD1 DAT3'      , 'ARM TMS'    , '-'         ,
+    'SDA0'      , 'SA5'        , 'PCM CLK'   , 'FL0'           , '-'          , '-'         ,
+    'SCL0'      , 'SA4'        , 'PCM FS'    , 'FL1'           , '-'          , '-'         ,
+    'TE0'       , 'SA3'        , 'PCM DIN'   , 'CTS0'          , '-'          , 'CTS1'      ,
+    'FL0'       , 'SA2'        , 'PCM DOUT'  , 'RTS0'          , '-'          , 'RTS1'      ,
+    'GPCLK0'    , 'SA1'        , 'RING OCLK' , 'TXD0'          , '-'          , 'TXD1'      ,
+    'FL1'       , 'SA0'        , 'TE1'       , 'RXD0'          , '-'          , 'RXD1'      ,
+    'GPCLK0'    , 'SOE/ SE'    , 'TE2'       , 'SD1 CLK'       , '-'          , '-'         ,
+    'SPI0 CE1/' , 'SWE/ SRW/'  , '-'         , 'SD1 CMD'       , '-'          , '-'         ,
+    'SPI0 CE0/' , 'SD0'        , 'TXD0'      , 'SD1 DAT0'      , '-'          , '-'         ,
+    'SPI0 MISO' , 'SD1'        , 'RXD0'      , 'SD1 DAT1'      , '-'          , '-'         ,
+    'SPI0 MOSI' , 'SD2'        , 'RTS0'      , 'SD1 DAT2'      , '-'          , '-'         ,
+    'SPI0 SCLK' , 'SD3'        , 'CTS0'      , 'SD1 DAT3'      , '-'          , '-'         ,
+    'PWM0'      , 'SD4'        , '-'         , 'SD1 DAT4'      , 'SPI2 MISO'  , 'TXD1'      ,
+    'PWM1'      , 'SD5'        , 'TE0'       , 'SD1 DAT5'      , 'SPI2 MOSI'  , 'RXD1'      ,
+    'GPCLK1'    , 'SD6'        , 'TE1'       , 'SD1 DAT6'      , 'SPI2 SCLK'  , 'RTS1'      ,
+    'GPCLK2'    , 'SD7'        , 'TE2'       , 'SD1 DAT7'      , 'SPI2 CE0/'  , 'CTS1'      ,
+    'GPCLK1'    , 'SDA0'       , 'SDA1'      , 'TE0'           , 'SPI2 CE1/'  , '-'         ,
+    'PWM1'      , 'SCL0'       , 'SCL1'      , 'TE1'           , 'SPI2 CE2/'  , '-'         ,
+    'SDA0'      , 'SDA1'       , 'SPI0 CE0/' , '-'             , '-'          , 'SPI2 CE1/' ,
+    'SCL0'      , 'SCL1'       , 'SPI0 MISO' , '-'             , '-'          , 'SPI2 CE0/' ,
+    'SD0 CLK'   , 'FL0'        , 'SPI0 MOSI' , 'SD1 CLK'       , 'ARM TRST'   , 'SPI2 SCLK' ,
+    'SD0 CMD'   , 'GPCLK0'     , 'SPI0 SCLK' , 'SD1 CMD'       , 'ARM RTCK'   , 'SPI2 MOSI' ,
+    'SD0 DAT0'  , 'GPCLK1'     , 'PCM CLK'   , 'SD1 DAT0'      , 'ARM TDO'    , '-'         ,
+    'SD0 DAT1'  , 'GPCLK2'     , 'PCM FS'    , 'SD1 DAT1'      , 'ARM TCK'    , '-'         ,
+    'SD0 DAT2'  , 'PWM0'       , 'PCM DIN'   , 'SD1 DAT2'      , 'ARM TDI'    , '-'         ,
+    'SD0 DAT3'  , 'PWM1'       , 'PCM DOUT'  , 'SD1 DAT3'      , 'ARM TMS'    , '-'
+);
+      Alt_2711_hdr_dsc_c: array[0..(gpiomax_2708_reg_c*altcnt_c-1)] of string[mdl] = 
+(//ALT 0		    1,				2,				3,				4,					5,
+    'SDA0'      , 'SA5'        , 'PCLK'      , 'SPI3 CE0/'     , 'TXD2'            , 'SDA6'        ,
+    'SCL0'      , 'SA4'        , 'DE'        , 'SPI3 MISO'     , 'RXD2'            , 'SCL6'        ,
+    'SDA1'      , 'SA3'        , 'LCD VSYNC' , 'SPI3 MOSI'     , 'CTS2'            , 'SDA3'        ,
+    'SCL1'      , 'SA2'        , 'LCD HSYNC' , 'SPI3 SCLK'     , 'RTS2'            , 'SCL3'        ,
+    'GPCLK0'    , 'SA1'        , 'DPI D0'    , 'SPI4 CE0/'     , 'TXD3'            , 'SDA3'        ,
+    'GPCLK1'    , 'SA0'        , 'DPI D1'    , 'SPI4 MISO'     , 'RXD3'            , 'SCL3'        ,
+    'GPCLK2'    , 'SOE/ SE'    , 'DPI D2'    , 'SPI4 MOSI'     , 'CTS3'            , 'SDA4'        ,
+    'SPI0 CE1/' , 'SWE/ SRW/'  , 'DPI D3'    , 'SPI4 SCLK'     , 'RTS3'            , 'SCL4'        ,
+    'SPI0 CE0/' , 'SD0'        , 'DPI D4'    , 'I2CSL CE/'     , 'TXD4'            , 'SDA4'        ,
+    'SPI0 MISO' , 'SD1'        , 'DPI D5'    , 'I2CSL SDI MISO', 'RXD4'            , 'SCL4'        ,
+    'SPI0 MOSI' , 'SD2'        , 'DPI D6'    , 'I2CSL SDA MOSI', 'CTS4'            , 'SDA5'        ,
+    'SPI0 SCLK' , 'SD3'        , 'DPI D7'    , 'I2CSL SCL SCLK', 'RTS4'            , 'SCL5'        ,
+    'PWM0 0'    , 'SD4'        , 'DPI D8'    , 'SPI5 CE0/'     , 'TXD5'            , 'SDA5'        ,
+    'PWM0 1'    , 'SD5'        , 'DPI D9'    , 'SPI5 MISO'     , 'RXD5'            , 'SCL5'        ,
+    'TXD0'      , 'SD6'        , 'DPI D10'   , 'SPI5 MOSI'     , 'CTS5'            , 'TXD1'        ,
+    'RXD0'      , 'SD7'        , 'DPI D11'   , 'SPI5 SCLK'     , 'RTS5'            , 'RXD1'        ,
+    '-'         , 'SD8'        , 'DPI D12'   , 'CTS0'          , 'SPI1 CE2/'       , 'CTS1'        ,
+    '-'         , 'SD9'        , 'DPI D13'   , 'RTS0'          , 'SPI1 CE1/'       , 'RTS1'        ,
+    'PCM CLK'   , 'SD10'       , 'DPI D14'   , 'SPI6 CE0/'     , 'SPI1 CE0/'       , 'PWM0 0'      ,
+    'PCM FS'    , 'SD11'       , 'DPI D15'   , 'SPI6 MISO'     , 'SPI1 MISO'       , 'PWM0 1'      ,
+    'PCM DIN'   , 'SD12'       , 'DPI D16'   , 'SPI6 MOSI'     , 'SPI1 MOSI'       , 'GPCLK0'      ,
+    'PCM DOUT'  , 'SD13'       , 'DPI D17'   , 'SPI6 SCLK'     , 'SPI1 SCLK'       , 'GPCLK1'      ,
+    'SD0 CLK'   , 'SD14'       , 'DPI D18'   , 'SD1 CLK'       , 'ARM TRST'        , 'SDA6'        ,
+    'SD0 CMD'   , 'SD15'       , 'DPI D19'   , 'SD1 CMD'       , 'ARM RTCK'        , 'SCL6'        ,
+    'SD0 DAT0'  , 'SD16'       , 'DPI D20'   , 'SD1 DAT0'      , 'ARM TDO'         , 'SPI3 CE1/'   ,
+    'SD0 DAT1'  , 'SD17'       , 'DPI D21'   , 'SD1 DAT1'      , 'ARM TCK'         , 'SPI4 CE1/'   ,
+    'SD0 DAT2'  , '-'          , 'DPI D22'   , 'SD1 DAT2'      , 'ARM TDI'         , 'SPI5 CE1/'   ,
+    'SD0 DAT3'  , '-'          , 'DPI D23'   , 'SD1 DAT3'      , 'ARM TMS'         , 'SPI6 CE1/'   ,
+    'SDA0'      , 'SA5'        , 'PCM CLK'   , '-'             , 'MII A RX ERR'    , 'RGMII MDIO'  ,
+    'SCL0'      , 'SA4'        , 'PCM FS'    , '-'             , 'MII A TX ERR'    , 'RGMII MDC'   ,
+    '-'         , 'SA3'        , 'PCM DIN'   , 'CTS0'          , 'MII A CRS'       , 'CTS1'        ,
+    '-'         , 'SA2'        , 'PCM DOUT'  , 'RTS0'          , 'MII A COL'       , 'RTS1'        ,
+    'GPCLK0'    , 'SA1'        , '-'         , 'TXD0'          , 'SD CARD PRES'    , 'TXD1'        ,
+    '-'         , 'SA0'        , '-'         , 'RXD0'          , 'SD CARD WRPROT'  , 'RXD1'        ,
+    'GPCLK0'    , 'SOE/ SE'    , '-'         , 'SD1 CLK'       , 'SD CARD LED'     , 'RGMII IRQ'   ,
+    'SPI0 CE1/' , 'SWE/ SRW/'  , '-'         , 'SD1 CMD'       , 'RGMII START STOP', '-'           ,
+    'SPI0 CE0/' , 'SD0'        , 'TXD0'      , 'SD1 DAT0'      , 'RGMII RX OK'     , 'MII A RX ERR',
+    'SPI0 MISO' , 'SD1'        , 'RXD0'      , 'SD1 DAT1'      , 'RGMII MDIO'      , 'MII A TX ERR',
+    'SPI0 MOSI' , 'SD2'        , 'RTS0'      , 'SD1 DAT2'      , 'RGMII MDC'       , 'MII A CRS'   ,
+    'SPI0 SCLK' , 'SD3'        , 'CTS0'      , 'SD1 DAT3'      , 'RGMII IRQ'       , 'MII A COL'   ,
+    'PWM1 0'    , 'SD4'        , '-'         , 'SD1 DAT4'      , 'SPI0 MISO'       , 'TXD1'        ,
+    'PWM1 1'    , 'SD5'        , '-'         , 'SD1 DAT5'      , 'SPI0 MOSI'       , 'RXD1'        ,
+    'GPCLK1'    , 'SD6'        , '-'         , 'SD1 DAT6'      , 'SPI0 SCLK'       , 'RTS1'        ,
+    'GPCLK2'    , 'SD7'        , '-'         , 'SD1 DAT7'      , 'SPI0 CE0/'       , 'CTS1'        ,
+    'GPCLK1'    , 'SDA0'       , 'SDA1'      , '-'             , 'SPI0 CE1/'       , 'SD CARD VOLT',
+    'PWM0 1'    , 'SCL0'       , 'SCL1'      , '-'             , 'SPI0 CE2/'       , 'SD CARD PWR0',
+    'SDA0'      , 'SDA1'       , 'SPI0 CE0/' , '-'             , '-'               , 'SPI2 CE1/'   ,
+    'SCL0'      , 'SCL1'       , 'SPI0 MISO' , '-'             , '-'               , 'SPI2 CE0/'   ,
+    'SD0 CLK'   , '-'          , 'SPI0 MOSI' , 'SD1 CLK'       , 'ARM TRST'        , 'SPI2 SCLK'   ,
+    'SD0 CMD'   , 'GPCLK0'     , 'SPI0 SCLK' , 'SD1 CMD'       , 'ARM RTCK'        , 'SPI2 MOSI'   ,
+    'SD0 DAT0'  , 'GPCLK1'     , 'PCM CLK'   , 'SD1 DAT0'      , 'ARM TDO'         , 'SPI2 MISO'   ,
+    'SD0 DAT1'  , 'GPCLK2'     , 'PCM FS'    , 'SD1 DAT1'      , 'ARM TCK'         , 'SD CARD LED' ,
+    'SD0 DAT2'  , 'PWM0 0'     , 'PCM DIN'   , 'SD1 DAT2'      , 'ARM TDI'         , '-'           ,
+    'SD0 DAT3'  , 'PWM0 1'     , 'PCM DOUT'  , 'SD1 DAT3'      , 'ARM TMS'         , '-'
+);
+var sh:string;
+begin
+{$warnings off}
+  if (altpin>=0) and (altpin<altcnt_c) and 
+	 (gpio>=0) 	 and (gpio<gpiomax_2708_reg_c) then 
+  begin
+    if (Upper(RPI_hw)='BCM2711')
+	  then sh:=Alt_2711_hdr_dsc_c[gpio*altcnt_c+altpin]
+	  else sh:=Alt_2709_hdr_dsc_c[gpio*altcnt_c+altpin];
+  end else sh:='-';
+{$warnings on}  
+  if sh='-' then sh:=dfltifempty;
+  GPIO_get_AltDesc:=sh;
+end; //GPIO_get_AltDesc
+
+function oldGPIO_get_AltDesc(gpio:longint; altpin:byte; dfltifempty:string):string;
 // datasheet page 102 
 const maxalt_c=5; res=''; intrnl='<intrnl>';
-      Alt_hdr_dsc_c   : array[0..maxalt_c] of array[0..gpiomax_reg_c-1] of string[mdl] = 
+      Alt_2709_hdr_dsc_c: array[0..maxalt_c] of array[0..gpiomax_2708_reg_c-1] of string[mdl] = 
   (	// ALT0
-    ( ('I2C SDA0'),		('I2C SCL0'),	('I2C SDA1'),	('I2C SCL1'),	('GPCLK0'),
+    ( ('SDA0'),			('SCL0'),		('SDA1'),		('SCL1'),		('GPCLK0'),
 	  ('GPCLK1'),		('GPCLK2'),		('SPI0 CE1/'),	('SPI0 CE0/'),	('SPI0 MISO'),
 	  ('SPI0 MOSI'),	('SPI0 SCLK'),	('PWM0'),		('PWM1'),		('TxD0'),
-	  ('RxD0'),			(res),			(res),			('PCM CLK'),	('PCM FS'),
-	  ('PVM DIN'),		('PCMDOUT'),	(res),			(res),			(res),
-	  (res),			(res),			(res),			('SDA0'),		('SCL0'),
-	  (res),			(res),			('GPCLK0'),		(res),			('GPCLK0'),
+	  ('RxD0'),			('FL0'),		('FL1'),		('PCM CLK'),	('PCM FS'),
+	  ('PCM DIN'),		('PCM DOUT'),	('SD0 CLK'),	('SD0 CMD'),	('SD0 DAT0'),
+	  ('SD0 DAT1'),		('SD0 DAT2'),	('SD0 DAT3'),	('SDA0'),		('SCL0'),
+	  ('TE0'),			('FL0'),		('GPCLK0'),		('FL1'),		('GPCLK0'),
 	  ('SPI0 CE1/'),	('SPI0 CE0/'),	('SPI0 MISO'),	('SPI0 MOSI'),	('SPI0 SCLK'),
-	  ('PWM0'),		 	('PWM1'),		('GPCLK1'),		('GPCLK2'),		('GPCLK3'),
-	  ('PWM1'),			(intrnl),		(intrnl),		(intrnl),		(intrnl),
-	  (intrnl),			(intrnl),		(intrnl),		(intrnl)		),
+	  ('PWM0'),		 	('PWM1'),		('GPCLK1'),		('GPCLK2'),		('GPCLK1'),
+	  ('PWM1'),			('SDA0'),		('SCL0'),		('SD0 CLK'),	('SD0 CMD'),
+	  ('SD0 DAT0'),		('SD0 DAT1'),	('SD0 DAT2'),	('SD0 DAT3')	),
 	// ALT1
     ( ('SA5'),			('SA4'),		('SA3'),		('SA2'),		('SA1'),
 	  ('SA0'),			('SOE/'),		('SWE/'),		('SD0'),		('SD1'),
 	  ('SD2'),			('SD3'),		('SD4'),		('SD5'),		('SD6'),
 	  ('SD7'),			('SD8'),		('SD9'),		('SD10'),		('SD11'),
 	  ('SD12'),			('SD13'),		('SD14'),		('SD15'),		('SD16'),
-	  ('SD17'),			(res),			(res),			('SA5'),		('SA4'),
+	  ('SD17'),			('TE0'),		('TE1'),		('SA5'),		('SA4'),
 	  ('SA3'),			('SA2'),		('SA1'),		('SA0'),		('SOE/'),
 	  ('SWE/'),			('SD0'),		('SD1'),		('SD2'),		('SD3'),
 	  ('SD4'),			('SD5'),		('SD6'),		('SD7'),		('SDA0'),
-	  ('SCL0'),			(''),			(''),			(''),			(''),	
-	  (''),				(''),			(''),			('')		  ),
+	  ('SCL0'),			('SDA1'),		('SCL1'),		('FL0'),		('GPCLK0'),	
+	  ('GPCLK1'),		('GPCLK2'),		('PWM0'),		('PWM1')		),
 	// ALT2	  
 	( (res),			(res),			(res),			(res),			(res),
 	  (res),			(res),			(res),			(res),			(res),
@@ -8424,10 +9336,12 @@ var sh:string;
 begin
 {$warnings off}
   if (altpin>=0) and (altpin<=maxalt_c) and 
-	 (gpio>=0)   and (gpio<gpiomax_reg_c)    then sh:=Alt_hdr_dsc_c[altpin,gpio] else sh:='';
+	 (gpio>=0) 	 and (gpio<gpiomax_2708_reg_c) 
+	then sh:=Alt_2709_hdr_dsc_c[altpin,gpio]
+  	else sh:='';
 {$warnings on}  
   if sh='' then sh:=dfltifempty;
-  GPIO_get_AltDesc:=sh;
+  oldGPIO_get_AltDesc:=sh;
 end; //GPIO_get_AltDesc
 
 function GPIO_get_altval(RegAltVal:byte):byte;
@@ -8462,7 +9376,7 @@ function  GPIO_get_fkt_value(gpio:longint):byte;
 var regidx,mask:longword; altval:byte;
 begin
   altval:=$00;
-  if (gpio>=0) and (gpio<gpiomax_reg_c) then
+  if (gpio>=0) and (gpio<gpiomax_2708_reg_c) then
   begin
     GPIO_get_mask_and_idx(GPFSEL,gpio,regidx,mask);
 	altval:=Byte(((BCM_GETREG(regidx) and mask) shr ((gpio mod 10)*3)) and $7);
@@ -8480,14 +9394,15 @@ begin
     GPCLR ..GPCLR+1: 		s:='GPCLR'+   Num2Str(longword(regidx-GPCLR),0);
 	GPLEV ..GPLEV+1: 		s:='GPLEV'+   Num2Str(longword(regidx-GPLEV),0);
 	GPEDS ..GPEDS+1: 		s:='GPEDS'+   Num2Str(longword(regidx-GPEDS),0);
-	GPREN	..GPREN+1: 		s:='GPREN'+   Num2Str(longword(regidx-GPREN),0); 	
+	GPREN ..GPREN+1: 		s:='GPREN'+   Num2Str(longword(regidx-GPREN),0); 	
 	GPFEN ..GPFEN+1: 		s:='GPFEN'+   Num2Str(longword(regidx-GPFEN),0); 
-	GPHEN  ..GPHEN+1: 		s:='GPHEN'+   Num2Str(longword(regidx-GPHEN),0);
-	GPLEN	..GPLEN+1: 		s:='GPLEN'+   Num2Str(longword(regidx-GPLEN),0); 
+	GPHEN ..GPHEN+1: 		s:='GPHEN'+   Num2Str(longword(regidx-GPHEN),0);
+	GPLEN ..GPLEN+1: 		s:='GPLEN'+   Num2Str(longword(regidx-GPLEN),0); 
 	GPAREN..GPAREN+1: 		s:='GPAREN'+  Num2Str(longword(regidx-GPAREN),0);
 	GPAFEN..GPAFEN+1: 		s:='GPAFEN'+  Num2Str(longword(regidx-GPAFEN),0);
 	GPPUD: 					s:='GPPUD'+   Num2Str(longword(regidx-GPPUD),0);
 	GPPUDCLK..GPPUDCLK+1: 	s:='GPPUDCLK'+Num2Str(longword(regidx-GPPUDCLK),0);
+	GPPUPPDN: 				s:='GPPUPPDN'+Num2Str(longword(regidx-GPPUPPDN),0);
 	STIMCS: 				s:='SYSTIMCS'; 
 	STIMCLO: 				s:='SYSTIMCLO';
 	STIMCHI: 				s:='SYSTIMCHI';
@@ -8611,19 +9526,35 @@ begin
   end; //case
 end;
 
-function  CEPstring(cmd:string):string; var sh:string; begin call_external_prog(Log_NONE,cmd,sh); CEPstring:=sh; end;
+function  CEPstring(cmd:string):string; var sh:string; 
+begin 
+  call_external_prog(Log_NONE,cmd,sh); 
+  CEPstring:=CSV_RemLastSep(sh,#$00);
+end;
 
-function  HAT_vendor:string;	 begin HAT_vendor:= 	CEPstring('cat /proc/device-tree/hat/vendor'); 		end;
-function  HAT_product:string; 	 begin HAT_product:=	CEPstring('cat /proc/device-tree/hat/product'); 	end;
-function  HAT_product_id:string; begin HAT_product_id:=	CEPstring('cat /proc/device-tree/hat/product_id');	end;
-function  HAT_product_ver:string;begin HAT_product_ver:=CEPstring('cat /proc/device-tree/hat/product_ver');	end;
-function  HAT_uuid:string; 		 begin HAT_uuid:=		CEPstring('cat /proc/device-tree/hat/uuid');		end;
+function  HAT_custom(tl:TStringList; keys,dflts,tr1,tr2:string):string;
+var sh:string;
+begin
+  sh:=SearchStringInList(tl,keys);
+  if (sh<>'')
+	then sh:=Select_RightItems(sh,tr1,tr2,2)
+	else sh:=dflts;
+  HAT_custom:=CSV_RemLastSep(sh,#$00);
+end;
+function  HAT_custom(tl:TStringList; keys,dflts:string):string;
+begin HAT_custom:=HAT_custom(tl,keys,dflts,' ','"'); end;
+
+function  HAT_vendor:string;	 begin HAT_vendor:= 	CEPstring('cat '+PrepFilePath(LNX_DevTree+'/hat/vendor')); end;
+function  HAT_product:string; 	 begin HAT_product:=	CEPstring('cat '+PrepFilePath(LNX_DevTree+'/hat/product')); end;
+function  HAT_product_id:string; begin HAT_product_id:=	CEPstring('cat '+PrepFilePath(LNX_DevTree+'/hat/product_id')); end;
+function  HAT_product_ver:string;begin HAT_product_ver:=CEPstring('cat '+PrepFilePath(LNX_DevTree+'/hat/product_ver')); end;
+function  HAT_uuid:string; 		 begin HAT_uuid:=		CEPstring('cat '+PrepFilePath(LNX_DevTree+'/hat/uuid')); end;
 function  HAT_GetInfo(ovrwrt:boolean; duuid,dvendor,dproduct,dsnr:string; dpid,dpver:longword):boolean;
 begin
   with HAT_info do
   begin
     uuid:=''; vendor:=''; product:=''; snr:=''; product_id:=0; product_ver:=0; 
-    available:=DirectoryExists('/proc/device-tree/hat'); 
+    available:=DirectoryExists(PrepFilePath(LNX_DevTree+'/hat')); 
     overwrite:=false; if not available then overwrite:=ovrwrt;
     if available then
     begin
@@ -8815,7 +9746,7 @@ begin
   begin
     sh:='';
 	tl.add('PIN Header ('+RPI_rev+'):');
-	tl.add('Signal    DIR V Pin  Pin V DIR Signal');
+	tl.add(Get_FixedStringLen('Signal',mdl,false)+' DIR V Pin  Pin V DIR Signal');
     for pin:= 1 to pinmax do
 	begin
 	  DESC_HWPIN(pin,desc,dir,pegel);
@@ -9038,7 +9969,7 @@ begin
   begin
     if (gpio>=0) and (ptr<>nil) then
 	begin	
-      writeln('pwm_SW_Thread: Start of ',description,' with PWMSW (GPIO',Num2Str(gpio,0),')');
+//	  writeln('pwm_SW_Thread: Start of ',description,' with PWMSW (GPIO',Num2Str(gpio,0),')');
 //	  , period(us):',PWM.pwm_period_us,' dtycycl(us):',PWM.pwm_dutycycle_us,' restcycl(us):',PWM.pwm_restcycle_us);
       Thread_SetName(description);
 	  while not ThreadCtrl.TermThread do
@@ -9064,7 +9995,7 @@ begin
 	  end; 
 	  mmap_arr^[regclr]:=mask_1Bit; 
 	end else LOG_Writeln(LOG_ERROR,'pwm_SW_Thread: GPIO not supported or no valid datastruct pointer');
-    writeln('pwm_SW_Thread: END of ',description);
+//	writeln('pwm_SW_Thread: END of ',description);
 	EndThread;
   end;
   pwm_SW_Thread:=0;
@@ -9100,16 +10031,16 @@ end;
 procedure PWM_WriteRange(gpio,range:longword);
 begin
   case gpio of 
-    GPIO_PWM0,GPIO_PWM0A0: BCM_SETREG(PWM0RNG,range); // HW PWM
-	GPIO_PWM1,GPIO_PWM1A0: BCM_SETREG(PWM1RNG,range); // HW PWM
+    GPIO_PWM0,GPIO_PWM0A0,GPIO_PWM0Audio: BCM_SETREG(PWM0RNG,range); // HW PWM
+	GPIO_PWM1,GPIO_PWM1A0,GPIO_PWM1Audio: BCM_SETREG(PWM1RNG,range); // HW PWM
   end; // case
 end;
 
 procedure PWM_Write(gpio,value:longword);
 begin
   case gpio of  
-    GPIO_PWM0,GPIO_PWM0A0: BCM_SETREG(PWM0DAT,value); // HW PWM
-	GPIO_PWM1,GPIO_PWM1A0: BCM_SETREG(PWM1DAT,value); // HW PWM
+    GPIO_PWM0,GPIO_PWM0A0,GPIO_PWM0Audio: BCM_SETREG(PWM0DAT,value); // HW PWM
+	GPIO_PWM1,GPIO_PWM1A0,GPIO_PWM1Audio: BCM_SETREG(PWM1DAT,value); // HW PWM
   end; // case
 end;
 
@@ -9139,8 +10070,8 @@ begin
       if (PWMHW IN portflags) then
 	  begin
       	case gpio of	  
-         GPIO_PWM0,GPIO_PWM0A0: BCM_SETREG(PWM0DAT,pwm_value,false,false); // HW PWM
-	     GPIO_PWM1,GPIO_PWM1A0: BCM_SETREG(PWM1DAT,pwm_value,false,false); // HW PWM
+         GPIO_PWM0,GPIO_PWM0A0,GPIO_PWM0Audio: BCM_SETREG(PWM0DAT,pwm_value,false,false); // HW PWM
+	     GPIO_PWM1,GPIO_PWM1A0,GPIO_PWM1Audio: BCM_SETREG(PWM1DAT,pwm_value,false,false); // HW PWM
       	end; // case
 	  end;
   	end; // with
@@ -9498,7 +10429,11 @@ begin
   begin
     TermThread:=true;
 //  if ThreadRunning then ThreadRunning:=(WaitForThreadTerminate(ThreadID,waitmsec)=0); // does not work on raspian
-	delay_msec(waitmsec); if ThreadRunning then ThreadRunning:=(not (KillThread(ThreadID)=0));
+	if (waitmsec>0) then
+	begin
+	  delay_msec(waitmsec); 
+	  if ThreadRunning then ThreadRunning:=(not (KillThread(ThreadID)=0));
+	end else ThreadRunning:=false;
 	Thread_InitStruct(ThreadCtrl); 
 	Thread_End:=ThreadRunning;
   end;
@@ -9594,7 +10529,7 @@ begin
 	  if (PWMHW IN portflags) then
 	  begin // HW PWM	  
 	    case gpio of
-	      GPIO_PWM0,GPIO_PWM0A0,GPIO_PWM1A0,
+	      GPIO_PWM0,GPIO_PWM0A0,GPIO_PWM1A0,GPIO_PWM0Audio,GPIO_PWM1Audio,
 		  GPIO_PWM1 : begin // PWM0:Pin12:GPIO18 PWM1:Pin35:GPIO19 
 					    initok:=true; 
 //				    	writeln('PWM_Setup (HW):'); GPIO_ShowStruct(GPIO_struct);
@@ -10256,7 +11191,7 @@ begin
 	
 	if (PWMHW IN portflags) and (not GPIO_FCTOK(gpio,[PWMHW])) then
 	begin
-	  LOG_writeln(LOG_ERROR,'GPIO_SetStruct: GPIO'+Num2Str(gpio,0)+' can not be PWMHW');
+	  LOG_writeln(LOG_WARNING,'GPIO_SetStruct: GPIO'+Num2Str(gpio,0)+' can not be PWMHW');
 	  portflags:=portflags-[PWMHW]+[PWMSW];		
 	end;
 	
@@ -10480,12 +11415,11 @@ begin
 end;
 
 procedure GPIO_set_GPPUD(enable,pullup:boolean); 
-begin 
+begin
   if enable then
   begin
-    if pullup then BCM_SETREG(GPPUD,$02,false,false) else BCM_SETREG(GPPUD,$01,false,false);
-  end
-  else BCM_SETREG(GPPUD,$00,false,false);
+	if pullup then BCM_SETREG(GPPUD,$02,false,false) else BCM_SETREG(GPPUD,$01,false,false);
+  end else BCM_SETREG(GPPUD,$00,false,false);
   delay_msec(1);
 end; { set GPIO Pull-up/down Register (GPPUD) } 
 
@@ -10505,18 +11439,33 @@ begin
 end;
 
 procedure GPIO_set_PULLUPORDOWN(gpio:longword; enable,pullup:boolean); // pulldown: pullup=false;
+// https://github.com/RPi-Distro/raspi-gpio/blob/master/raspi-gpio.c
 // natural pull of the GPIO (0-8 pull high, 9-27 pull low)
 // approximately 50KΩ
-var idx,mask:longword;
+const no2711=true;
+var idx,mask,pull:longword;
 begin 
-  LOG_Writeln(LOG_DEBUG,'GPIO_set_PULLUPORDOWN: GPIO'+Num2Str(gpio,0)+' '+Bool2Str(enable)+' '+Bool2Str(pullup)); 
-  GPIO_get_mask_and_idx(GPPUDCLK,gpio,idx,mask);
-  GPIO_set_GPPUD(enable,pullup); 				// assert clock to GPPUDCLKn
-  BCM_SETREG(idx,mask,false,false);
-  delay_msec(1);
-  GPIO_set_GPPUD(false, pullup); 				// deassert clock from GPPUDCLKn
-  BCM_SETREG(idx,0,false,false);  
-  delay_msec(1);
+  LOG_Writeln(LOG_DEBUG,'GPIO_set_PULLUPORDOWN: GPIO'+Num2Str(gpio,0)+' '+Bool2Str(enable)+' '+Bool2Str(pullup));
+  if (Upper(RPI_hw)='BCM2711') then
+  begin 
+	GPIO_get_mask_and_idx(GPPUPPDN,gpio,idx,mask);
+	if enable then begin if pullup then pull:=1 else pull:=2; end else pull:=0;
+	pull:=(pull shl ((gpio mod 16)*2));
+//	writeln('BCM2711 PullSet['+Num2Str(gpio,2)+']: reg: GPPUPPDN'+Num2Str(idx-GPPUPPDN,0)+' msk: 0x'+HexStr(mask,8)+' pull: 0x'+HexStr(pull,2));
+	BCM_SETREG(idx,(BCM_GETREG(idx) and (not mask) or pull));
+  end
+  else
+  begin
+	GPIO_get_mask_and_idx(GPPUDCLK,gpio,idx,mask);
+	GPIO_set_GPPUD(enable,pullup); 				// assert clock to GPPUDCLKn
+	delay_us(10);
+	BCM_SETREG(idx,mask,false,false);
+	delay_us(10);
+	GPIO_set_GPPUD(false, pullup); 				// deassert clock from GPPUDCLKn
+	delay_us(10);
+	BCM_SETREG(idx,0,false,false);  
+	delay_us(10);
+  end;
 end;
 procedure GPIO_set_PULLUP  (gpio:longword; enable:boolean); begin GPIO_set_PULLUPORDOWN(gpio,enable,true);  end;	// enable or disable PULLUP
 procedure GPIO_set_PULLDOWN(gpio:longword; enable:boolean); begin GPIO_set_PULLUPORDOWN(gpio,enable,false); end;	// enable or disable PULLDOWN
@@ -10846,7 +11795,7 @@ begin
   GPIO_get_HDR_PIN:=lvl;
 end;
 
-function  ENC_GetVal(hdl:byte; ctrsel:integer):real; 
+function  ENC_GetVal(hdl:integer; ctrsel:integer):real; 
 var val:real;
 begin 
   val:=0;
@@ -10878,11 +11827,11 @@ begin
   ENC_GetVal:=val;  
 end;
 
-function  ENC_GetVal       (hdl:byte):real;		begin ENC_GetVal:=       ENC_GetVal(hdl, 0); end;
-function  ENC_GetCycles    (hdl:byte):real;		begin ENC_GetCycles:=    ENC_GetVal(hdl, 1); end;
-function  ENC_GetValPercent(hdl:byte):real;		begin ENC_GetValPercent:=ENC_GetVal(hdl, 3); end;
-function  ENC_GetSwitch    (hdl:byte):real;		begin ENC_GetSwitch:=    ENC_GetVal(hdl, 2); end;
-function  ENC_GetSwPtime   (hdl:byte):real;		begin ENC_GetSwPtime:=   ENC_GetVal(hdl, 5); end;
+function  ENC_GetVal       (hdl:integer):real;		begin ENC_GetVal:=       ENC_GetVal(hdl, 0); end;
+function  ENC_GetCycles    (hdl:integer):real;		begin ENC_GetCycles:=    ENC_GetVal(hdl, 1); end;
+function  ENC_GetValPercent(hdl:integer):real;		begin ENC_GetValPercent:=ENC_GetVal(hdl, 3); end;
+function  ENC_GetSwitch    (hdl:integer):real;		begin ENC_GetSwitch:=    ENC_GetVal(hdl, 2); end;
+function  ENC_GetSwPtime   (hdl:integer):real;		begin ENC_GetSwPtime:=   ENC_GetVal(hdl, 5); end;
 
 procedure ENC_IncSwCnt (var ENCInfo:ENC_CNT_struct_t; cnt:integer);
 begin inc(ENCInfo.switchcounter,cnt); end;
@@ -10936,38 +11885,6 @@ begin
   end;
 end;
 
-(*
-  ENC_ptr = ^ENC_struct_t;
-  ENC_CNT_ptr=^ENC_CNT_struct_t;
-  ENC_CNT_struct_t = record	  
-    Handle:integer;
-    ENC_activity:boolean;
-    switchcounter,switchcounterold,switchcountermax,switchlastpresstime,
-    counter,counterold,countermax,cycles,cyclesold:longint;
-    encsteps,enccycles,swsteps,Interval_ms:longint;
-    enc,encold:real;
-    fIntervalResetTime:TDateTime;
-    activitymodedetect,
-    steps_per_cycle:byte;
-    kbdcode,kbdupcnt,kbddwncnt,kbdswitch:char;
-    TurnRateStruct:FREQ_Determine_t;
-  end; 
-  ENC_struct_t = record					// Encoder data structure
-    ENC_CS : TRTLCriticalSection;
-	SyncTime: TDateTime;				// for syncing max. device queries
-//  ENCptr:ENC_ptr; 
-	ThreadCtrl:Thread_Ctrl_t;
-	A_Sig,B_Sig,S_Sig:GPIO_struct_t;
-	a,b,seq,seqold,deltaold,delta:longint;
-	idxcounter,SwitchRepeatTime_ms,
-	sleeptime_ms:longword;
-	beepgpio:integer;
-	ok,s2minmax:boolean;
-	SwitchFiredSpecFunc:TProcedureNoArgCall;
-	CNTInfo:ENC_CNT_struct_t;
-	desc:string[RPI_hal_dscl];
-  end;
-*)
 function  ENC_Device(ptr:pointer):ptrint;
 (* seq	B	A	  AxorB		  delta	meaning	
 	0	0	0		0			0	no change
@@ -11368,56 +12285,6 @@ begin
   if LOG_Level<=LOG_DEBUG then LOG_Writeln(LOG_DEBUG,HexStr(data.buf)); 
 end;
 
-function rtc_func(fkt:longint; fpath:string; var dattime:TDateTime) : longint;
-(* uses e.g. /dev/rtc0 *)
-var rslt:integer; hdl:cint; Y,Mo,D,H,Mi,S,MS : Word;
- function rtc_open(fpath:string) : longint; begin {$IFDEF UNIX}rtc_open:=fpOpen(fpath,O_RdWr); {$ENDIF} end;
-begin  
-  rslt:=0;
-  if Pos('/DEV/RTC',Upper(fpath))=1 then 
-  begin  
-    {$IFDEF UNIX}
-    case fkt of
-      RTC_RD_TIME  : begin
-                         hdl:= rtc_open(fpath);
-                         if hdl<0	then begin	LOG_Writeln(LOG_ERROR,'rtc_func #1 RTC_RD_TIME (Handle: '+Num2Str(hdl,0)+')'); exit(hdl); end
-                                    else      	LOG_Writeln(LOG_DEBUG,'rtc_func #1 RTC_RD_TIME (Handle: '+Num2Str(hdl,0)+')');          
-                         rslt:=fpIOctl(hdl,RTC_RD_TIME, addr(rtc_time));
-                         if rslt<0	then begin	LOG_Writeln(LOG_ERROR,'rtc_func #2 RTC_RD_TIME (Handle: '+Num2Str(hdl,0)+') '+LNX_ErrDesc(fpgeterrno)); fpclose(hdl); exit(rslt); end
-                                    else    	LOG_Writeln(LOG_DEBUG,'rtc_func #2 RTC_RD_TIME (Handle: '+Num2Str(hdl,0)+')');
-                         with rtc_time do
-                         begin
-                           dattime:=EncodeDateTime(word(tm_year+1900),word(tm_mon+1),word(tm_mday),
-                                                   word(tm_hour),     word(tm_min),  word(tm_sec), 0);
-                         end;
-                         writeln(FormatDateTime('yyyy-mm-dd hh:nn:ss',dattime));
-                       end;
-        RTC_SET_TIME : begin
-                         hdl:= rtc_open(fpath);
-                         if hdl < 0    then begin LOG_Writeln(LOG_ERROR,'rtc_func #1 RTC_SET_TIME (Handle: '+Num2Str(hdl,0)+')'); exit(hdl); end
-                                       else       LOG_Writeln(LOG_DEBUG,'rtc_func #1 RTC_SET_TIME (Handle: '+Num2Str(hdl,0)+')');
-                         with rtc_time do
-                         begin
-                           DecodeDateTime(dattime,Y,Mo,D,H,Mi,S,MS);
-                           tm_year:=Y-1900; tm_mon:=Mo-1; tm_mday:=D; tm_hour:=H; tm_min:=Mi; tm_sec:=S;
-                         end;
-                         rslt:=fpIOctl(hdl, RTC_SET_TIME, addr(rtc_time));
-                         if rslt<0	then begin LOG_Writeln(LOG_ERROR,'rtc_func #2 RTC_SET_TIME (Handle: '+Num2Str(hdl,0)+') '+LNX_ErrDesc(fpgeterrno)); fpclose(hdl); exit(rslt); end
-                                    else       LOG_Writeln(LOG_DEBUG,'rtc_func #2 RTC_SET_TIME (Handle: '+Num2Str(hdl,0)+')');
-                       end;
-      else             rslt:=-1;
-    end;
-    if rslt=0 then fpclose(hdl);
-	{$ENDIF}
-  end
-  else
-  begin
-    (* not supported here, must be raw I2C access. Implementation later, maybe. *)
-    rslt:=-1;
-  end;
-  rtc_func:=rslt;
-end;
-
 {$IFDEF UNIX}
 function  MapUSB(devpath:string):string; // e.g. MapUSB('/dev/ttyUSB0') -> /dev/bus/usb/002/004
 var dpath:string; 
@@ -11573,7 +12440,7 @@ begin
 end;
 
 procedure I2C_CleanBuffer(busnum:byte);
-begin with I2C_buf[busnum] do begin hdl:=-1; buf:=''; end; end;
+begin with I2C_buf[busnum] do begin hdl:=-1; buf:=''; reperr:=true; end; end;
 
 procedure I2C_Start(busnum:integer);
 var _I2C_path:string;
@@ -11753,7 +12620,8 @@ begin
       if (rslt<0) then
       begin
     	SetLength(buf,			0);
-    	LOG_Writeln(LOG_ERROR,	'I2C_bus_WrRd[0x'+HexStr(busnum,2)+'/0x'+HexStr(baseadr,2)+']: failed to read device: '+LNX_ErrDesc(fpgeterrno));
+    	if reperr then
+    	  LOG_Writeln(LOG_ERROR,'I2C_bus_WrRd[0x'+HexStr(busnum,2)+'/0x'+HexStr(baseadr,2)+']: failed to read device: '+LNX_ErrDesc(fpgeterrno));
     	ERR_MGMT_UPD(errhdl,	_IOC_READ, RDlen,		 false);
 //		ERR_MGMT_UPD(errhdl,	_IOC_WRITE,Length(WRbuf),false);
       end
@@ -12128,7 +12996,7 @@ var _lvl:t_errorlevel; info:string;
 begin
   with DeviceStruct do
   begin
-    HW_IniInfoStruct(DeviceStruct); data:=''; present:=false; _lvl:=LOG_ERROR;
+    HW_IniInfoStruct(DeviceStruct); data:=''; present:=false; _lvl:=LOG_WARNING;
     HW_SetInfoStruct(DeviceStruct,I2CDev,rpi_I2C_busgen,i2c_unvalid_addr,dsc);
     info:=dsc+'[0x'+HexStr(bus,2)+'/0x'+HexStr(adr,2);
     if cmds<>'' then info:=info+'/0x'+HexStr(cmds);
@@ -12136,7 +13004,9 @@ begin
 //  writeln('info:',info);
     if I2C_ChkBusAdr(bus,adr) then
     begin
+	  I2C_buf[bus].reperr:=false;    
       I2C_string_read(bus,adr,cmds,lgt,NO_ERRHNDL,data); 
+ 	  I2C_buf[bus].reperr:=true;    
       present:=(data<>'');     
       if present 			   then present:=present and (Length(data)= lgt);
       if present and (rv1<>'') then present:=present and (HexStr(data)= rv1); 
@@ -12171,12 +13041,11 @@ begin
   end;
   clock_gettime(CLOCK_REALTIME,@tende);
 //writeln('data: ',HexStr(data));
-  r:=MicroSecondsBetween(tende,tstrt)/1000;
+  r:=NanoSecondsBetween(tende,tstrt)/(1000000);
   if ok and (r>0) then
   begin
-// SAY(LOG_WARNING,'I2C_HWSpeedT: cnt:'+Num2Str(cnt,0)+' msec:'+Num2Str(r,0,2)+' #######################');
-// 2018-04-16 22:31:13 WRN I2C_HWSpeedT: cnt:1000 msec:102.00 #######################
-    r:=(cnt/1024)/(r/1000);	// kB/sec
+	cnt:=cnt+round(cnt/8); 	// protocol overhead, 1Bit (ACK/NACK) per Byte
+	r:=(cnt/1024)/(r/1000);	// kB/sec
   end else r:=0;
 //if not ok then 
   ERR_Report(hndl);
@@ -12463,8 +13332,6 @@ begin
   SPI_IOC_WR_BITS_PER_WORD:=	_IOW (SPI_IOC_MAGIC, 3, 1);
   SPI_IOC_RD_MAX_SPEED_HZ:=		_IOR (SPI_IOC_MAGIC, 4, 4);	// SizeOf(longint) ??
   SPI_IOC_WR_MAX_SPEED_HZ:=		_IOW (SPI_IOC_MAGIC, 4, 4); // SizeOf(longint) ??
-//RTC_RD_TIME :=			  	_IOR ('p', 		     9, SizeOf(rtc_time_t));
-//RTC_SET_TIME:=			  	_IOW ('p', 		    10, SizeOf(rtc_time_t));
   IOCTL_TAG_PROPERTY:=			_IOWR('d',			 0, 4); // SizeOf(longint) ??
   WDIOC_SETTIMEOUT:=			_IOWR('W',			 6, SizeOf(longint));
   WDIOC_GETTIMEOUT:=			_IOR ('W',			 7, SizeOf(longint));
@@ -13486,8 +14353,8 @@ begin
   i:=ord(PID_Default);
   if not ( (Te=0) or (Tb=0) or IsNaN(Tb) or IsNaN(Te) ) then 
   begin
-	r:=Tb/Te;
-	i:=ord(P_Default); 						// gut regelbar 		-> P
+	r:=Tb/Te;			
+					 i:=ord(P_Default);		// gut regelbar 		-> P
 	if (r<=10)	then i:=ord(PI_Default);	// regelbar 			-> PI	
 	if (r<3)	then i:=ord(PID_Default); 	// schlecht regelbar	-> PID
   end;
@@ -13540,7 +14407,7 @@ begin
   PID_sim:=timadj;
 end;
   
-function  PID_DetPara(StrList:TStringList; idxStart,idxEnd,smoothdata,smoothtdr,loctim,locist,locSetPoint:longint; StoerSprung,timadjfct:real; var Ks,Te,Tb,Tsum,SampleTimeAvg:PID_float_t; tst:boolean):integer;
+function  PID_DetPara(loglvl:t_ErrorLevel; StrList:TStringList; idxStart,idxEnd,smoothdata,smoothtdr,loctim,locist,locSetPoint:longint; StoerSprung,timadjfct:real; var Ks,Te,Tb,Tsum,SampleTimeAvg:PID_float_t; tst:boolean; filout:string):integer;
 //determines Ks,Te,Tb out of a given sensor data (.csv)
 //Ks,Te,Tb for feeding PID_GetPara
 //Prof. Dr. R. Kessler, FH-Karlsruhe, FB-MN, http://www.home.fh-karlsruhe.de/~kero0001, WendeTangReg3.doc
@@ -13549,17 +14416,19 @@ function  PID_DetPara(StrList:TStringList; idxStart,idxEnd,smoothdata,smoothtdr,
 //0,45;6;0;0;132;-0,15259;-0,15259;133,28756;552630;133,44015;557774;0,24146382;1;0;7,92544758;1;0
 //...
 //0,45;6;1081;619469;132;129,85428;129,85428;133,28756;552630;133,44015;557774;0,24146382;1;133,4401502;7,92544758;0;0
-var _ok:boolean; res,i,linecnt,idx,avgnumIst,avgnumTDR:longint; 
-	maxZ,minZ,tZ,maxXp,tWP,XWP,t1,t2,wt,scaleXp:PID_float_t;
+var _ok:boolean; res,i,linecnt,idx,avgnumIst,avgnumTDR:longint; _tl:TStringList;
+	maxZ,minZ,tZ,maxXp,tWP,XWP,t1,t2,_Te,_Tb,wt,scaleXp:PID_float_t; 
   	A_t,A_td,A_W,A_U,A_X,A_TDR,A_Xp: array of PID_float_t;
 begin
+  _tl:=TStringList.create; 
+//writeln('PID_DetPara filout:',filout,' ',idxStart,' ',idxEnd,' ',tst);
   linecnt:=idxEnd-idxStart+1; res:=-1; Ks:=NaN; Te:=Nan; Tb:=NaN; Tsum:=Nan; 
   if (linecnt>0) then
   begin
     Ks:=1; scaleXp:=1; 
-    SetLength(A_U,linecnt); 	SetLength(A_X,linecnt); 	SetLength(A_t,linecnt); 
+    SetLength(A_U,  linecnt); 	SetLength(A_X, linecnt); 	SetLength(A_t,linecnt); 
     SetLength(A_TDR,linecnt); 	SetLength(A_Xp,linecnt);  	SetLength(A_W,linecnt);
-    SetLength(A_td,linecnt); 
+    SetLength(A_td, linecnt); 
     for i:=idxStart to idxEnd do
     begin // ArrFill 
       _ok:=true;
@@ -13567,6 +14436,7 @@ begin
       if not Str2Num(AdjZahl(Select_Item(StrList[i],';','',locSetPoint)),A_W[i-idxStart]) then _ok:=false;	// SetPoint
       if not Str2Num(AdjZahl(Select_Item(StrList[i],';','',locist)),	 A_U[i-idxStart]) then _ok:=false;	// istval
       if not _ok then LOG_Writeln(LOG_ERROR,'PID_DetPara['+Num2Str(i,0)+'] value not ok: '+StrList[i]);
+//	  writeln(i:5,' ',A_t[i-idxStart],' ',A_W[i-idxStart],' ',A_U[i-idxStart]);
     end;
         
     avgnumIST:=smoothdata; if avgnumIST<1 then avgnumIST:=1; // 1=no smoothing
@@ -13590,57 +14460,70 @@ begin
       t1:= (XWP-minZ)/maxXp;			// t1= Zeitabschn. unter Wendetangente bis minZ
       t2:= (maxZ-XWP)/maxXp;			// t2= Zeitabschn. oberhalb Wendetangente bis maxZ
       Te:= tWP-t1-tZ;					// Te= Verzugszeit
-      Tb:= t1+t2;						// Tb= Ausgleichszeit
-      if StoerSprung>0 then 
-        Ks:= maxZ/StoerSprung; 			// Ks= Streckenverstärkung = Endwert der Sprungantwort geteilt durch Höhe des Störsprungs.
+      Tb:= t1+t2;						// Tb= Ausgleichszeit 
+      if (StoerSprung<>0) then
+    	Ks:=maxZ/StoerSprung;			// Ks= Streckenverstärkung = Endwert der Sprungantwort geteilt durch Höhe des Störsprungs. 
 
       if tst then
       begin
 //	    create .csv output // overwrite Input StringList !!!!!!!!
-	    StrList.clear;
+	    _tl.clear;
 	  
 	    scaleXp:=maxZ/maxXp;				// normalize TDR
-        StrList.add('time;td;U;cnt;W;U(avg='+Num2Str(avgnumIst,0)+');Xp(scale='+Num2Str(scaleXp,0,PID_nk8)+');WT');
+        _tl.add('time,U,W,U(avg='+Num2Str(avgnumIst,0)+'),Xp(scale='+Num2Str(scaleXp,0,PID_nk8)+'),WT');
         for i:=1 to linecnt do
         begin            
 		  if A_t[i-1]<(tWP-t1) then wt:=minZ else 
 		    if A_t[i-1]>(tWP+t2) then wt:=maxZ 
 			  else wt:=(A_t[i-1]-(tWP-t1))/Tb*(maxZ-minZ); // calc Wendetangente        
-          StrList.add(
-        		AdjZahlDE(A_t [i-1],0,PID_nk8)+';'+AdjZahlDE(A_td[i-1],0,PID_nk8)+';'+
-        		AdjZahlDE(A_U [i-1],0,PID_nk8)+';'+Num2Str(i-1,0)+';'+
-            	AdjZahlDE(A_W [i-1],0,PID_nk8)+';'+AdjZahlDE(A_X   [i-1],0,PID_nk8)+';'+
-    	  		AdjZahlDE(A_Xp[i-1]*scaleXp,0,PID_nk8)+';'+
-    	  		AdjZahlDE(wt,0,PID_nk8)
+          _tl.add(
+        		Num2Str(A_t [i-1],0)+','+
+        		Num2Str(A_U [i-1],0,PID_nk8)+','+
+            	Num2Str(A_W [i-1],0,PID_nk8)+','+
+            	Num2Str(A_X [i-1],0,PID_nk8)+','+
+    	  		Num2Str(A_Xp[i-1]*scaleXp,0,PID_nk8)+','+
+    	  		Num2Str(wt,0,PID_nk8)
 				);
         end;  
-//    ShowStringList(StrList);   
+        if (filout<>'') then 
+        begin
+    	  SAY(loglvl,'PID_DetPara: writing to ('+Num2Str(_tl.count,0)+') '+filout);
+    	  if not StringList2TextFile(filout,_tl) then
+			LOG_Writeln(LOG_ERROR,'PID_DetPara: can not write '+filout);
+        end;
+//    ShowStringList(_tl);   
         scaleXp:=1;
-      end;
+      end; // tst
       
+      _Te:=Te; _Tb:=Tb;					// keep calced Te and Tb
       if PID_TimAdj(SampleTimeAvg,Te,Tb,TSum)>0 then
       begin
-        res:=PID_DetType(Te,Tb);		// Determine P/PI/PID
-        SAY(LOG_DEBUG,	'tZ/minZ/maxZ/maxXp/SampleTimeAvg/StoerSprung: '+
+      	res:=PID_DetType(Te,Tb);		// Determine P/PI/PID
+        SAY(loglvl,	'tZ/minZ/maxZ/maxXp/SampleTimeAvg/StoerSprung: '+
           				Num2Str(tZ,0,PID_nk8)+' '+Num2Str(minZ,0,PID_nk8)+' '+
           				Num2Str(maxZ,0,PID_nk8)+' '+Num2Str(maxXp,0,PID_nk8)+' '+
           				Num2Str(SampleTimeAvg,0,PID_nk8)+' '+Num2Str(StoerSprung,0,PID_nk8)); 
-        SAY(LOG_DEBUG,	'avgnumIST/avgnumTDR: '+Num2Str(avgnumIST,0,PID_nk8)+' '+Num2Str(avgnumTDR,0,PID_nk8)); 
-        SAY(LOG_DEBUG,	'WendePunkt['+Num2Str(idx,0)+']: '+
+        SAY(loglvl,	'avgnumIST/avgnumTDR: '+Num2Str(avgnumIST,0,PID_nk8)+' '+Num2Str(avgnumTDR,0,PID_nk8)); 
+        SAY(loglvl,	'WendePunkt['+Num2Str(idx,0)+']: '+
           				Num2Str(tWP,0,PID_nk8)+'/'+Num2Str(XWP,0,PID_nk8));
-	    SAY(LOG_DEBUG,	't1/t2: '+Num2Str(t1,0,PID_nk8)+' '+Num2Str(t2,0,PID_nk8));
-	    SAY(LOG_DEBUG,	'Ks/Te/Tb/res: '+
-	      				Num2Str(Ks,0,PID_nk8)+' '+Num2Str(Te,0,PID_nk8)+' '+
-	      				Num2Str(Tb,0,PID_nk8)+' '+Num2Str(res,0));    
+	    SAY(loglvl,	't1/t2: '+Num2Str(t1,0,PID_nk8)+' '+Num2Str(t2,0,PID_nk8));
+	    SAY(loglvl,	'Ks/Te/Tb: '+
+	      				Num2Str(Ks,0,PID_nk8)+' '+ Num2Str(_Te,0,PID_nk8)+' '+
+	      				Num2Str(_Tb,0,PID_nk8));    
+	    SAY(loglvl,	'TimAdj Te/Tb/suggestedPIDMethod: '+
+	      				Num2Str(Te,0,PID_nk8)+' '+Num2Str(Tb,0,PID_nk8)+' '+GetEnumName(TypeInfo(PID_Method_t),res));
       end else LOG_Writeln(LOG_ERROR,'PID_DetPara: timeadj wrong paras');
     end else LOG_Writeln(LOG_ERROR,'PID_DetPara: Xp not found (wrong epsilon?)');
     SetLength(A_U,0);	SetLength(A_X,0); 	SetLength(A_t,0);	SetLength(A_td,0);
     SetLength(A_TDR,0);	SetLength(A_Xp,0);	SetLength(A_W,0);
   end else LOG_Writeln(LOG_ERROR,'PID_DetPara: wrong parameter/empty list');
+  _tl.free;
   PID_DetPara:=res;
 end;
+function  PID_DetPara(StrList:TStringList; idxStart,idxEnd,smoothdata,smoothtdr,loctim,locist,locSetPoint:longint; StoerSprung,timadjfct:real; var Ks,Te,Tb,Tsum,SampleTimeAvg:PID_float_t; tst:boolean):integer;
+begin PID_DetPara:=PID_DetPara(LOG_DEBUG,StrList,idxStart,idxEnd,smoothdata,smoothtdr,loctim,locist,locSetPoint,StoerSprung,timadjfct,Ks,Te,Tb,Tsum,SampleTimeAvg,tst,''); end;
 
-function  PID_GetPara(loglvl:t_ErrorLevel; Ks,Te,Tb,Tsum:PID_float_t; Method:PID_Method_t; var Ti,Td:PID_float_t; var K:PID_array_t):integer;
+function  PID_GetPara(loglvl:t_ErrorLevel; Ks,Te,Tb,Tsum:PID_float_t; Method:PID_Method_t; var Ti,Td:PID_float_t; var K:PID_array_t; loginfo:string):integer;
 //calcs Kp,Ki,Kd,Ti,Td for feeding PID_Init
 //Input:  Statische Verstärkung (Ks), Verzugszeit (Te) und Ausgleichszeit (Tb),
 //Input:  Px_SUM (TSum)
@@ -13710,8 +14593,8 @@ begin
   end; // case
   if not IsNaN(Ti) then K[iKi]:=K[0]/Ti; 
   if not IsNan(Td) then K[iKd]:=K[0]*Td;
-//SAY(loglvl,'PID_GetParaIn ['+GetEnumName(TypeInfo(PID_Method_t),ord(Method))+']: Ks: '+Num2Str(Ks,0,PID_nk8)+' Te: '+Num2Str(Te,0,PID_nk8)+' Tb: '+Num2Str(Tb,0,PID_nk8));
-//SAY(loglvl,'PID_GetParaOut['+GetEnumName(TypeInfo(PID_Method_t),ord(Method))+']: Kp: '+Num2Str(K[0],0,PID_nk8)+' Ki: '+Num2Str(K[1],0,PID_nk8)+' Kd: '+Num2Str(K[2],0,PID_nk8)+' Ti: '+Num2Str(Ti,0,PID_nk8)+' Td: '+Num2Str(Td,0,PID_nk8));
+  SAY(loglvl,'PID_GetParaIn ['+GetEnumName(TypeInfo(PID_Method_t),ord(Method))+' '+loginfo+']: Ks: '+Num2Str(Ks,0,PID_nk8)+' Te: '+Num2Str(Te,0,PID_nk8)+' Tb: '+Num2Str(Tb,0,PID_nk8));
+  SAY(loglvl,'PID_GetParaOut['+GetEnumName(TypeInfo(PID_Method_t),ord(Method))+' '+loginfo+']:   Kp: '+Num2Str(K[0],0,PID_nk8)+' Ki: '+Num2Str(K[1],0,PID_nk8)+' Kd: '+Num2Str(K[2],0,PID_nk8)+' Ti: '+Num2Str(Ti,0,PID_nk8)+' Td: '+Num2Str(Td,0,PID_nk8));
   PID_GetPara:=res;
 end;
 
@@ -13725,11 +14608,11 @@ begin
 end;
 
 function  CSV_RemLastSep(strng:string; sep:char):string;
-var sh:string;
+var lgt:longint; sh:string;
 begin
-  sh:=strng;
-  if (Length(strng)>0) and (strng[Length(strng)]=sep) then 
-    sh:=copy(strng,1,Length(strng)-1);
+  sh:=strng; lgt:=Length(sh);
+  if (lgt>0) then
+	if (sh[lgt]=sep) then SetLength(sh,(lgt-1));
   CSV_RemLastSep:=sh;
 end;
 
@@ -13792,10 +14675,10 @@ begin
   StoerSprung:=1; Method:=PID_Default;
   avgnumIst:=1; avgnumPInc:=1; // demo, no data smoothing.
   PID_DetPara(_tl,idxa,idxe,avgnumIst,avgnumPInc,PID_loctusec,PID_locistval,PID_locsollval,StoerSprung,timadj,Ks,Te,Tb,Tsum,SmplTimAvg,true); 
-  PID_GetPara(LOG_INFO,Ks,Te,Tb,Tsum,Method,Ti,Td,K);
+  PID_GetPara(LOG_INFO,Ks,Te,Tb,Tsum,Method,Ti,Td,K,'');
   writeln('PID_TestSim Kp:',K[iKp]:0:2,' Ki:',K[iKi]:0:2,' Kd:',K[iKd]:0:2);
 //  Kp:=1.1;  Ki:=0.2;  Kd:=0.1;	// Kp=1.1,Ki=0.2,Kd=0.1; //   Kp:=1; Ki:=0; Kd:=0.5;
-  PID_Init(pid1,1,500,false,Ks,-25,25,1000,K,PID_Vector(-1.25,1.25,1000),PID_Vector(PID_twiddle_saveattol,PID_twiddle_tolerance,PID_twiddle_tolNOTsav));  
+  PID_Init(pid1,1,500,false,Ks,0,-25,25,1000,0,K,PID_Vector(-1.25,1.25,1000),PID_Vector(PID_twiddle_saveattol,PID_twiddle_tolerance,PID_twiddle_tolNOTsav));
   PID_SimCSV(_tl,pid1);
   ShowStringList(_tl); 
   _tl.free;
@@ -13877,6 +14760,10 @@ begin
 	    2:	begin
 			  outstr:='KpS,KiS,KdS: '; 
 			  for li:=1 to Length(PID_Ksav)	do outstr:=outstr+Num2Str(PID_Ksav[li-1],gkc,nkc)+' ';
+			end;
+	    3:	begin
+			  outstr:='ControlOut,MinOutput0,MinOutput,MaxOutput: ';
+			  outstr:=outstr+Num2Str(PID_ControlOut,gkc,nkc)+' '+Num2Str(PID_MinOutput0,gkc,nkc)+' '+Num2Str(PID_MinOutput,gkc,nkc)+' '+Num2Str(PID_MaxOutput,gkc,nkc);
 			end;
 	   11: 	begin  // show Twiddle p 
 			  outstr:='p  [0-2]:    '; 
@@ -13977,10 +14864,19 @@ begin
   end; // with
 end;
 
-procedure PID_Limit(var Value:PID_float_t; MinOut,MaxOut:PID_float_t);
-begin if Value<MinOut then Value:=MinOut else if Value>MaxOut then Value:=MaxOut; end;
+procedure PID_Limit(var Value:PID_float_t; MinOut0,MinOut,MaxOut:PID_float_t);
+begin
+  if (Value=0) then
+  begin
+	if Value<MinOut0 then Value:=MinOut0 else if Value>MaxOut then Value:=MaxOut; 
+  end
+  else
+  begin
+	if Value<MinOut  then Value:=MinOut  else if Value>MaxOut then Value:=MaxOut; 
+  end;
+end;
 
-procedure PID_SetPrevInput (var PID_Struct:PID_Struct_t; pval:PID_float_t); begin PID_Struct.PID_PrevInput:=pval; end;
+procedure PID_SetPrevInput (var PID_Struct:PID_Struct_t; pval:PID_float_t); begin PID_Struct.PID_ProcessValue:=pval; end;
 procedure PID_SetSelfTuning(var PID_Struct:PID_Struct_t; On_:boolean); begin PID_Struct.PID_Twiddle.twiddle_on:=On_; end;
 
 procedure PID_SetIntImprove(var PID_Struct:PID_Struct_t; On_:boolean); 
@@ -14003,7 +14899,10 @@ begin PID_Struct.PID_STimAdj:=On_; end;
 
 procedure PID_ResetIntegrator(var PID_Struct:PID_Struct_t); 
 // Re-initialises the PID engine of "PID_Struct" without change of settings
-begin PID_Struct.PID_Integrated:=0.0; end;
+begin PID_Struct.PID_Integrated:=PID_Struct.PID_IntegratedWindupResetValue; end;
+
+procedure PID_IntegratedWindupReset(var PID_Struct:PID_Struct_t; WindupResetValue:PID_float_t); 
+begin PID_Struct.PID_IntegratedWindupResetValue:=WindupResetValue; end;
 
 procedure PID_SetSampleTime(var PID_Struct:PID_Struct_t; New_dT_usec:int64);
 var ratio,NewSampleTime:PID_float_t;
@@ -14021,9 +14920,14 @@ begin
   end; // with 
 end;
 
-procedure PID_SetMinMaxLimit(var PID_Struct:PID_Struct_t; MinOutput,MaxOutput:PID_float_t);
+procedure PID_SetMinMaxLimit(var PID_Struct:PID_Struct_t; MinOutput0,MinOutput,MaxOutput:PID_float_t);
 begin
-  with PID_Struct do begin PID_MinOutput:=MinOutput; PID_MaxOutput:=MaxOutput; end; // with
+  with PID_Struct do 
+  begin 
+	PID_MinOutput0:=MinOutput0; 
+	PID_MinOutput:= MinOutput; 
+	PID_MaxOutput:= MaxOutput; 
+  end; // with
 end;
 
 procedure PID_Reset(var PID_Struct:PID_Struct_t);
@@ -14031,30 +14935,37 @@ begin
   with PID_Struct do
   begin 
     PID_ResetIntegrator(PID_Struct); PID_SetPrevInput(PID_Struct,0.0);
-	PID_LastError:=0.0; PID_PrevAbsError:=0.0;	PID_cnt:=0;
+	PID_Error:=0; PID_LastError:=0.0; PID_PrevAbsError:=0.0;	PID_cnt:=0;
   end; // with
 end;
 
-procedure PID_Init(var PID_Struct:PID_Struct_t; nr:longint; itermax:longword; enab_twiddle:boolean; Ks,MinOutput,MaxOutput,SampleTime_ms:PID_float_t; K,dK,tol:PID_array_t);
+procedure PID_Init(var PID_Struct:PID_Struct_t; nr:longint; itermax:longword; enab_twiddle:boolean; Ks,MinOutput0,MinOutput,MaxOutput,SampleTime_ms,WindupResetValue:PID_float_t; K,dK,tol:PID_array_t);
 // Initialises the PID engine of "PID_Struct"
 // Ks = Amplification
 // Kp = the "proportional" error multiplier
 // Ki = the "integrated value" error multiplier
 // Kd = the "derivative" error multiplier
-// MinOutput = the minimal value the output value can have (should be < 0)
-// MaxOutput = the maximal value the output can have (should be > 0)
+// MinOutput0= the minimal value the output value can have, if switched off
+// MinOutput = the minimal value the output value can have, if switched on
+// MaxOutput = the maximal value the output can have, 		if switched on
 begin
-  PID_Reset				 (PID_Struct); 	 
-  PID_SetIntImprove		 (PID_Struct,true); 
-  PID_SetDifImprove		 (PID_Struct,true);	
-  PID_SetSampleTimeAdjust(PID_Struct,false);
-  PID_SetMinMaxLimit	 (PID_Struct,MinOutput,MaxOutput);
-  PID_InitPara			 (PID_Struct,K);
-  PID_InitTwiddle		 (PID_Struct,enab_twiddle,itermax,K,dK,tol); // tol=0.00001
+  PID_IntegratedWindupReset	(PID_Struct,WindupResetValue); 
+  PID_Reset				 	(PID_Struct); 	 
+  PID_SetIntImprove		 	(PID_Struct,true); 
+  PID_SetDifImprove			(PID_Struct,true);	
+  PID_SetSampleTimeAdjust	(PID_Struct,false);
+  PID_SetMinMaxLimit	 	(PID_Struct,MinOutput0,MinOutput,MaxOutput);
+  PID_InitPara			 	(PID_Struct,K);
+  PID_InitTwiddle		 	(PID_Struct,enab_twiddle,itermax,K,dK,tol); // tol=0.00001
   with PID_Struct do
   begin 
-    PID_nr:=nr;		PID_Ks:=Ks;   	PID_Delta:=0; PID_Ksav:=K;  		
-//	writeln('PID_Init Ks: ',PID_Ks:0:2,' Kp:',PID_Kp:0:2,' Ki:',PID_Ki:0:2,' Kd:',PID_Kd:0:2,' max:',PID_MaxOutput:0:2,' min:',PID_MinOutput:0:2);
+    PID_nr:=nr;		PID_Ks:=Ks;   	PID_ControlOut:=0; PID_Ksav:=K;  	
+    
+(*  PID_K[iKp]:=PID_K[iKp]/PID_Ks;
+    PID_K[iKi]:=PID_K[iKi]/PID_Ks;
+    PID_K[iKd]:=PID_K[iKd]/PID_Ks;	*)
+//	writeln('PID_Init['+Num2Str(nr,0)+'] Ks: ',PID_Ks:0:5,' Kp:',PID_K[iKp]:0:5,' Ki:',PID_K[iKi]:0:5,' Kd:',PID_K[iKd]:0:5,' max:',PID_MaxOutput:0:2,' min:',PID_MinOutput:0:2,' min0:',PID_MinOutput0:0:2);
+	
 	clock_gettime(CLOCK_REALTIME,@PID_Time);
 	PID_LastTime:=PID_Time;
 	PID_FirstTime:=true;
@@ -14062,18 +14973,19 @@ begin
 	PID_dT:=round(PID_SampleTime*1000);	PID_LastdT:=PID_dT;
   end;
 end;
-procedure PID_Init(var PID_Struct:PID_Struct_t; nr:longint; Ks,MinOutput,MaxOutput,SampleTime_ms,tolerance,saveattol:PID_float_t; K:PID_array_t);
-begin PID_Init(PID_Struct,nr,500,false,Ks,MinOutput,MaxOutput,SampleTime_ms,K,PID_Vector((K[iKp]*0.25),(K[iKi]*0.2),(K[iKd]*0.01)),PID_Vector(PID_twiddle_saveattol,PID_twiddle_tolerance,PID_twiddle_tolNOTsav)); end;
+procedure PID_Init(var PID_Struct:PID_Struct_t; nr:longint; Ks,MinOutput0,MinOutput,MaxOutput,SampleTime_ms,tolerance,saveattol:PID_float_t; K:PID_array_t);
+begin PID_Init(PID_Struct,nr,500,false,Ks,MinOutput0,MinOutput,MaxOutput,SampleTime_ms,0,K,PID_Vector((K[iKp]*0.25),(K[iKi]*0.2),(K[iKd]*0.01)),PID_Vector(PID_twiddle_saveattol,PID_twiddle_tolerance,PID_twiddle_tolNOTsav)); end;
 
-//http://rn-wissen.de/wiki/index.php/Regelungstechnik
-function  PID_Calc(var PID_Struct:PID_Struct_t; Setpoint,InputValue:PID_float_t; twiddle_postpone:boolean):PID_float_t;
+// http://rn-wissen.de/wiki/index.php/Regelungstechnik
+function  PID_Calc(var PID_Struct:PID_Struct_t; SetPoint,ProcessValue:PID_float_t; Stoersprung:boolean):PID_float_t;
 // To be called at a regular time interval (e.g. every 100 msec)
-// Setpoint: the target value for "InputValue" to be reached
-// InputValue: the actual value measured in the system
-// Functionresult: PID function of (SetPoint-InputValue) of "PID_Struct",
-//   a positive value means "InputValue" is too low  (< SetPoint), the process should take action to increase it
-//   a negative value means "InputValue" is too high (> SetPoint), the process should take action to decrease it
-var _err,_p,_i,_d:PID_float_t;
+// SetPoint: the target value for "ProcessValue" to be reached
+// ProcessValue: the actual value measured in the system
+// Stoersprung:	 SetPoint change, used to prevent twiddle adjust during SetPoint change
+// Functionresult: PID function of (SetPoint-ProcessValue) of "PID_Struct",
+//   a positive value means "ProcessValue" is too low  (< SetPoint), the process should take action to increase it
+//   a negative value means "ProcessValue" is too high (> SetPoint), the process should take action to decrease it
+var _p,_i,_d:PID_float_t;
 begin
   with PID_Struct do
   begin
@@ -14081,32 +14993,37 @@ begin
 	PID_dT	:= MicroSecondsBetween(PID_Time,PID_LastTime);
 	if PID_STimAdj and (not PID_FirstTime) and (PID_dT<>PID_LastdT) then PID_SetSampleTime(PID_Struct,PID_dT);
 	inc(PID_cnt); 
-	_err	:= Setpoint - InputValue;
+	PID_Error:=	SetPoint - ProcessValue;
 
 //	calc p term
-	_p		:= PID_K[iKp] * _err;
+	_p:=		PID_K[iKp] * PID_Error;
 	
 //	calc i term and limit integral windup
-	if PID_IntImprove and (Sign(_err)<>Sign(PID_Integrated)) then PID_Integrated := 0.0;		
-	PID_Integrated := PID_Integrated + _err;
-	PID_Limit(PID_Integrated, PID_MinOutput, PID_MaxOutput);
+	if PID_IntImprove and (Sign(PID_Error)<>Sign(PID_Integrated)) 
+	  then PID_Integrated := PID_IntegratedWindupResetValue;
+	if Stoersprung
+	  then PID_Integrated := PID_IntegratedWindupResetValue;
+	
+	PID_Integrated := PID_Integrated + PID_Error;
 	_i		:= PID_K[iKi] * PID_Integrated;
+	PID_Limit(_i, PID_MinOutput0, PID_MinOutput, PID_MaxOutput);
 	
 //	calc d term
-	_d		:= PID_K[iKd] * (_err - PID_LastError);
-	if PID_DifImprove and (abs(_err)<abs(PID_LastError)) then _d := 0.0; 
+	_d		:= PID_K[iKd] * (PID_Error - PID_LastError);
+	if PID_DifImprove and (abs(PID_Error)<abs(PID_LastError)) then _d := 0.0; 
 
-	PID_LastError		:= _err;
-	PID_Delta			:= (_p + _i + _d);
-//	writeln(pid_cnt:2,' err: ',_err:0:4,' res: ',PID_Delta:0:4,' p:',:_p:0:4,' i:',_i:0:4,' d:',_d:0:4);
-	PID_Limit(PID_Delta, PID_MinOutput, PID_MaxOutput);
+	PID_LastError		:= PID_Error;
+	PID_ControlOut		:= (_p + _i + _d);
+//	writeln(pid_cnt:2,' err: ',PID_Error:0:4,' res: ',PID_ControlOut:0:4,' p:',:_p:0:4,' i:',_i:0:4,' d:',_d:0:4);
+
+	PID_Limit(PID_ControlOut, PID_MinOutput0, PID_MinOutput, PID_MaxOutput);
 	
 	with PID_Struct.PID_Twiddle do
 	begin
-	  if twiddle_on and (not twiddle_postpone) then
+	  if twiddle_on and (not Stoersprung) then
 	  begin // PID self tuning
 	    inc(twiddle_iterations);
-	  	PID_UpdateError(PID_Struct.PID_Twiddle,PID_Delta);
+	  	PID_UpdateError(PID_Struct.PID_Twiddle,PID_ControlOut);
 		if (twiddle_iterations>twiddle_intermax) then
 		begin
 		  PID_TwiddleCalc(PID_Struct);
@@ -14115,20 +15032,21 @@ begin
 	  end;
 	end; // with
 	
-	PID_PrevInput		:= InputValue;
+	PID_SetPoint		:= SetPoint;
+	PID_ProcessValue	:= ProcessValue;
 	PID_LastTime		:= PID_Time;
 	PID_LastdT			:= PID_dT;
 	PID_FirstTime		:= false;
-	PID_Calc			:= PID_Delta;
+	PID_Calc			:= PID_ControlOut;
   end; // with
 end;
 
-function  PID_Calc(var PID_Struct:PID_Struct_t; Setpoint,InputValue:PID_float_t):PID_float_t;
-begin PID_Calc:=PID_Calc(PID_Struct,Setpoint,InputValue,true); end;
+function  PID_Calc(var PID_Struct:PID_Struct_t; SetPoint,ProcessValue:PID_float_t):PID_float_t;
+begin PID_Calc:=PID_Calc(PID_Struct,SetPoint,ProcessValue,false); end;
 
 procedure PID_TestXX;
 //just for demo purposes
-//simulate PID. How the to be adjusted Value approaches a Setpoint value
+//simulate PID. How the to be adjusted Value approaches a SetPoint value
 const
   Kp=0.15; Ki=0.1; Kd=0.1;		// PID parameter
   PID_Min=-25; PID_Max=+25;		// MinOutput=-25; MaxOutput=+25
@@ -14139,7 +15057,7 @@ const
 var loop,n:integer; pid1:PID_Struct_t; NewVal,SetPoint,delta:PID_float_t;
 begin
   RPI_HW_Start([InstSignalHandler]);
-  PID_Init(pid1,1,1,PID_Min,PID_Max,STim_msec,PID_twiddle_tolerance,PID_twiddle_saveattol,PID_Vector(Kp,Ki,Kd));
+  PID_Init(pid1,1,1,0,PID_Min,PID_Max,STim_msec,PID_twiddle_tolerance,PID_twiddle_saveattol,PID_Vector(Kp,Ki,Kd));
   PID_SetIntImprove (pid1,true); PID_SetDifImprove(pid1,true);	// enable improvements
   NewVal:=0; loop:=0; n:=0;
   writeln('PID_Test2 Kp:',Kp:0:2,' Ki:',Ki:0:2,' Kd:',Kd:0:2);
@@ -14157,7 +15075,7 @@ end;
 
 procedure PID_Test;
 //just for demo purposes
-//simulate PID. How the to be adjusted Value approaches a Setpoint value
+//simulate PID. How the to be adjusted Value approaches a SetPoint value
 const
   Kp=1.1;  Ki=0.2;  Kd=0.1;		// PID parameter
   PID_Min=-25; PID_Max=+25;		// MinOutput=-25; MaxOutput=+25
@@ -14167,7 +15085,7 @@ const
 var loop,n:integer; pid1:PID_Struct_t; NewVal,SetPoint,delta:PID_float_t;
 begin
   RPI_HW_Start([InstSignalHandler]);
-  PID_Init(pid1,1,1,PID_Min,PID_Max,STim_msec,PID_twiddle_tolerance,PID_twiddle_saveattol,PID_Vector(Kp,Ki,Kd));
+  PID_Init(pid1,1,1,0,PID_Min,PID_Max,STim_msec,PID_twiddle_tolerance,PID_twiddle_saveattol,PID_Vector(Kp,Ki,Kd));
   PID_SetIntImprove (pid1,true); PID_SetDifImprove(pid1,true);	// enable improvements
   NewVal:=0; loop:=0; n:=0;
   writeln('PID_Test2 Kp:',Kp:0:2,' Ki:',Ki:0:2,' Kd:',Kd:0:2);
@@ -14335,13 +15253,13 @@ end;
  
 procedure RPI_hal_exit;
 begin
-//writeln('Exit unit RPI_hal+');
-  PtrRPI_SignalRoutine:=nil;
-  if ExitCode<>0 then 
-  begin 
-    LOG_Writeln(LOG_ERROR,'ExitCode: '+FPC_ErrDesc(ExitCode)); 
-    if ExitCode=217 then LOG_Writeln(LOG_ERROR,'RPI_hal_exit: maybe RPI_hal was not initialized, check usage of RPI_HW_Start');
-  end;
+//writeln('Exit unit RPI_hal+');  
+  if (ExitCode<>0) then 
+  begin
+	DUMP_CallStack('rpi_hal['+Num2Str(ExitCode,0)+']:');
+	if ExitCode=217 then LOG_Writeln(LOG_ERROR,'RPI_hal_exit: maybe RPI_hal was not initialized, check usage of RPI_HW_Start');
+  end;  
+  
   if RPI_platform_ok then
   begin
     TRIG_End(-1); 
@@ -14353,6 +15271,7 @@ begin
     RPI_FW_close;
     MMAP_end;
   end;
+//RPI_TempSaveLimits(RPI_Temps,ApplicationName);
 //writeln('Exit unit RPI_hal-');
   BIOS_EndIniFile;
   RpiMaintCmd.free;
@@ -14362,7 +15281,7 @@ begin
 	LNX_WDOG(WDOG_Close);	// DISABLE&close WDOG device
   end;
   if _OnExitShowRuntime then SAY(LOG_INFO,LOG_GetEndMsg(''));
-  MSG_HUB_ptr:=nil; CURL_ProgressUpdateHook_ptr:=nil;
+  MSG_HUB_ptr:=nil; CURL_ProgressUpdateHook_ptr:=nil; RPI_SignalHandlerHook_ptr:=nil;
   LOG_LevelColor(false);
 //say(log_info,'RPI_hal_exit-')
 end;
@@ -14372,14 +15291,8 @@ begin
   LOG_Writeln(LOG_ERROR,'RPI_SignalHandlerErrExit['+Num2Str(errno,0)+']: '+LNX_ErrDesc(errno));
 end;
 
-function  RPI_SignalRoutine(sig:cint):integer;
-// My HandlerRoutine: Installation: PtrRPI_SignalRoutine:=@RPI_SignalRoutine;
-begin
-//do something with 'sig'
-  RPI_SignalRoutine:=0;
-end;
-
 procedure RPI_SignalHandler(sig:cint); cdecl;
+// example signal handler
 begin
   LOG_Writeln(LOG_ERROR,'RPI_SignalHandler: receiving signal: '+Num2Str(sig,0));
   case sig of
@@ -14392,14 +15305,18 @@ begin
 			  SAY_Level(LOG_WARNING); 
 			end;
 	SIGTERM,SIGINT,
-	SIGHUP:	terminateProg:=true;
+	SIGHUP:	begin
+			  terminateProg:=true;
+			end;
 	else 	begin
 			  LOG_WRITELN(LOG_WARNING,'RPI_SignalHandler: unregistered signal ('+Num2Str(sig,0)+'), set variable terminateProg');
 			  terminateProg:=true;
 			end;
   end; // case
-  if (PtrRPI_SignalRoutine<>nil) then PtrRPI_SignalRoutine(sig);
 end;
+
+procedure RPI_intSignalHandler(sig:cint); cdecl;
+begin if (RPI_SignalHandlerHook_ptr<>nil) then RPI_SignalHandlerHook_ptr(sig); end;
 
 function  RPI_Init_Allowed:boolean;
 var ok:boolean; i:longint;
@@ -14504,7 +15421,7 @@ begin
 	_flgtodo:=_flgtodo-[InstSignalHandler];
 	{$IFDEF UNIX} 
   	  new(na); new(oa); terminateProg:=false;
-  	  na^.sa_Handler:=SigActionHandler(@RPI_SignalHandler);
+  	  na^.sa_Handler:=SigActionHandler(@RPI_intSignalHandler);
   	  fillchar(na^.Sa_Mask,sizeof(na^.sa_mask),#0);
   	  na^.Sa_Flags:=0;
 	  {$ifdef Linux}               // Linux specific
@@ -14618,16 +15535,26 @@ begin
 end;
 
 procedure inivar;
-var i,j:integer;
+var i,j:integer; dt:TDateTime; sh:string;
 begin
-  RPI_ProgramStartTime:=now; 	_OnExitShowRuntime:=false; 
-  terminateProg:=false;			PtrRPI_SignalRoutine:=nil;
+//i:=0; i:=4 div i;
+  RPI_ProgramStartTime:=now; 	_OnExitShowRuntime:=false;
+  try
+	call_external_prog(LOG_NONE,'uptime -s',sh);	// 2019-07-03 09:05:57
+	if Str2DateTime(sh,'YYYY-MM-DD hh:mm:ss',dt) then RPI_BootTime:=dt;
+  except
+	RPI_BootTime:=RPI_ProgramStartTime; 
+  end;
+  terminateProg:=false;			
   LNX_sudo(false);
   MSG_HUB_ptr:=nil;				CURL_ProgressUpdateHook_ptr:=nil;
+  RPI_SignalHandlerHook_ptr:=@RPI_SignalHandler;
   rpi_fw_api.hndl:=-1; 			GPU_MEM_BASE:=0;
   LOG_LevelColor(true);
   LOG_Level(LOG_Warning); 		SAY_Level(LOG_INFO);
 
+  SD_speedRD:=noData_c;
+  
   with IP_Infos do
   begin
   	idx:=0; init:=false; samesubnet:=false; hostname:=''; 
@@ -14650,13 +15577,9 @@ begin
   cpu_fw:='';
   RpiMaintCmd:=TIniFile.Create('');
   RPI_MaintSetVersions(0,0);	// disable VersionCheck@RPI_Maint PKGInstall
-  with RPI_Temps do
-  begin
-  	TempInfo:=''; TempIdx:=1; TempMax:=RPI_TempAlarmCelsius_c;
-	for i:= 1 to 2 do begin Temp[i]:=NaN; TempLvl[i]:=LOG_NONE; end;
-	TempUnit[1]:='''C'; TempUnit[2]:='&#x2103;';
-  end; // with
-//RPI_Temp(false);
+  RPI_TempInit(RPI_Temps);
+//RPI_TempLoadLimits(RPI_Temps,ApplicationName);
+
   SetUTCOffset;  // set _TZlocal 
   mem_fd:=-1; mmap_arr:=nil; cpu_rev_num:=0; GPIO_map_idx:=2; 
   
@@ -14678,11 +15601,16 @@ end;
 begin
 //writeln('Enter unit rpi_hal');
   AddExitProc(@RPI_hal_exit);
-  inivar;
-  Get_CPU_INFO_Init; 
-//RPI_ShutDownInit(-1);			// just init data struct, no HW-Pin
-  IO_Init_Const;
-  RPI_HW_initpart:=[];
-  if RPI_Init_Allowed then RPI_HW_Start;
-//writeln('Leave unit rpi_hal');
+  try
+	inivar;
+  	Get_CPU_INFO_Init; 
+//	RPI_ShutDownInit(-1);			// just init data struct, no HW-Pin
+  	IO_Init_Const;
+  	RPI_HW_initpart:=[];
+  	if RPI_Init_Allowed then RPI_HW_Start;
+//	writeln('Leave unit rpi_hal');
+  except
+	On E_rpi_hal_Exception :Exception do 
+	  DUMP_ExceptionCallStack('rpi_hal:',E_rpi_hal_Exception);
+  end;
 end.
