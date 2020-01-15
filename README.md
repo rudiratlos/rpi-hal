@@ -1,6 +1,6 @@
 # rpi_hal
 Free Pascal Hardware abstraction library for the Raspberry Pi</br>
-This Unit, with more than 14600 Lines of Code,</br>
+This Unit, with more than 15600 Lines of Code,</br>
 delivers procedures and functions to access the rpi HW</br>
 
 - I2C
