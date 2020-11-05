@@ -1,6 +1,6 @@
 # rpi_hal
 Free Pascal Hardware abstraction library for the Raspberry Pi</br>
-This Unit, with more than 15600 Lines of Code,</br>
+This Unit, with more than 17300 Lines of Code,</br>
 delivers procedures and functions to access the rpi HW</br>
 
 - I2C
@@ -10,7 +10,7 @@ delivers procedures and functions to access the rpi HW</br>
 - BTLE Beacon (Blutooth)
 - Rotational Encoders implemented with Threads (e.g. Keyes KY-040 Rotary Encoder)
 - Servo functions
-- PID Algorithmus
+- PID Algorithm
 - Bidirectional serial device access in User space /dev/yourdevice 
 - USB Reset and Access
 - Maintain INI-Files for parameter management
@@ -18,7 +18,8 @@ delivers procedures and functions to access the rpi HW</br>
 - Thread Management
 - OS signal handler (SIGHUP, SIGUSR1...)
 - OS IP info access (IPaddr, GWaddr, Domainname...)
-- Timing functions (e.g. SetTimeOut, TimeElapsed)
+- Timing functions  (e.g. SetTimeOut, TimeElapsed)
+- CSV record parsing (e.g. to parse .csv line according to RFC4180)
 - StringManipulation (e.g. Select_Item for handling .csv files)
 - StringListManipulation
 - call external OS program and receive answer with multiple lines (e.g. directory list)
