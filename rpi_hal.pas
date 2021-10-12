@@ -1,7 +1,7 @@
-unit rpi_hal; // V5.3 // 2020-11-05
+unit rpi_hal; // V5.5 // 2021-10-12
 { RPI_hal:
 * Free Pascal Hardware abstraction library for the Raspberry Pi
-* Copyright (c) 2012-2020 Stefan Fischer
+* Copyright (c) 2012-2021 Stefan Fischer
 ***********************************************************************
 *
 * RPI_hal is free software: you can redistribute it and/or modify
@@ -37,11 +37,14 @@ unit rpi_hal; // V5.3 // 2020-11-05
   {$PACKRECORDS 16} 
   { $ ALIGN 32}
   {$MACRO ON}
-  {$HINTS OFF}
+  { $ HINTS OFF}
+  {$NOTES OFF}
+  
 Interface 
-uses {$IFDEF UNIX}    cthreads,initc,ctypes,unixtype,BaseUnix,Unix,unixutil,errors, {$ENDIF} 
+uses {$IFDEF UNIX}    cthreads,unixtype, (*pthreads,*) initc,ctypes,BaseUnix,Unix,unixutil,errors, {$ENDIF} 
      {$IFDEF WINDOWS} windows, {$ENDIF} 
-	 crt,typinfo,sysutils,strutils,dateutils,Classes,Process,math,inifiles,md5;  	 
+	 crt,typinfo,sysutils,strutils,dateutils,Classes,Process,math,inifiles,md5;
+ 	 
 const
   supminkrnl=797; supmaxkrnl=970; 	// not used
   fmt_rfc3339='yyyy-mm-dd"T"hh:nn:ss';
@@ -66,12 +69,25 @@ const
 //http://makezine.com/2016/03/02/raspberry-pi-3-not-halt-catch-fire/
   RPI_TempAlarmCelsius_c=   85;	// 85'C according to spec (max. temp), 82'C rpi start to throttle@82Deg 
   RPI_CTempCool_c=		0.6824;	// factor for 58'C
+  RPI_CTempFanOFF_c=	RPI_CTempCool_c;
+  RPI_CTempFanON_c=		0.7647;	// factor for 65'C
   RPI_CTempWarn_c= 		0.8824;	// factor for 75'C
   RPI_CTempHot_c=		0.9412;	// factor for 80'C
+  
+  RPI_TempFanOFF_c=		RPI_TempAlarmCelsius_c*RPI_CTempFanOFF_c; 	 // 58'C
+  RPI_TempFanON1_c=		RPI_TempAlarmCelsius_c*RPI_CTempFanON_c; 	 // 65'C
+  RPI_TempFanON2_c=		RPI_TempAlarmCelsius_c*RPI_CTempWarn_c; 	 // 75'C
+  
+  RPI_TightLoop_us_c=	125; 	// us tested on rpi3B&4 @600MHz
  
   LF      = #$0A; CR   = #$0D; STX      = #$02; ETX = #$03;	ESC=#27;
   Cntrl_Z = #$1A; BELL =   #7; EOL_char =   LF; HT  = #$09; // HT=TAB
   yes_c='TRUE,YES,1,JA,AN,EIN,HIGH,ON'; nein_c='FALSE,NO,0,NEIN,AUS,LOW,OFF';
+  
+  sed_enc_htm_c='s/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g; s/''"''"''/\&#39;/g';
+  sed_uml_htm_c='s/Š/\&auml;/g; s/š/\&ouml;/g; s/Ÿ/\&uuml;/g; s/€/\&Auml;/g; s/…/\&Ouml;/g; s/†/\&Uuml;/g';
+  sed_esc_htm_c='sed '''+sed_enc_htm_c+'; '+sed_uml_htm_c+''''; // esc html with sed
+
   CompanyShortName='BASIS';
   DfltSect_c='DEFAULT'; HomeSect_c='HOME'; noSect_c='UNKNOWN';
   UAgentDefault='Mozilla/5.0 (Macintosh; Intel Mac OS X 10.10; rv:36.0) Gecko/20100101 Firefox/36.0';
@@ -133,6 +149,7 @@ options fbtft_device name=adafruit13m debug=3 speed=16000000 gpios=dc:9
   LNX_ShadowFile=		'/etc/shadow';
   LNX_DevTree=			'/proc/device-tree';
   
+  IP_infomax_c=			3;
   ifuap_c=				'ap0';
   ifeth_c=				'eth0';
   ifwlan_c=				'wlan0';
@@ -140,18 +157,28 @@ options fbtft_device name=adafruit13m debug=3 speed=16000000 gpios=dc:9
   ifusb0_c=				'usb0';
   ovpn_dev_c=			'tun0';
   noip_c=				'noIPAdr'; 
-  noMAC_c=				'noMAC';
+  noMAC_c=				'noMAC';		// ff:ff:ff:ff:ff:ff
   noData_c=				'noData';
   unknown_c=			'unknown';
   exit_c=				'<exit>';
   none_c=				'<none>';
   usrbrk_c=				'usr break';
+  
+//ipdevarr:array[-1..IP_infomax_c] of string[10]=('nodev',ifwlan_c,ifeth_c,ifuap_c,ifwlan1_c);  
+  IP_infoNOadapt_c=	-1;
+  IP_infoWLAN0idx_c= 0;
+  IP_infoETH0idx_c=	 1;
+  IP_infoUAP0idx_c=	 2;
+  IP_infoWLAN1idx_c= 3;
     
   hnamdflt_c=	'raspberrypi';
   EncDecPWD_c=	'rpi_hal$4712';		// default pwd, if no encrypt/decrypt pwd is supplied
   
   CRLF4HTTP=CR+LF; // for HTTP-Protocol we have to send 0d0a 
+
   ext_sep_c='.'; 
+  esc_char_c='\';
+
   sep_max_c=6;
   sep:array[0..sep_max_c] of char=(';',',','|','*','~','`','^');
      		   
@@ -233,7 +260,7 @@ options fbtft_device name=adafruit13m debug=3 speed=16000000 gpios=dc:9
   STIM_BASE_OFS=    	$00003000; 	// Docu Page 172ff SystemTimer
   INTR_BASE_OFS=   		$0000B000;  // Docu Page 112ff 
   TIMR_BASE_OFS=   		$0000B000;  // Docu Page 196ff Timer ARM side
-  MBX_BASE_OFS=			$0000B880;	// MailboxBaseAddr
+  MBX_BASE_OFS=			$0000B880;	// MailboxBaseAddr // dmesg | grep mbox
   PADS_BASE_OFS=   		$00100000; 
   CLK_BASE_OFS=   		$00101000; 	// Docu Page 107ff
   GPIO_BASE_OFS=   		$00200000; 	// Docu Page  90ff GPIO contr. page start (1 page=4096Bytes) 
@@ -452,14 +479,16 @@ options fbtft_device name=adafruit13m debug=3 speed=16000000 gpios=dc:9
   I2C_UseNoReg		 = $ffff;  {  use this as Read/Write register, 
 							      if I2C device has no registers (RD/WR only one value)
 							      like the pressure sensor HDI M500 }
-  I2C_M_TEN          = $0010;  // we have a ten bit chip address 
   I2C_M_WR			 = $0000;
   I2C_M_RD           = $0001;
-  I2C_M_NOSTART      = $4000;
-  I2C_M_REV_DIR_ADDR = $2000;
-  I2C_M_IGNORE_NAK   = $1000;
+  I2C_M_TEN          = $0010;  	// we have a ten bit chip address 
+  I2C_M_DMA_SAFE	 = $0200;	// use only in kernel space
+  I2C_M_RECV_LEN     = $0400;  	// length will be first received byte
   I2C_M_NO_RD_ACK    = $0800;
-  I2C_M_RECV_LEN     = $0400;  // length will be first received byte
+  I2C_M_IGNORE_NAK   = $1000;
+  I2C_M_REV_DIR_ADDR = $2000;
+  I2C_M_NOSTART      = $4000;
+  I2C_M_STOP		 = $8000;
  
   I2C_RETRIES        = $0701; // number of times a device address should be polled when not acknowledging
   I2C_TIMEOUT        = $0702; // set timeout - call with int            
@@ -507,6 +536,8 @@ options fbtft_device name=adafruit13m debug=3 speed=16000000 gpios=dc:9
   I2C_FUNC_SMBUS_WRITE_BLOCK_DATA = $02000000; 
   I2C_FUNC_SMBUS_READ_I2C_BLOCK   = $04000000; // I2C-like block xfer  
   I2C_FUNC_SMBUS_WRITE_I2C_BLOCK  = $08000000; // w/ 1-byte reg. addr.  
+  I2C_FUNC_SMBUS_HOST_NOTIFY	  = $10000000; // SMBus 2.0 or later
+  
   I2C_FUNC_SMBUS_BYTE             = I2C_FUNC_SMBUS_READ_BYTE       or I2C_FUNC_SMBUS_WRITE_BYTE;
   I2C_FUNC_SMBUS_BYTE_DATA        = I2C_FUNC_SMBUS_READ_BYTE_DATA  or I2C_FUNC_SMBUS_WRITE_BYTE_DATA;
   I2C_FUNC_SMBUS_WORD_DATA        = I2C_FUNC_SMBUS_READ_WORD_DATA  or I2C_FUNC_SMBUS_WRITE_WORD_DATA;
@@ -739,24 +770,19 @@ options fbtft_device name=adafruit13m debug=3 speed=16000000 gpios=dc:9
   PID_twiddle_tolerance=0.00001;		 PID_twiddle_saveattol=PID_twiddle_tolerance*100;
   PID_twiddle_tolNOTsav=0;	 
   PID_nk15=15;
-
-  IP_infomax_c=3;
-  IP_infoNOadapt_c=-1;
-  IP_infoWLAN0idx_c=0;
-  IP_infoETH0idx_c=1;
-  IP_infoUAP0idx_c=2;
-  IP_infoWLAN1idx_c=3;
-     
+       
 type
   E_rpi_hal_Exception= class(Exception);
-  t_ErrorLevel=   (	LOG_NHdr,LOG_WHITE,LOG_BLACK,LOG_BLUE,LOG_GREEN,LOG_LHTGRN,LOG_YELLOW,LOG_ORANGE,LOG_RED,LOG_MAGENTA,
+  t_ErrorLevel=   (	LOG_NHdr,LOG_WHITE,LOG_BLACK,LOG_BLUE,LOG_GREEN,LOG_YELLOW,LOG_ORANGE,LOG_RED,LOG_MAGENTA,
+  					LOG_CYAN,LOG_BROWN,LOG_LGRAY,LOG_DGRAY,LOG_LBLUE,LOG_LGREEN,LOG_LCYAN,LOG_LRED,LOG_LMAGENTA,
   					LOG_All,LOG_DEBUG,LOG_INFO,LOG_NOTICE,LOG_WARNING,LOG_ERROR,LOG_URGENT,LOG_NONE,LOG_NONE2); 
 //t_port_flags order is important, do not change. Ord(t_port_flags) will be used to set ALT-Bits in GPFSELx Registers.
 // ORD:				   0,     1,   2,   3,   4,   5,   6,   7,    8,    9      10
   t_port_flags  = (	INPUT,OUTPUT,ALT5,ALT4,ALT0,ALT1,ALT2,ALT3,PWMHW,PWMSW,control,
 					FRQHW,Simulation,PullUP,PullDOWN,RisingEDGE,FallingEDGE,NOpull,
 					DS2mA,DS4mA,DS6mA,DS8mA,DS10mA,DS12mA,DS14mA,DS16mA,noPADhyst,noPADslew,
-					ReversePOLARITY,InitialHIGH,WRthrough,IOsync,IOCheck,UseCSec,UseCSecWR,UseCSecRD,I2C,
+					ReversePOLARITY,InitialHIGH,WRthrough,IOCheck,UseUsage,
+					UseCSec,UseCSecWR,UseCSecRD,I2C,
 					Baud300,Baud1k2,Baud2k4,Baud4k8,Baud9k6,Baud19k2,Baud38k4,Baud57k6,
 					SIOinvertLogic,Bit5,Bit6,Bit7,Bit8,StopBit1,StopBit1H,StopBit2,HShw,HSsw,
 					ParityNONE,ParityODD,ParityEVEN,ParityMark,ParitySpace,withSTTY,
@@ -765,7 +791,8 @@ type
 
   t_initpart	= (	InitHaltOnError,InitGPIO, (* InitGPIOonly,*) InitRPIfw,InitI2C,InitSPI,
   					InitCreateScript,InitOnExitShowRuntime,StartShutDownWatcher,InitWDOG,InitWDOGnoThread,
-  					InstSignalHandler,UPDAuthDBDateTime,InitCertSnakeOil,InitCertServer,InitCertLetsEncrypt);
+  					InstSignalHandler,UPDAuthDBDateTime,InitCertSnakeOil,InitCertServer,InitCertLetsEncrypt,
+  					OSGetIPinfos);
   s_initpart  	= set of t_initpart;
   t_IOBusType	= (	UnknDev,I2CDev,SPIDev);
   t_PowerSwitch	= ( ELRO,Sartano,Nexa,Intertechno,FS20);
@@ -775,9 +802,11 @@ type
   					UpdErrVerbose,UpdNoCreateDir,UpdNewerOnly,UpdCleanUP,UpdKeepFile,
   					UpdNoWDOGprevent,UpdNoZIP,UpdFollowLink,UpdVerify,UpdDBG1,UpdDBG2,UpdnoMD5Chk,UpdOnlyMD5Chk,
   					UPDStop,UPDDisable,UPDEnable,UPDStart,UPDReStart,UpdShowThInfo,SysV,Systemd,
-  					APTupd,APTforceOverwrite,APTProgressBar,APTforceConfOLD,APTautoclean,APTautoremove,APTcheckPkg,
-  					APTallowRelChg,APTnoProxy,APTpkgPin,
-  					WDOG_Close,WDOG_Retrig,WDOG_GTO,WDOG_STO,WDOG_BSTAT,WDOG_GSup,WDOG_Pause,WDOG_Resume);  
+  					APTforceUpd,APTforceOverwrite,APTProgressBar,APTProgressBarFancy,APTforceConfOLD,APTautoClean,APTautoRemove,APTcheckPkg,
+  					APTallowRelChg,APTnoProxy,APTpkgPin,APTdwnOnly,APTautoInst,APTsimulate,APTallowUnAuth,APTfixBroken,APTignoreHold,
+  					APTupdate,APTupgrade,APTdistUpgrade,APTinstall,APTreInstall,APTremove,APTpurge,APTcheck,APTdownload,APTclean,
+  					WDOG_Close,WDOG_Retrig,WDOG_GTO,WDOG_STO,WDOG_BSTAT,WDOG_GSup,WDOG_Pause,WDOG_Resume,  
+  					ActWeb,ActCTRLDev,ActSCPI,ActButton,ActInTestMode,ActDelFile,ActIsCmd);		
   s_rpimaintflags=set of t_rpimaintflags;
   
   t_RPI_config	= (	GET_CAN_EXPAND,EXPAND_FS,GET_HOSTNAME,SET_HOSTNAME,GET_BOOT_CLI,GET_AUTOLOGIN,
@@ -791,11 +820,12 @@ type
   t_PWRflags = 	  ( PWR_OFF,PWR_ON,PWR_HDMI );
   s_PWRflags =		set of t_PWRflags;
   
-  t_Manu_flag=	  (	unknownManufacturer,Bosch,HDI,AMS,HTD,MCP,IDT);
+  t_Manu_flag=	  (	unknownManufacturer,Bosch,HDI,AMS,HTD,MCP,IDT,MAXIM);
   
   t_BIOS_Flags=	  (	BIOS_secret,BIOS_noOVR,BIOS_DoESC,BIOS_UnESC,BIOS_crypt,
   					 BIOS_bool,BIOS_int,BIOS_uint,BIOS_float,BIOS_NonZero,BIOS_tstmp,BIOS_PrefDflt,
   					 BIOS_1byte,BIOS_2byte,BIOS_4byte,BIOS_lon,BIOS_lat,
+  					 BIOS_tryARRidx,BIOS_RemOnDflt,
   					 BIOS_trim1,BIOS_trim2,BIOS_trim3,BIOS_trim4,BIOS_Printable);
   s_BIOS_Flags=		set of t_BIOS_Flags;
   
@@ -806,7 +836,7 @@ type
   
   MSG_Type_t=	  (	noIDaddmsg,dashmsg,pmsg,usrmsg,maintmsg,cmdmsg,curlprogmsg);
   MSG_Type_s=		set of MSG_Type_t;
-  
+      
   t_MemoryMapPtr= ^t_MemoryMap;
   t_MemoryMap	= array[0..BCM270x_RegMaxIdx] of longword; // for 32 Bit access 
   buftype 		= array[0..c_max_Buffer-1] of byte;
@@ -820,10 +850,18 @@ type
   TProcedureNoArgCall=	procedure;
   TProcedureOneArgCall=	procedure(i:integer);
   TProcedureCOneArgCall=procedure(i:cint); cdecl;
+  TFunctionNoArgCall=	function ():integer;
   TFunctionOneArgCall=	function (i:integer):integer;
+  TFunctionOneArgCallR=	function (i:integer):real;
   TcFunctionOneArgCall=	function (i:cint):cint;
   TThFunctionOneArgCall=function (ptr:pointer):ptrint;
   TFunctionThreeArgCall=function (lvl:t_ErrorLevel; msgtype:MSG_Type_t; msg:string):longint;
+
+  RPIreg64_t = record
+	case typus:byte of
+		$00: (qw:qword);
+		$01: (lwLO,lwHI:longword);
+  end;
 
   STAT_struct_t = record
     statready:		boolean;
@@ -832,7 +870,7 @@ type
 	old_avg,trend:	float;
 	val_arr:		array of float;
   end;
-  
+    
   isr_t = record
     devnum					: byte;
     enter_isr_routine,
@@ -849,31 +887,37 @@ type
 	enter_isr_time			: TDateTime;
 	last_isr_servicetime	: int64;
   end;
-    
+   
+  Thread_ClassPrio_t = (SCHED_OTHER,SCHED_FIFO,SCHED_RR,SCHED_BATCH,SCHED_ISO,SCHED_IDLE,SCHED_DEADLINE); 
   Thread_name_t=	string[16];
+
   Thread_Ctrl_ptr= ^Thread_Ctrl_t;
   Thread_Ctrl_t=record	 
 	ThreadID:		TThreadID; //PtrUInt; 
 	ThreadRunning,
 	TermThread:		boolean;
 	ThreadFunc:		TThFunctionOneArgCall;
+	ThreadFlags:	s_rpimaintflags;
 	ThreadTimeOut:	TDateTime;
+	ThreadPrio,
+	ThreadRetCode,
+	ThreadProgressOld,
+	ThreadProgress:	integer;
 	ThreadInfo,
 	ThreadCmdStr,
 	ThreadRetStr:	string;
-	ThreadRetCode:	integer;
-	ThreadProgressOld,
-	ThreadProgress:	integer;
 	UsrData:		array[0..4] of longword;
 	ThreadPara:		array[0..4] of integer;
 	ThreadParaStr:	array[0..4] of string;
   end;
   
   TL_prot_t=record
-    TL_CS:TRTLCriticalSection;
-    TL:TStringList;
-    TL_modified:boolean;
-    ThCtl:Thread_Ctrl_t; 
+    TL_CS:		TRTLCriticalSection;
+    TL:			TStringList;
+    TL_modified,
+    TL_initok:	boolean;
+    TL_stamp:	TDateTime;
+    TL_hash:	string;
   end;
   
   STR_prot_t=record
@@ -896,7 +940,7 @@ type
     DbgThreadRunning:boolean;
     DbgRecTrig,DbgFMT,DbgTrigMode,DbgLogMode,DbgSeq,DBGlogID:longint;
     DbgRecordTime_ms:longword;
-    DbgStartTime,DbgTime:timespec;
+    DbgStartTime,DbgTime:qword;
     DbgTimeStamp,DbgNextWriteLog:TDateTime;
 	DbgLogLvl,DbgLogRetLvl:T_ErrorLevel;
 	DbgTL:TStringList;
@@ -976,21 +1020,7 @@ type
 	val:		longword;
 	end_tag:	longword;
   end;
-  
-  HW_Usage_t = record
-  	usecnt,usetimesec:longword;
-  	dat:TDateTime;
-  end;
-  
-  HW_DevicePresent_t = record
-    hndl:integer;
-    DevType:t_IOBusType;
-    present:boolean;
-    BusNum,HWAddr:integer;
-    descr:string[RPI_hal_dscl];
-    data:string;
-  end;
-  
+    
   I2C_Bus_Info_t = record
     I2C_CS 			: TRTLCriticalSection;
     I2C_useCS		: boolean;
@@ -998,9 +1028,14 @@ type
 	I2C_speed		: longword;
   end;
   
+  I2C_stringbuf_ptr = ^I2C_stringbuf_t;
+  I2C_stringbuf_t = record
+	str:string[c_max_Buffer];	// ShortString
+  end;
+
   I2C_databuf_ptr = ^I2C_databuf_t;
   I2C_databuf_t = record
-	buf: 	string[c_max_Buffer];
+  	buf:	I2C_stringbuf_t;
 	hdl: 	cint;
 	test,reperr:boolean;
   end;
@@ -1010,28 +1045,35 @@ type
     addr:	word;
 	flags:	word;
 	len:	word;
-	bptr:	I2C_databuf_ptr;
+	bptr:	pointer;
+//	bptr:	I2C_stringbuf_ptr;
   end;
   
+  I2C_rdwr_ioctl_data_ptr = ^I2C_rdwr_ioctl_data_t;
   I2C_rdwr_ioctl_data_t = record
     msgs:	I2C_msg_ptr;
 	nmsgs:	longword;
   end;
   
-  I2C_cmd_t=string[8];  
-  I2C_rdwr_zip_msg_t = record
-    msgset:	I2C_rdwr_ioctl_data_t;
-	iomsgs:	array[0..1] of I2C_msg_t;
-    zipbuf: I2C_cmd_t;  
+  I2C_rdwr_mult_msgs_ptr = ^I2C_rdwr_mult_msgs_t;
+  I2C_rdwr_mult_msgs_t = record
+	errhdl: cint;
+	busno:	longword;
+	msgs:	array[0..(I2C_RDWR_IOCTL_MAX_MSGS-1)] of I2C_msg_t;
   end;
   
-  I2C_rdwr_zip_data_t = record
-	hdl: 	cint;
-	msgidx,
-	busno,
-	datlen:	longword;
-	msgset:	I2C_rdwr_ioctl_data_t;
-    iomsgs:	array[0..(I2C_RDWR_IOCTL_MAX_MSGS-1)] of I2C_msg_t;
+  HW_Usage_t = record
+  	usecnt,usetimesec:longword;
+  	dat:TDateTime;
+  end;
+  
+  HW_DevicePresent_t = record
+    hndl:integer;
+    DevType:t_IOBusType;
+    Xpresent:boolean;
+    BusNum,HWAddr:integer;
+    Manuf:t_Manu_flag; 
+    descr:string[RPI_hal_dscl];
   end;
   
   PWM_struct_t = record
@@ -1047,6 +1089,15 @@ type
 	pwm_freq_hz,
 	pwm_freq_min,
 	pwm_freq_max	: real;
+  end;
+  
+  BEEP_ptr	   = ^BEEP_struct_t;
+  BEEP_struct_t = record
+    gpio			: longint;
+    USRbrk			: boolean;
+	cnt,
+	High_ms,
+	Low_ms			: longword;
   end;
   
   GPIO_ptr	   = ^GPIO_struct_t;
@@ -1097,7 +1148,7 @@ type
   StrobeStruct_t = record
 	state:							t_Strobe_flag;
 	modetog:						boolean;
-	strobeONtimer,strobeINTtimer:	timespec;
+	strobeONtimer,strobeINTtimer:	qword;
 	seq,strobeON_us,strobeONmin_us,
 	strobeONsave_us,strobeINTmax_us,
 	strobeINT_us,strobeINTsave_us:	int64;
@@ -1110,10 +1161,10 @@ type
     ENC_activity:boolean;
     switchcounter,switchcounterold,switchcountermax,
     switchlastpresstime,
-    counter,counterold,countermax,cycles,cyclesold:longint;
+    counter,counterold,countermark,countermax,cycles,cyclesold:longint;
     encsteps,enccycles,swsteps,Interval_ms:longint;
     enc,encold:real;
-    fIntervalResetTime:TDateTime;
+    fIntervalResetTime,DelayResetTime:TDateTime;
     activitymodedetect,
     steps_per_cycle:byte;
     kbdcode,kbdupcnt,kbddwncnt,kbdswitch:char;
@@ -1125,10 +1176,11 @@ type
 //  ENCptr:ENC_ptr; 
 	ThreadCtrl:Thread_Ctrl_t;
 	A_Sig,B_Sig,S_Sig:GPIO_struct_t;
-	a,b,seq,seqold,deltaold,delta:longint;
+	a,b,seq,seqold:word;
+	deltaold,delta:longint;
 	idxcounter,SwitchRepeatTime_ms,
 	sleeptime_ms:longword;
-	beepgpio:integer;
+	BEEP:BEEP_struct_t;
 	ok,s2minmax:boolean;
 	SwitchFiredSpecFunc:TProcedureNoArgCall;
 	CNTInfo:ENC_CNT_struct_t;
@@ -1260,13 +1312,11 @@ type
   PID_Struct_t = record
 	PID_nr:				longint;
 	PID_cnt: 			longword;
-	PID_dT,
-	PID_LastdT:			int64;			// nano seconds
+	PID_SampleTime_us:	int64;			// micro seconds
 	PID_IntImprove,	
 	PID_DifImprove,
 	PID_LimImprove,
-	PID_FirstTime,	
-	PID_STimAdj,
+	PID_FirstTime,
 	PID_UseSelfTuning:	boolean;
 	PID_Time,
 	PID_LastTime: 		timespec;
@@ -1280,10 +1330,9 @@ type
     PID_MaxOutput,		// ControlOut maximum, if ON
     PID_Error,
     PID_LastError,
-    PID_LastSampleTime,
-    PID_SampleTime,	
     PID_PrevAbsError:	PID_float_t;
-	PID_K,PID_Ksav:		PID_array_t;
+	PID_K,PID_KTa,
+	PID_Ksav:			PID_array_t;
     PID_Twiddle:		PID_Twiddle_t;
   end;
 
@@ -1332,14 +1381,17 @@ type
     stat,wireless:boolean;
     timestamp:TDateTime;
 	alias,iface,ip4addr,ip6addr,hwaddr,gwaddr,nsaddr,domain,
-	link,ssid,signal,chan,freq,DNSname:string;
+	link,ssid,signal_link,signal_level,signal_quality,chan,freq,DNSname:string;
   end;
   
+  IP_Infos_ptr = ^IP_Infos_t;
   IP_Infos_t = record
 	idx:		longint;
-    init,
+    init,init1,
     samesubnet:	boolean;
-    devlst,ip4ext,ip6ext,
+    devlst,
+    ip4ext1,ip4ext2,
+    ip4ext,
     hostapd_extdev,
     hostname:	string;
     IP_Info: 	array[0..IP_infomax_c] of IP_Info_t;
@@ -1368,6 +1420,21 @@ type
 	cnt:int64;
   end;
 
+  RPI_TMR_struct_t = record
+	tim_start,tim_ende:qword;
+	tim_us,tim_us_min,tim_us_max:int64;
+	cnt:int64;
+  end;
+  
+  DISTribution_t = record
+  	siz,cnt:qword;
+    vmin,vmax,step:real;
+  range:array of longint;
+//    range:array[0..3] of longint;
+  end;
+  
+  CSV_array_t = array of string;
+
 var
   dummy:AlignmentSize_t; // requires {$PACKRECORDS 32} 
 msg:RPI_MBX_msg_t;	// 32 byte aligned
@@ -1385,12 +1452,12 @@ msg:RPI_MBX_msg_t;	// 32 byte aligned
   RPI_bType:byte;
   RPI_FreqARMFreq:longword;
   RTC3231_NextRead,LNX_UsrAuthModDateTime,RPI_ProgramStartTime,RPI_BootTime:TDateTime;
-  _TZLocal:longint; _TZOffsetString:string[10];
+  _TZLocal:longint; _TZOffsetString:string[10]; _TZString:string[25];
   IniFileDesc:T_IniFileDesc;
   RpiMaintCmd:TIniFile;
   MSG_HUB_ptr,CURL_ProgressUpdateHook_ptr:TFunctionThreeArgCall;
   RPI_SignalHandlerHook_ptr:TProcedureCOneArgCall;
-  SD_speedRD:string;
+  SD_speedRD,MD5Hash4emptyString:string;
   
   USBDEVFS_RESET,
   SPI_IOC_RD_MODE,SPI_IOC_WR_MODE,SPI_IOC_RD_LSB_FIRST,SPI_IOC_WR_LSB_FIRST,
@@ -1419,7 +1486,7 @@ msg:RPI_MBX_msg_t;	// 32 byte aligned
   spi_buf:		array[0..spi_max_bus,
 					  0..spi_max_dev]	of SPI_databuf_t; 
   I2C_bus:		array[0..I2C_max_bus]	of I2C_Bus_Info_t; 
-  I2C_buf:		array[0..I2C_max_bus]	of I2C_databuf_t; 
+  I2C_buf:		array[0..I2C_max_bus]	of I2C_databuf_t;
   
   ENC_struct: 	array					of ENC_struct_t;
   TRIG_struct: 	array					of TRIG_struct_t;
@@ -1456,6 +1523,8 @@ procedure DBGlog_Test;
 procedure STAT_Test; 
 procedure TST_Select_Item;
 procedure TST_Trimme;
+procedure DIST_Test;
+procedure IPInfo_Test;
 
 function  _IOC (dir:byte; typ:char; nr,size:word):longword;
 function  _IO  (typ:char; nr:word):longword; 
@@ -1484,9 +1553,14 @@ procedure BIT_Put(var v:longword; i:byte; b:boolean);
 procedure BIT_Put(var v:qword;	  i:byte; b:boolean);
 
 function  MSK_Get8		(bitnum:byte):byte; 
+function  MSK_Get16		(bitnum:byte):word;
 function  MSK_Get16_8	(bitnum:byte; var idxofs:byte):byte;
 function  MSK_Get64_8	(bitnum:byte; var idxofs:byte):byte;
 function  MSK_Get256_8	(bitnum:byte; var idxofs:byte):byte;
+
+function  MSK2BitNum	(mask:qword):integer;
+
+function  GetARRIdx(bracketset:byte; var aidx,algt:longint; var key:string):boolean;
 
 function  BCM_REGAdr(idx:longword):longword; 
 function  BCM_GETREG(regidx:longword):longword;
@@ -1503,6 +1577,7 @@ function  RPI_mmap_get_info (modus:longint)  : longword;
 procedure RPI_HDR_SetDesc(HWPin:longint; desc:string);
 procedure RPI_show_all_info;
 procedure RPI_show_SBC_info;
+procedure STIM_show_regs;
 function  RPI_WLANavailChan(cntry:string):string;
 function  RPI_PWRCtrl(flags:s_PWRflags):integer;
 
@@ -1534,6 +1609,7 @@ function  TIM_Setup(timr_freq_Hz:real):real;
 procedure TIM_Test; // 1MHz
 
 procedure FRQ_SetStruct (var GPIO_struct:GPIO_struct_t);	// set default values
+procedure FRQ_SetStruct (var GPIO_struct:GPIO_struct_t; freq_Hz:real);
 procedure FRQ_SetStruct (var GPIO_struct:GPIO_struct_t; freq_Hz,freq_min,freq_max:real);
 function  FRQ_Setup		(var GPIO_struct:GPIO_struct_t):boolean;
 procedure FRQ_Switch	(var GPIO_struct:GPIO_struct_t; ein:boolean);
@@ -1549,6 +1625,10 @@ function  PWM_GetMinFreq(dutycycle:longword):real;
 function  PWM_GetMaxFreq(dutycycle:longword):real;
 function  PWM_GetMaxDtyC(freq:real):longword;
 function  PWM_GetDRVal  (percent:real; dutyrange:longword):longword; 
+
+procedure BEEP_SetStruct (var BEEP_struct:BEEP_struct_t; beepgpio:longint; beepcnt,beepHighms,beepLOWms:longword);
+function  GPIO_BeepThread(BEEPstructPTR:pointer):ptrint;
+procedure GPIO_Beep		 (var BEEP_struct:BEEP_struct_t);
 
 procedure GPIO_ShowStruct(var GPIO_struct:GPIO_struct_t);
 procedure GPIO_SetStruct(var GPIO_struct:GPIO_struct_t); // set default values
@@ -1576,6 +1656,7 @@ procedure GPIO_set_input   (gpio:longword);         // Set RPi GPIO pin to input
 procedure GPIO_set_output  (gpio:longword);         // Set RPi GPIO pin to output direction 
 procedure GPIO_set_ALT     (gpio:longword; altfunc:t_port_flags); // Set RPi GPIO pin to ALT0..ALT5 
 procedure GPIO_set_PINMODE (gpio:longword; portfkt:t_port_flags);
+procedure GPIO_set_PAD	   (gpio:longword; flgs:s_port_flags);
 procedure GPIO_set_PAD	   (gpio:longword; noSLEW,noHYST:boolean; drivestrength:byte);
 procedure GPIO_set_PULLUP  (gpio:longword; enable:boolean); // enable/disable PullUp
 procedure GPIO_set_PULLDOWN(gpio:longword; enable:boolean); // enable/disable PullDown
@@ -1613,6 +1694,9 @@ function  ENC_GetVal		(hdl:integer):real;
 function  ENC_GetValPercent	(hdl:integer):real; 
 function  ENC_GetSwitch		(hdl:integer):real;
 function  ENC_GetCycles     (hdl:integer):real; 
+function  ENC_GetMark		(hdl:integer):real;
+function  ENC_SetMark		(hdl:integer):real;
+
 function  ENC_GetCounter	(var ENCInfo:ENC_CNT_struct_t):boolean;
 procedure ENC_IncEncCnt		(var ENCInfo:ENC_CNT_struct_t; cnt:integer);
 procedure ENC_IncSwCnt		(var ENCInfo:ENC_CNT_struct_t; cnt:integer);
@@ -1649,6 +1733,7 @@ function  BIOS_GetIniString(section,name,default:string; flgs:s_BIOS_Flags):stri
 function  BIOS_SetIniString(name,value:string):boolean;	
 function  BIOS_SetIniString(section,name,value:string):boolean;	
 function  BIOS_SetIniString(section,name,value:string; flgs:s_BIOS_Flags):boolean;
+function  BIOS_SetDelIniString(section,name,value:string):boolean;
 
 function  BIOS_DeleteKey(section,name:string):boolean;
 procedure BIOS_EraseSection(section:string);
@@ -1656,17 +1741,18 @@ procedure BIOS_SetDfltSection(section:string);
 procedure BIOS_SetDfltFlags(flags:s_BIOS_flags);
 procedure USAGE_Init(nr:byte; var struct:HW_Usage_t; sect,key:string);
 
-function  RPI_OSrev:string;// 9.1
-function  RPI_snr :string; // 0000000012345678 
-function  RPI_hw  :string; // BCM2708
-function  RPI_fw  :string; // 2018-02-09T14:22:56
-function  RPI_uname:string;// Linux pump 4.14.18-v7+ #1093 SMP Fri Feb 9 15:33:07 GMT 2018 armv7l GNU/Linux
+function  RPI_lsbrel:string;// Raspbian GNU/Linux 11 (bullseye)
+function  RPI_OSrev:string;	// 11.0
+function  RPI_snr :string; 	// 0000000012345678 
+function  RPI_hw  :string; 	// BCM2708
+function  RPI_fw  :string; 	// 2018-02-09T14:22:56
+function  RPI_uname:string;	// Linux pump 4.14.18-v7+ #1093 SMP Fri Feb 9 15:33:07 GMT 2018 armv7l GNU/Linux
 function  RPI_machine:string;// armv7l
-function  RPI_proc:string; // ARMv6-compatible processor rev 7 (v6l) 
-function  RPI_mips:string; // 697.95 
-function  RPI_feat:string; // swp half thumb fastmult vfp edsp java tls 
-function  RPI_rev :string; // rev1;256MB;1000002 
-function  RPI_freq:string; // 700000;700000;900000;Hz  	
+function  RPI_proc:string; 	// ARMv6-compatible processor rev 7 (v6l) 
+function  RPI_mips:string; 	// 697.95 
+function  RPI_feat:string; 	// swp half thumb fastmult vfp edsp java tls 
+function  RPI_rev :string; 	// rev1;256MB;1000002 
+function  RPI_freq:string; 	// 700000;700000;900000;Hz  	
 function  RPI_Volt:string;	// core:1.2000V;sdram_c:1.2000V;sdram_i:1.2000V;sdram_p:1.2250V
 function  RPI_FREQs:string;	// arm:600000000;core:250000000;h264:250000000;isp:250000000;...
 function  RPI_whoami:string;
@@ -1680,6 +1766,15 @@ function  RPI_cores:longint;
 function  RPI_BCM2835:boolean;
 function  RPI_BCM2835_GetNodeValue(node:string; var nodereturn:string):longint;
 function  RPI_status_led_GPIO:byte;	// give GPIO_NUM of Status LED
+function  RPI_GetPrecisionCounter_us:qword;
+procedure RPI_SetTimeOut_us(var qTimer:qword; Retrig_us:longword);
+function  RPI_SetTimeOut_us(Retrig_us:longword):qword;
+function  RPI_TimeElapsed_us(var qTimer:qword):boolean;
+function  RPI_TimeElapsed_us(var qTimer:qword; Retrig_us:longword):boolean;
+function  RPI_MicroSecondsBetween(qTimer1,qTimer2:qword):int64;
+procedure RPI_TMR_Init(var RPI_TMR_struct:RPI_TMR_struct_t);
+procedure RPI_TMR_GetStartTime(var RPI_TMR_struct:RPI_TMR_struct_t);
+procedure RPI_TMR_GetEndTime(var RPI_TMR_struct:RPI_TMR_struct_t);
 function  RPI_I2C_BRadj(i2c_speed_kHz:longint):longint;
 function  RPI_I2C_busnum(func:byte):byte; // get the I2C busnumber, where e.g. the general purpose devices are connected. This depends on rev1 or rev2 board . e.g. RPI_I2C_busnum(RPI_I2C_general_purpose_bus_c) 
 function  RPI_I2C_busgen:byte;  // general purpose bus
@@ -1691,6 +1786,7 @@ function  RPI_I2C_ChkDev(bus,adr:byte):integer;
 function  RPI_SPI_GetSpeed(bus:byte):longint;
 function  RPI_hdrpincount:byte; // connector_pin_count on HW Header
 function  RPI_GetBuildDateTimeString:string;
+function  RPI_GetBuildDateTime:TDateTime;
 procedure RPI_show_cpu_info;
 procedure RPI_MaintSetVersions(versmin,versmax:real); 
 procedure RPI_MaintDelEnv;
@@ -1720,8 +1816,8 @@ function  HAT_product:string;
 function  HAT_product_id:string; 
 function  HAT_product_ver:string;
 function  HAT_uuid:string; 
-function  HAT_custom(tl:TStringList; keys,dflts:string):string;
-function  HAT_custom(tl:TStringList; keys,dflts,tr1,tr2:string):string;
+function  HAT_custom(tl:TStringList; const keys:string):string;
+function  HAT_custom(tl:TStringList; const keys,dflts:string):string;
 procedure HAT_Info_Test;
 
 function  USB_Reset(buspath:string):integer; // e.g. USB_Reset('/dev/bus/usb/002/004');
@@ -1730,20 +1826,25 @@ function  MapUSB(devpath:string):string;     // e.g. MapUSB('/dev/ttyUSB0') -> /
 procedure I2C_show_struct (busnum:byte);
 procedure I2C_Display_struct(busnum:byte; comment:string);
 procedure HW_IniInfoStruct(var DeviceStruct:HW_DevicePresent_t);
-procedure HW_SetInfoStruct(var DeviceStruct:HW_DevicePresent_t; DevTyp:t_IOBusType; BusNr,HWAdr:integer; dsc:string);
-function  I2C_HWT(var DeviceStruct:HW_DevicePresent_t; bus,adr,lgt:word; cmds:string; Handle:integer; rv1,nv1,nv2,dsc:string):boolean;
-function  I2C_HWT(var DeviceStruct:HW_DevicePresent_t; bus,adr,lgt:word; cmds:string; Handle:integer; rv1,nv1,nv2,dsc,dsc2:string):boolean;
+procedure HW_SetInfoStruct(var DeviceStruct:HW_DevicePresent_t; DevTyp:t_IOBusType; BusNr,HWAdr:integer; ManufType:t_Manu_flag; dsc:string);
+
+function  I2C_HWpresent(var DeviceStruct:HW_DevicePresent_t):boolean;
+function  I2C_HWT(var DeviceStruct:HW_DevicePresent_t; bus,adr,lgt:word; ManufType:t_Manu_flag; cmds:string; Handle:integer; rv1,nv1,nv2,dsc:string):boolean;
+function  I2C_HWT(var DeviceStruct:HW_DevicePresent_t; bus,adr,lgt:word; ManufType:t_Manu_flag; cmds:string; Handle:integer; rv1,nv1,nv2,dsc,dsc2:string):boolean;
 function  I2C_HWSpeedT(var DeviceStruct:HW_DevicePresent_t; lgt:word; loops:longword; cmds,dsc:string):real;
 function  I2C_HWSpeedT(BusNum,HWaddr,rdlgt:word; loops:longword; cmds,dsc:string):real;
 
 procedure I2C_EnterCriticalSection(busnum:byte);
 procedure I2C_LeaveCriticalSection(busnum:byte); 
 
-//function  I2C_bus_SEGMENTS	(var zipdata:I2C_rdwr_zip_data_t):integer;
-//procedure I2C_prep_iomsg	(var zipdata:I2C_rdwr_zip_data_t; baseadr,flag,lgt:word);
-//procedure I2C_init_ZIPdata	(var zipdata:I2C_rdwr_zip_data_t; siz,busnum:word; errhdl:integer);
+procedure I2C_init_ROOTmsg	(var rdwr:I2C_rdwr_ioctl_data_t; msgptr:I2C_msg_ptr; msgcnt:longword);
+function  I2C_xfer			(var rdwr:I2C_rdwr_ioctl_data_t; var multmsgs:I2C_rdwr_mult_msgs_t):integer;
+procedure I2C_prep_IOmsg	(var rdwr:I2C_rdwr_ioctl_data_t; var multmsgs:I2C_rdwr_mult_msgs_t; baseadr:word; const WRbuf:string; WRflgs:word; var RDbuf:I2C_stringbuf_t; RDflgs,RDlen:word);
+procedure I2C_show_MULTmsgs	(var rdwr:I2C_rdwr_ioctl_data_t; var multmsgs:I2C_rdwr_mult_msgs_t);
+procedure I2C_init_MULTmsgs	(var multmsgs:I2C_rdwr_mult_msgs_t; busnum:word; errhndl:integer; wipe:boolean);
 
-function  I2C_bus_WrRd		(busnum,baseadr:word; const WRbuf:string; WRflgs:word; var RDbuf:string; RDflgs:word; RDlen:byte; errhdl:integer):integer;
+function  I2C_bus_WrRd		(busnum,baseadr:word; const WRbuf:string; WRflgs:word; var RDbuf:I2C_stringbuf_t; RDflgs:word; RDlen:byte; errhdl:integer):integer;
+function  I2C_string_read	(busnum,baseadr:word; const WRbuf:string; RDlen:byte; errhdl:integer; var RDbuf:I2C_stringbuf_t):integer;
 function  I2C_string_read	(busnum,baseadr:word; const WRbuf:string; RDlen:byte; errhdl:integer; var RDbuf:string):integer;
 function  I2C_string_write	(busnum,baseadr:word; const WRbuf:string; errhdl:integer):integer; 
 function  I2C_ChkBusAdr		(busnum,baseadr:word):boolean; 
@@ -1763,7 +1864,8 @@ function oldI2C_string_write(busnum,baseadr:word; datas:string; errhdl:integer):
 function oldI2C_string_write(busnum,baseadr,basereg:word; datas:string; errhdl:integer):integer;
 // END	** old functions
 
-function  SPI_HWT(var DeviceStruct:HW_DevicePresent_t; bus,adr,lgt:word; cmds:string; Handle:integer; rv1,nv1,nv2,dsc:string):boolean;
+function  SPI_HWpresent(var DeviceStruct:HW_DevicePresent_t):boolean;
+function  SPI_HWT(var DeviceStruct:HW_DevicePresent_t; bus,adr,lgt:word; ManufType:t_Manu_flag; cmds:string; Handle:integer; rv1,nv1,nv2,dsc:string):boolean;
 function  SPI_Dev_Init(busnum,devnum,bpw,cs_change:byte; mode,maxspeed_hz:longword; delay_usec:word):boolean;
 function  SPI_Dev_Init(busnum,devnum:byte):boolean;
 function  SPI_ClkWrite(spi_hz:real):longword;
@@ -1791,12 +1893,12 @@ procedure eeprom_SetAddr(devaddr:word);
 function  eeprom_write_page(startadr:word; datas:string):integer;
 function  eeprom_read_page(startadr:word; len:byte; var outs:string):integer;
 
-function  Thread_Start		(var ThreadCtrl:Thread_Ctrl_t; funcadr:TThreadFunc; paraadr:pointer; delaymsec:longword; prio:longint):boolean;
+function  Thread_Start		(var ThreadCtrl:Thread_Ctrl_t; funcadr:TThreadFunc; paraadr:pointer; delaymsec:longword; prio:integer):boolean;
 function  Thread_End  		(var ThreadCtrl:Thread_Ctrl_t; waitmsec:longword):boolean;
 procedure Thread_InitStruct0(var ThreadCtrl:Thread_Ctrl_t);
 procedure Thread_InitStruct	(var ThreadCtrl:Thread_Ctrl_t);
 procedure Thread_InitStruct2(var ThreadCtrl:Thread_Ctrl_t; ThFunc:TThFunctionOneArgCall);
-procedure Thread_SetName(name:string); 				
+procedure Thread_SetName(name:string); 
 procedure Thread_ShowStruct(var ThreadCtrl:Thread_Ctrl_t);   
 procedure SetTimeOut (var EndTime:TDateTime;TimeOut_ms:Int64);
 function  TimeElapsed(var EndTime:TDateTime;Retrig_ms:Int64):boolean;
@@ -1809,13 +1911,16 @@ function  TimeElapsed_us(ptspec:Ptimespec; Retrig_us:int64):boolean;
 procedure TimeStrobeInit(var StrobeStruct:StrobeStruct_t; const ID,strobINT_us,strobONmin_us,strobINTmax_us:int64);
 procedure TimeStrobeDuty(var StrobeStruct:StrobeStruct_t; const dutycycle:real);
 procedure TimeStrobeMode(var StrobeStruct:StrobeStruct_t; const modi:s_Strobe_flag);
+procedure TimeStrobeMode(var StrobeStruct:StrobeStruct_t; const modi:s_Strobe_flag; const strob_us:int64);
 procedure TimeStrobeAsyn(var StrobeStruct:StrobeStruct_t; const modus:t_Strobe_flag);
 function  TimeStrobe	(var StrobeStruct:StrobeStruct_t):boolean;
 procedure TimeStrobeShow(var StrobeStruct:StrobeStruct_t; lvl:T_ErrorLevel; msg:string);
 
 procedure LOGSAY_tst;
 procedure Log_Writeln(typ:T_ErrorLevel;msg:string);  // writes to STDERR
+procedure Log_Writeln(typ,col:T_ErrorLevel;msg:string);
 procedure LOG_ShowStringList(typ:T_ErrorLevel; ts:TStringList); 
+procedure LOG_ShowStringList(typ1,typ2:T_ErrorLevel; ts:TStringList); 
 function  LOG_Level:t_ErrorLevel;    
 procedure Log_Level(level:t_ErrorLevel);
 procedure LOG_LevelSave; 
@@ -1847,27 +1952,39 @@ procedure DUMP_ExceptionCallStack(hdr:string; E:Exception; haltprog:boolean);
 
 function  MSG_HUB(lvl:t_ErrorLevel; msgtype:MSG_Type_t; msg:string):longint;
 
-procedure Get_SDcard_RDSpeed;
-function  GetIPAdr(iface:string; var ipaddr:string; ip4:boolean):boolean;
-function  GetMACAdr(iface:string; var hwaddr:string):boolean;
-function  GetHostName:string;
-function  GetDomainName(iface:string):string;
-function  GetDomainName:string;
-function  GetMainDomainName:string;
-function  GetWLANSignal(iface:string):longint; 	// -1,0-100
-function  IP_iface(aliasname:string):string;
-function  IS_Online(ip4:boolean):boolean;
-function  MAC_Addr(iface:string; fmt:byte):string;
-function  MAC_isRPI(macsubstr:string):boolean;
-function  IP4_Addr(iface:string):string;
-function  IP6_Addr(iface:string):string;
-function  IP4_AddrExt:string;
-function  IP4_AddrValid(ipstr:string):boolean;
+function  IPInfo_GetIPAdr(iface:string; var ipaddr:string; ip4:boolean):boolean;
+function  IPInfo_GetMACAdr(iface:string; var hwaddr:string):boolean;
+function  IPInfo_GetHostName:string;
+function  IPInfo_GetDomainName(iface:string):string;
+function  IPInfo_GetDomainName:string;
+function  IPInfo_GetMainDomainName:string;
+function  IPInfo_GetWLANSignal(iface:string):longint; 	// 999,0-100
+function  IPInfo_GetWLANSigDB(iface:string):longint; 	// 999,-100..0
+function  IPInfo_iface(aliasname:string):string;
+function  IPInfo_IsOnline(ip4:boolean):boolean;
+function  IPInfo_AddrExt(ip4:boolean):string;
+function  IPInfo_Addr4(iface:string):string;
+function  IPInfo_Addr6(iface:string):string;
+function  IPInfo_MACAddr(iface:string; fmt:byte):string;
+function  IPInfo_GetInterfaceName(intidx:longint):string;
+function  IPInfo_GetIdx(intface:string):longint;
+procedure IPInfo_GetOS;	// force OS read
+procedure IPInfo_GetOS(var IPInfos:IP_Infos_t);
+function  IPInfo_Wait:boolean;
+function  IPInfo_Wait1:boolean;
+procedure IPInfo_Show(lvl:T_ErrorLevel; var IPInfo:IP_Info_t);
+procedure IPInfos_Show(lvl:T_ErrorLevel; var IPInfos:IP_Infos_t);
+
+function  IP4AddrValid(ipstr:string):boolean;
 function  IP4AddrListValid(ipliststr:string):boolean;
-function  IP6_AddrValid(ipstr:string):boolean;
+function  IP6AddrValid(ipstr:string):boolean;
 function  IP6AddrListValid(ipliststr:string):boolean;
 function  IPAddrListValid(ipliststr:string):boolean;
 function  IP4AddrsInSameSubnet(ip4adr1,ip4adr2:string):boolean;
+
+function  GetHostNameOS:string;
+procedure Get_SDcard_RDSpeed;
+function  MAC_isRPI(macsubstr:string):boolean;
 
 procedure LNX_sudo(sudouse:boolean);
 function  LNX_sudo:boolean;
@@ -1880,6 +1997,7 @@ function  LNX_ParGET(filnam,parnam:string; var parval:string):integer;
 function  LNX_ParLinEXIST(filnam,parstr:string):boolean;
 function  LNX_GetProcessNumsByName(processname:string):string;
 procedure LNX_KillProcesses(processlist:string; signal:word);
+function  LNX_StrMod(part:byte; mode:TMode):string;
 function  LNX_chmod(filename:string; mode:TMode):cint;
 function  LNX_chowngrp(filename:string; owner,group:string):integer;
 function  LNX_chowngrpmod(filename:string; owner,group:string; mode:TMode):integer;
@@ -1907,20 +2025,25 @@ function  LNX_CertStartPack(var certpack:cert_pack_t; descr,pubcertfil,privkeyfi
 function  LNX_EncryptFile(filpubkey,filnam,ext:string; flags:s_rpimaintflags):integer;
 function  LNX_DecryptFile(filprivkey,filnam,ext:string; flags:s_rpimaintflags):integer;
 function  LNX_RemoveOldFiles(path2files:string; days:longint):integer;
+function  LNX_RemoveFilesKeepLatest(fnhdr:string; uniqcnt:integer):integer;
 function  LNX_ShellESC(s:string):string;
 procedure LNX_ADD2Crontab(cmd:string);
 function  LNX_ErrDesc(errno:longint):string;
-function  LNX_SetDateTimeUTC(utc:TDateTime):boolean;
+function  LNX_SetDateTimeUTC(utc:TDateTime):integer;
+function  LNX_SetDateTimeUTC2(utc:TDateTime; hwclock:boolean):integer;
 function  LNX_WDOG(wdog_action:t_rpimaintflags; p1:longint):longint;
 function  LNX_WDOG(wdog_action:t_rpimaintflags):longint; 
 function  LNX_SSHFSmount(site,pwd,mnt:string; var err:string):integer;
+
 function  BTLE_StartBeaconURL(url1,url2:string):longint;
 function  BTLE_StopBeacon:boolean;
+
 procedure MinMaxAdj(var value:real; valmin,valmax:real);
 function  Limits(var value:int64; minvalue,maxvalue:int64):int64;
 function  Limits(var value:longint; minvalue,maxvalue:longint):longint;
 function  Limits(var value:longword; minvalue,maxvalue:longword):longword;
 function  Limits(var value:real; minvalue,maxvalue:real):real;
+function  InLimits(value,minvalue,maxvalue:real):boolean;
 function  MinMax(value:int64; var minvalue,maxvalue:int64):integer;
 function  MinMax(value:longint; var minvalue,maxvalue:longint):integer;
 function  MinMax(value:longword; var minvalue,maxvalue:longword):integer;
@@ -1946,10 +2069,12 @@ function  Bool2Num(b:boolean) : byte;
 function  Bool2Str(b:boolean) : string; 
 function  Bool2LVL(b:boolean) : string; 	 
 function  Bool2Dig(b:boolean) : string; 
-function  Bool2Swc(b:boolean) : string;	 
+function  Bool2Swc(b:boolean) : string;	
+function  Bool2DIR(b:boolean) : string; 
 function  Bool2OC (b:boolean) : string;
 function  Bool2YN (b:boolean) : string;
 function  Bool2YNS(b:boolean) : string;
+function  Bool2PF (b:boolean) : string;
 function  Bool2EA (b:boolean) : string;
 function  Bool2eas(b:boolean) : string;
 function  Bool2UpDown(b:boolean):string;
@@ -1977,6 +2102,14 @@ function  Str2Num(s:string; var num:longint):boolean;
 function  Str2Num(s:string; var num:longword):boolean;
 function  Str2Num(s:string; var num:real):boolean; 
 function  Str2Num(s:string; var num:extended):boolean;
+procedure Str2Num(s:string; var num:byte; dflt:byte);
+procedure Str2Num(s:string; var num:smallint; dflt:smallint);
+procedure Str2Num(s:string; var num:int64; dflt:int64);
+procedure Str2Num(s:string; var num:qword; dflt:qword);
+procedure Str2Num(s:string; var num:longint; dflt:longint);
+procedure Str2Num(s:string; var num:longword; dflt:longword);
+procedure Str2Num(s:string; var num:real; dflt:real);
+procedure Str2Num(s:string; var num:extended; dflt:extended);
 function  Str2NumFMT(s:string; nk:byte):string;
 function  Num2StrFMT(num:real; nk:byte):string;
 function  Str2CP437(s:string):string;
@@ -1992,6 +2125,8 @@ function  LeadingZeros(l:longint;digits:byte):string;
 function  Bin(q:longword;lgt:Byte) : string; 
 //function  Hex(nr:qword;lgt:byte) : string; 
 //function  Hex(ptr:pointer;lgt:byte): string;
+function  QW2Str(qw:qword):string;
+function  HexStr(s:shortstring):string;overload;
 function  HexStr(s:string):string;overload;
 function  StrHex(Hex_strng:string):string;
 function  AdjZahlDE(r:real;lgt,nk:byte):string;
@@ -2002,10 +2137,15 @@ function  FormatFileSize(const Size: Int64):string;
 function  FormatNumSize(const Size:int64):string;
 function  scale(x,in_min,in_max,out_min,out_max:real):real;
 function  scale(x,in_min,in_max,out_min,out_max:longint):longint;
+function  scale(x,in_min,in_max,out_min,out_max:int64):int64;
+function  DIST_Insert(var struct:DISTribution_t; valIN:real):longint;
+function  DIST_Init(var struct:Distribution_t; ArrSize:word; fmin,fmax:real):boolean;
+procedure DIST_Show(var struct:Distribution_t; hdr:string);
+procedure DIST_End(var struct:Distribution_t);
 function  Get_SameCharString(cnt:longint;c:char):string;
 function  Get_FixedStringLen(s:string;cnt:word;leading:boolean):string; 
 //function  StringReverse(s:string):string;
-function  ShortString(fmt,maxlgt,divdr:longint; str:string):string;
+function  ShortStrng(fmt,maxlgt,divdr:longint; str:string):string;
 function  KEYpressedChar(lvl:T_ErrorLevel; msg:string; ch:char):boolean;
 function  KEYpressedChar(ch:char):boolean;
 function  ESCpressed:boolean;
@@ -2021,12 +2161,14 @@ function  Trimme(s:string;modus:byte):string;//modus: 1:adjL 2:adjT 3:AdjLT 4:Ad
 function  FilterChar(s,filter:string):string;
 function  RemoveChar(s,filter:string):string;
 function  GetNumChar(s:string):string;
+function  GetNumChar2(s:string):string;
 function  GetAlphaNumChar(s:string):string;
 function  GetParserTokenChar(s:string):string;
 function  ContainDescenderLetter(s:string):boolean;
 function  GetHexChar(s:string):string;
-function  HashTag(var InString:string):string; 
-function  HashTag(modus:byte; filname,comment1,comment2:string):string;
+function  HashTag(const InString:string):string; 
+function  HashTag(modus:byte; const filname,InString,comment:string):string;
+function  HashTagFMT(hash:string):string;
 function  ReplaceChars(s,filterchars,replacechar:string):string;
 function  RM_CRLF(s:string):string; 
 function  SB_LF  (s:string):string; // \n -> #$0a
@@ -2038,12 +2180,6 @@ function  BS_CR  (s:string):string; // #$0d -> \r
 function  BS_CRLF(s:string):string; 
 function  BS_DoESC(s:string):string;
 function  BS_ALL (s:string):string;
-function  IPInfo_GetInterfaceName(intidx:longint):string;
-function  IPInfo_GetIdx(intface:string):longint;
-procedure IPInfo_GetOS;	// force OS read
-procedure IPInfo_GetOS(var IPInfos:IP_Infos_t);
-procedure IPInfoShow(lvl:T_ErrorLevel; var IPInfo:IP_Info_t);
-procedure IPInfosShow(lvl:T_ErrorLevel; var IPInfos:IP_Infos_t);
 function  GetPrintableChars(s:string; c1,c2:char):string;
 function  CamelCase(strng:string):string;
 function  GetRndTmpFileName(filhdr,extname:string):string;
@@ -2068,7 +2204,8 @@ procedure String2MStream(MStreamIn:TMemoryStream; var SourceString:string);
 function  MStream2File(filname:string; StreamOut:TMemoryStream):boolean;
 function  File2MStream(filname:string;StreamOut:TMemoryStream; var hash:string):boolean;
 function  File2MString(filname:string; var OutString,hash:string):boolean;
-function  TextFile2StringList(filname:string; StrListOut:TStringList; append:boolean; var hash:string):boolean;
+function  TextFile2StringList(const filname:string; StrListOut:TStringList):boolean;
+function  TextFile2StringList(const filname:string; StrListOut:TStringList; append:boolean):boolean;
 function  StringListAdd2List(StrList1,StrList2:TStringList; append:boolean):longword; 
 function  StringListAdd2List(StrList1,StrList2:TStringList):longword; //Adds StringList2 to Stringlist1. result is size of Stringlist in bytes
 function  StringList2TextFile(filname:string; StrListOut:TStringList):boolean;
@@ -2085,6 +2222,7 @@ procedure TL_prot_Init(var tlp:TL_prot_t);
 procedure TL_prot_Stop(var tlp:TL_prot_t);
 procedure STR_prot_Init(var slp:STR_prot_t);
 procedure STR_prot_Stop(var slp:STR_prot_t);
+function  escSEP(const strng:string):string;
 function  Anz_Item(const strng,trenner,trenner2:string): longint;
 function  Select_Item(const strng,trenner,trenner2,dflt:string;itemno:longint):string; 
 function  Select_Item(const strng,trenner,trenner2:string;itemno:longint) : string;
@@ -2092,30 +2230,42 @@ function  Select_RightItems(const strng,trenner,trenner2:string;startitemno:long
 function  Select_LeftItems (const strng,trenner,trenner2:string;enditemno:longint):string; 
 function  Locate_Value(const strng,search,tr1,tr2,tr3,tr4:string; var valoutstrng:string):boolean;
 
+function  CSV_ESCvalue(const value:string):string;
 function  CSV_Count(const strng:string):longint;
 function  CSV_Count(const strng:string; const delim:char):longint;
 function  CSV_Item(const strng:string; itemno:longint):string;
 function  CSV_Item(const strng:string; const delim:char; itemno:longint):string;
 function  CSV_Item(const strng:string; const delim:char; const dflt:string; itemno:longint):string;
+procedure CSV_Explode(const strng:string; var fields:CSV_array_t);
+procedure CSV_Explode(const strng:string; const delim:char; const dflt:string; var fields:CSV_array_t);
 function  CSV_RightItems(const strng:string; const delim:char; itemno:longint):string; 
 function  CSV_LeftItems(const strng:string; const delim:char; itemno:longint):string;
 function  CSV_RemFirstSep(const strng:string; const delim:char):string;
 function  CSV_RemLastSep(const strng:string):string;
 function  CSV_RemLastSep(const strng:string; const delim:char):string;
+procedure CSVRemLastSep(var strng:string; const delim:char);
 procedure CSV_MaintList(var csvlst:string; entry:string; addit:boolean);
 function  CSV_MaintListToogleField(var csvlst:string; entry:string):boolean;
+function  CSV_FileList(const cmd:string):string;
 
+function  ReMAParrLI(var arr,adflt:Array of longint;  sects,keys,values:string):boolean;
+function  MODarrLI	(var arr:Array of longint; idx,newval:longint; sects,keys:string):boolean;
+function  MODarrLW(var arr:Array of longword; idx:longint; newval:longword; sects,keys:string):boolean;
+function  ReMAParrLW(var arr,adflt:Array of longword; sects,keys,values:string):boolean;
+function  ChgArrLW  (var arr,adflt:Array of longword; var ArrOut:Array of longint):boolean;
+
+function  ContentHasChangedTimeStamp(const hashOld,hashNew:string; timeStampOld,timeStampNew:TDateTime):TDateTime;
 function  StringPrintable(s:string):string; 
 function  CharPrintable(c:char):string;
 procedure ShowStringList(StrList:TStringList); 
 function  StringListMinMaxValue(StrList:TStringList; fieldnr:word; tr1,tr2:string; flgs:s_BIOS_Flags; var min,max:extended; var nk:longint):boolean;
-procedure StringListSnap(StrListIn,StrListOut:TStringList; srchstrng:string);
-function  SearchStringInListIdx(StrList:TStringList; srchstrng:string; occurance,StartIdx:longint):longint;
-function  SearchStringInList(StrList:TStringList; srchstrng:string):string;
-function  GiveStringListIdx(StrList:TStringList; srchstrng:string; var idx:longint; occurance:longint):boolean;
-function  GiveStringListIdx(StrList:TStringList; srchstrng:string; var idx:longint; occurance,StartIdx:longint):boolean;
-function  GiveStringListIdx(StrList:TStringList; srchstrngSTART,srchstrngEND:string; var idx:longint):boolean;
-function  GiveStringListIdx2(StrList:TStringList; srchstrng:string; var idxStart,idxEnd:longint):boolean;
+procedure StringListSnap(StrListIn,StrListOut:TStringList; const srchstrng:string);
+function  SearchStringInListIdx(StrList:TStringList; const srchstrng:string; occurance,StartIdx:longint):longint;
+function  SearchStringInList(StrList:TStringList; const srchstrng:string):string;
+function  GiveStringListIdx(StrList:TStringList; const srchstrng:string; var idx:longint; occurance:longint):boolean;
+function  GiveStringListIdx(StrList:TStringList; const srchstrng:string; var idx:longint; occurance,StartIdx:longint):boolean;
+function  GiveStringListIdx(StrList:TStringList; const srchstrngSTART,srchstrngEND:string; var idx:longint):boolean;
+function  GiveStringListIdx2(StrList:TStringList; const srchstrng:string; var idxStart,idxEnd:longint):boolean;
 procedure MemCopy(src,dst:pointer; size:longint); 
 procedure MemCopy(src,dst:pointer; size,srcofs,dstofs:longint);
 function  DeltaTime_in_ms(dt1,dt2:TDateTime):int64;
@@ -2132,6 +2282,9 @@ function  SearchValIdx(var InpArr:array of real; srchval,Epsilon:real):longint;
 function  TTY_sttySpeed(lvl:t_ErrorLevel; ttyandspeed:string):integer;  // e.g. '/dev/ttyAMA0@9600'
 function  TTY_setterm(lvl:t_ErrorLevel; ttydev,ttyopts:string):integer; // e.g. '/dev/tty1' '--cursor off --clear all' 
 function  TTY_console:string;
+procedure TimeZoneString(TimeZoneString:string);
+function  TimeZoneString:string;
+function  GetTimeZoneString:string;
 procedure SetUTCOffset; // time Offset in minutes form GMT to localTime
 function  GetDateTimeLocal:TDateTime; 
 function  GetDateTimeLocal(utc:TDateTime):TDateTime; 
@@ -2141,12 +2294,15 @@ function  GetUTCOffsetMinutes(offset_String:string):longint; // e.g. '-02:00' ->
 function  GetDateTimeUTC:TDateTime;
 function  GetDateTimeUTC(dt:TDateTime; tzofs:longint):TDateTime; 
 function  DateTime2FMT(fmt:integer; dt:TDateTime):string;
+function  DateTime00MS(dt:TDateTime):TDateTime;	// get rid of ms
+function  Rfc822DateTimeEncode(dt:TDateTime):string; // Sat, 14 Aug 2021 07:57:03 +0000
 function  GetTimeStamp(dt:TDateTime):string; 	// YEAR-MM-DD hh:mm:ss.zzz
 function  GetTZTimeStamp(dt:TDateTime):string;	// YEAR-MM-DD hh:mm:ss.zzz+XX:XX
 function  GetXMLTimeStamp(dt:TDateTime):string; // YEAR-MM-DDThh:mm:ss.zzz+XX:XX
 function  GetDateTimefromXMLTimeStamp(tstmp:string; var dt:TDateTime; var tzofs:longint):boolean;
 function  GetUTCDateTimefromXMLTimeStamp(tstmp:string; var dt:TDateTime):boolean;
 function  GetDateTimefromUTC(tstmp:string; var dt:TDateTime):boolean;
+function  GetDateTimefromTimeDateCtlUTC(tstmp:string; var dt:TDateTime):boolean;
 function  call_external_prog(typ:t_ErrorLevel; cmdline:string):integer; 
 function  call_external_prog(typ:t_ErrorLevel; cmdline:string; var receivestring:string):integer;
 function  call_external_prog(typ:t_ErrorLevel; cmdline:string; receivelist:TStringList):integer; 
@@ -2170,6 +2326,7 @@ procedure Test_TimeStrobe;
 procedure delay_nanos(Nanoseconds:int64);
 procedure delay_us   (Microseconds:longword);	
 procedure delay_msec (Milliseconds:longword); 
+function  delay_sec	 (sec:real):boolean;
 function  GetHighPrecisionCounter: Int64; 
 function  Sigmoid(A,k,x,x0:real):real;
 function  SigmoidIsA(A,k,epsilon,x0:real):real;
@@ -2221,7 +2378,6 @@ function  PID_Calc(var PID_Struct:PID_Struct_t; SetPoint,ProcessValue:PID_float_
 procedure PID_SetIntImprove(var PID_Struct:PID_Struct_t; On_:boolean);
 procedure PID_SetDifImprove(var PID_Struct:PID_Struct_t; On_:boolean);
 procedure PID_SetMinMaxLimit(var PID_Struct:PID_Struct_t; MinOutput0,MinOutput,MaxOutput:PID_float_t);
-procedure PID_SetSampleTimeAdjust(var PID_Struct:PID_Struct_t; On_:boolean); 
 procedure PID_SetSelfTuning(var PID_Struct:PID_Struct_t; On_:boolean); 
 
 function  PID_ExecTwiddle(var PID_Twiddle:PID_Twiddle_t; var PID_K:PID_array_t; errorUpdate:PID_float_t; Stoersprung:boolean):boolean;
@@ -2262,6 +2418,8 @@ procedure SIG_EndLoop(nr:integer; ende:boolean);
 function  SIG_EndLoop(nr:integer):boolean;
 function  SIG_ESCterm(nr:integer):boolean;
 
+procedure USR_BreakSetFunc(USRbrkFunc:TFunctionOneArgCall); 
+
 implementation  
 
 const max_EndLoop_c=5;
@@ -2275,7 +2433,7 @@ var
     _LOG_LevelColor,restrict2gpio,_OnExitShowRuntime:boolean;
     GPIO_map_idx,I2C_busnum,connector_pin_count,status_led_GPIO:byte;
     cpu_snr,cpu_hw,cpu_proc,cpu_rev,cpu_mips,cpu_feat,cpu_fmin,cpu_fcur,
-    cpu_machine,cpu_fmax,os_rev,cpu_fw,uname,sudo,whoami:string;
+    cpu_machine,cpu_fmax,os_rev,lsb_rel,cpu_fw,uname,sudo,whoami:string;
     cpu_rev_num,cpu_freq,pll_freq:real;
     RPI_ShutDownGPIO,cpu_cores: longint;
 	eeprom_devadr:word; 
@@ -2283,6 +2441,7 @@ var
 	oa,na:PSigActionRec;	
 	RPIHDR_Desc:array[1..max_pins_c] of string[mdl];
 	_EndLoop:array[0..max_EndLoop_c] of boolean;
+	CallUSRbrkFunc:TFunctionOneArgCall;
 
 //function  Aligned(p:pointer; alig:byte):boolean; begin Aligned:=((PtrUint(p) mod alig)=0); end; 
 function  Aligned(p:pointer; alig:byte):boolean; begin Aligned:=(p=Align(p,alig)); end;
@@ -2290,6 +2449,8 @@ procedure AlignShow;
 begin 
   writeln('addr 0x'+HexStr(@msg),' (',PtrUInt(@msg),') aligned ',Aligned(@msg,32),' (',(PtrUint(@msg) mod 32),')'); 
 end;
+
+procedure USR_BreakSetFunc(USRbrkFunc:TFunctionOneArgCall); begin CallUSRbrkFunc:=USRbrkFunc; end;
 
 procedure SIG_EndLoop(nr:integer; ende:boolean); begin _EndLoop[nr]:=ende; end;
 function  SIG_EndLoop(nr:integer):boolean;		 begin SIG_EndLoop:=_EndLoop[nr]; end;
@@ -2381,9 +2542,47 @@ begin
   MOD_Euclid:=m;
 end;
 
+function  USRBreakFunc(mode:integer):integer; 
+// dummy, assign your own USR_Break function with USR_BreakSetFunc.
+// this function will be called by delay_sec
+// e.g. USR_BreakSetFunc(@USR_Break);
+begin 
+  USRBreakFunc:=0; 
+end;
+
+procedure delay_msec(Milliseconds:longword);  
+begin 
+  if (Milliseconds>0) then sysutils.sleep(Milliseconds); 
+end;
+
+function  delay_sec(sec:real):boolean;		// in sec
+const _mio_c=1000000; _resol_msec_c=100; 	// resolution 100msec
+var _cnt,_cntmax,_us:qword; _flg:boolean;
+begin
+  _flg:=true;
+  if (sec>0) then
+  begin
+	_us:=round(sec*_mio_c);
+	if (sec>0.5) then // 500msec
+	begin
+	  _cnt:=	0; 
+	  _cntmax:=	trunc(sec * 1000 / _resol_msec_c); 
+	  _us:=	_us mod _mio_c;
+	  while (not TerminateProg) and (_flg and (_cnt<_cntmax)) do
+	  begin
+		delay_msec(_resol_msec_c);
+		if (CallUSRbrkFunc<>nil) then if (CallUSRbrkFunc(0)>0) then _flg:=false; // break 
+		inc(_cnt);
+		LNX_WDOG(WDOG_Retrig);
+	  end; // while
+	end;
+	if (_flg and (_us>0)) then delay_us(_us);
+  end;
+  delay_sec:=_flg;
+end;
+
 function  RoundUpPow2(nr:real):longword; begin RoundUpPow2:=round(intpower(2,round(log2(nr)))); end;
 function  DivRoundUp(n,d:real):longword; begin DivRoundUp:=round((n+d-1)/d); end;	
-procedure delay_msec (Milliseconds:longword);  begin if Milliseconds>0 then sysutils.sleep(Milliseconds); end;
 function  CHK8(s:string):byte; var i,chk:byte; begin chk:=$00; for i := 1 to Length(s) do chk:=chk  +  ord(s[i]); CHK8:=chk; end;
 function  CRC8(s:string):byte; var i,crc:byte; begin crc:=$00; for i := 1 to Length(s) do crc:=crc xor ord(s[i]); CRC8:=crc; end;
 function  CRC8_ok(s:string):boolean; var ok:boolean; begin ok:=false; if s<>'' then ok:=(ord(s[Length(s)])=CRC8(copy(s,1,Length(s)-1))); CRC8_ok:=ok; end;
@@ -2456,7 +2655,7 @@ procedure SetTimeOut_ns(ptspec:Ptimespec; Retrig_ns:int64);
 // e.g usage: SetTimeOut_ns(@timespec,123);
 var tv_now:timespec; 
 begin 
-  clock_gettime(CLOCK_REALTIME,@tv_now);
+  clock_gettime(CLOCK_REALTIME,@tv_now); // call OS
   SetTimeOut_ns(@tv_now,ptspec,Retrig_ns); 
 end;
 
@@ -2468,16 +2667,17 @@ begin SetTimeOut_ns(ptspec_start,ptspec_end,Retrig_us*1000); end;
 
 procedure SetTimeOut_us(ptspec:Ptimespec; Retrig_us:int64);
 // e.g usage: SetTimeOut_us(@timespec,123);
+// pls. consider to use the more efficient RPI_SetTimeOut_us
 var tv_now:timespec; 
 begin 
-  clock_gettime(CLOCK_REALTIME,@tv_now);
+  clock_gettime(CLOCK_REALTIME,@tv_now); // call OS
   SetTimeOut_ns(@tv_now,ptspec,Retrig_us*1000); 
 end;
 
 function  TimeElapsed_ns(ptspec:Ptimespec; Retrig_ns:int64):boolean;
 var ok:boolean; tv_now:timespec;
 begin 
-  clock_gettime(CLOCK_REALTIME,@tv_now);
+  clock_gettime(CLOCK_REALTIME,@tv_now); // call OS
 
   if (ptspec^.tv_sec = tv_now.tv_sec) 
 	then ok:=(ptspec^.tv_nsec <= tv_now.tv_nsec)
@@ -2488,6 +2688,7 @@ begin
 end;
 
 function  TimeElapsed_us(ptspec:Ptimespec; Retrig_us:int64):boolean;
+// pls. consider to use the more efficient RPI_TimeElapsed_us
 begin TimeElapsed_us:=TimeElapsed_ns(ptspec,Retrig_us*1000); end;
 
 function  TimeElapsed_us(ptspec:Ptimespec):boolean;
@@ -2497,7 +2698,7 @@ procedure Test_TimeOut;
 var tv_now1,tv_now2:timespec; timo:boolean; n:longint;
 begin
   writeln('resolution: ',rpi_timespecresolution.tv_nsec);
-  clock_gettime(CLOCK_REALTIME,@tv_now1);
+  clock_gettime(CLOCK_REALTIME,@tv_now1); // call OS
   writeln('tv_now1: ',TimeSpec2Str(@tv_now1));
   writeln;
   with tv_now1 do begin tv_sec:=0; tv_nsec:=0; end;
@@ -2514,7 +2715,7 @@ begin
   	timo:=TimeElapsed_ns(@tv_now2,50000000);
 	writeln('tv_now2: ',TimeSpec2Str(@tv_now2),' timo:',timo);
 	if timo then inc(n);
-	sleep(5);
+	delay_msec(5);
   until (n>=5);
 end;
 
@@ -2524,11 +2725,11 @@ begin
   begin
 	case modus of
 	  STB_Reset:	begin 
-	  				  SetTimeOut_us(@strobeINTtimer,0);
-					  SetTimeOut_us(@strobeONtimer, 0);
+	  				  strobeINTtimer:=RPI_GetPrecisionCounter_us;
+					  strobeONtimer:= RPI_GetPrecisionCounter_us;
 					end;
-	  STB_IntvalSet:  SetTimeOut_us(@strobeINTtimer,0);
-	  STB_DtyCycl:	  SetTimeOut_us(@strobeONtimer, 0);
+	  STB_IntvalSet:  strobeINTtimer:=RPI_GetPrecisionCounter_us;
+	  STB_DtyCycl:	  strobeONtimer:= RPI_GetPrecisionCounter_us;
 	end; // case
   end; // with
 end;
@@ -2633,9 +2834,9 @@ begin
   with StrobeStruct do
   begin
 	case modus of
-	  STB_DtyCycl:	if TimeElapsed_us(@strobeONtimer)  then flg:=STB_Off else flg:=STB_On;
+	  STB_DtyCycl:	if RPI_TimeElapsed_us(strobeONtimer)  then flg:=STB_Off else flg:=STB_On;
 	  STB_OneShot,
-	  STB_Interval:	if TimeElapsed_us(@strobeINTtimer) then flg:=STB_Off else flg:=STB_On;
+	  STB_Interval:	if RPI_TimeElapsed_us(strobeINTtimer) then flg:=STB_Off else flg:=STB_On;
 	  STB_GetState:	flg:=state;
 	  else 			flg:=STB_unk;
 	end; // case 
@@ -2648,22 +2849,22 @@ var flg:boolean;
 begin
   with StrobeStruct do
   begin
-	if TimeElapsed_us(@strobeINTtimer) then
+	if RPI_TimeElapsed_us(strobeINTtimer) then
 	begin
 	  if (strobeINT_us>0) then 
 	  begin
-		SetTimeOut_us(@strobeINTtimer,strobeINT_us); 
+		RPI_SetTimeOut_us(strobeINTtimer,strobeINT_us); 
 	  end;
 		
 	  if (strobeON_us>0) then 
 	  begin
 //writeln('TimeStrobeX: mode:'+GetEnumName(TypeInfo(t_Strobe_flag),Ord(mode))+' state:'+GetEnumName(TypeInfo(t_Strobe_flag),Ord(state)));
-		SetTimeOut_us(@strobeONtimer,strobeON_us);			// pwm ON time
+		RPI_SetTimeOut_us(strobeONtimer,strobeON_us);			// pwm ON time
 	  end;
 	end;	  
 
 	flg:=false;
-	if TimeElapsed_us(@strobeONtimer) then 
+	if RPI_TimeElapsed_us(strobeONtimer) then 
 	begin
 	  if (state=STB_OneShot) then state:=STB_unk;
 	end 
@@ -2733,45 +2934,131 @@ end;
   procedure delay_nanos(Nanoseconds:int64);
   var res:longint; sleeper,remain:timespec;
   begin
-    sleeper.tv_sec:=  	Nanoseconds div nano_c;
-    sleeper.tv_nsec:=	Nanoseconds mod nano_c;	// 0-999999999
-    if (rpi_timespecresolution.tv_nsec<>1) then 
-	  sleeper.tv_nsec:= sleeper.tv_nsec div rpi_timespecresolution.tv_nsec;
-    repeat
-	  res:=fpnanosleep(@sleeper,@remain);
-	  if (res<>0) then
-	  begin
-		sleeper:=remain;	// -1: nanosleep was interrupted, remain holds left ns
-//		LOG_Writeln(LOG_WARNING,'delay_nanos['+Num2Str(res,0)+']: '+TimeSpec2Str(@remain));
-	  end;
-    until (res>=0);
+	try
+	  sleeper.tv_sec:=  Nanoseconds div nano_c;
+      sleeper.tv_nsec:=	Nanoseconds mod nano_c;	// 0-999999999
+      if (rpi_timespecresolution.tv_nsec<>1) then 
+	  	sleeper.tv_nsec:= sleeper.tv_nsec div rpi_timespecresolution.tv_nsec;
+      repeat
+	  	res:=fpnanosleep(@sleeper,@remain);
+	  	if (res<>0) then
+	  	begin
+		  sleeper:=remain;	// -1: nanosleep was interrupted, remain holds left ns
+//		  LOG_Writeln(LOG_WARNING,'delay_nanos['+Num2Str(res,0)+']: '+TimeSpec2Str(@remain));
+	  	end;
+      until (res>=0);
+    except
+	  LOG_Writeln(LOG_ERROR,'delay_nanos: '+Num2Str(Nanoseconds,0));
+    end;
   end; 
 {$ENDIF}
+
+function  RPI_MicroSecondsBetween(qTimer1,qTimer2:qword):int64;
+var i64:int64;
+begin 
+  if (qTimer1>=qTimer2) 
+	then i64:= (qTimer1-qTimer2)
+	else i64:=-(qTimer2-qTimer1);
+  RPI_MicroSecondsBetween:=i64; 
+end;
  
 {$IFDEF UNIX}
-procedure delay_us(Microseconds:longword); 
-const tightloop_us=125; // tested on rpi3B&4
-var qTimer,qEndTimer:qword; //qt:qword; 
+function  RPI_GetPrecisionCounter_us:qword;
+var qT:qword; //qT:RPIreg64_t;
 begin 
-  if (Microseconds>0) then
-  begin 
-//  qt:=0;
-    Move(mmap_arr^[STIMCLO],qEndTimer,Sizeof(qEndTimer));
-    qEndTimer:=qEndTimer+Microseconds;
+  try
+//  qT.lwHI:=mmap_arr^[STIMCHI]; qT.lwLO:=mmap_arr^[STIMCLO];
+    Move(mmap_arr^[STIMCLO],qT,Sizeof(qT)); // 1.5x faster
+  except
+    qT:=0;
+    LOG_Writeln(LOG_ERROR,'RPI_GetPrecisionCounter_us: check usage of RPI_HW_Start');
+  end;
+  RPI_GetPrecisionCounter_us:=qT;
+end;
+
+function  RPI_SetTimeOut_us(Retrig_us:longword):qword;
+begin
+  RPI_SetTimeOut_us:= RPI_GetPrecisionCounter_us + Retrig_us;
+end;
+
+procedure RPI_SetTimeOut_us(var qTimer:qword; Retrig_us:longword);
+// e.g usage: RPI_SetTimeOut_us(qTimer,123);
+begin qTimer:=RPI_SetTimeOut_us(Retrig_us); end;
+
+function  RPI_TimeElapsed_us(var qTimer:qword; Retrig_us:longword):boolean;
+// e.g usage: if RPI_TimeElapsed_us(qTimer,123) then xxx;
+var ok:boolean; qT:qword;
+begin 
+  try 
+    qT:=RPI_GetPrecisionCounter_us;
+	ok:=(qT >= qTimer);	
+  	if (ok and (Retrig_us>0)) then qTimer:= qT + Retrig_us;
+  except
+    LOG_Writeln(LOG_ERROR,'RPI_TimeElapsed_us: '+Num2Str(Retrig_us,0)+' check usage of RPI_HW_Start');
+	ok:=true; // prevent endless loop, in case of error
+  end;
+  RPI_TimeElapsed_us:=ok;
+end;
+
+function  RPI_TimeElapsed_us(var qTimer:qword):boolean;
+begin RPI_TimeElapsed_us:=RPI_TimeElapsed_us(qTimer,0); end;
+
+procedure RPI_TMR_Init(var RPI_TMR_struct:RPI_TMR_struct_t);
+begin
+  with RPI_TMR_struct do
+  begin
+	tim_start:=0;					tim_ende:=tim_start;
+	tim_us:=0;						cnt:=0;
+	tim_us_min:=high(int64);		tim_us_max:=low(int64);
+  end; // end;
+end;
+
+procedure RPI_TMR_GetStartTime(var RPI_TMR_struct:RPI_TMR_struct_t);
+begin
+  try
+	RPI_TMR_struct.tim_start:=RPI_GetPrecisionCounter_us;
+  except
+	LOG_Writeln(LOG_ERROR,'RPI_TMR_GetStartTime: check usage of RPI_HW_Start');
+  end;
+end;
+
+procedure RPI_TMR_GetEndTime(var RPI_TMR_struct:RPI_TMR_struct_t);
+begin
+  try
+	with RPI_TMR_struct do
+  	begin
+	  tim_ende:=RPI_GetPrecisionCounter_us; 
+	  tim_us:=RPI_MicroSecondsBetween(tim_ende,tim_start);
+	  MinMax(tim_us,tim_us_min,tim_us_max);
+	  inc(cnt);
+  	end; // with
+  except
+	LOG_Writeln(LOG_ERROR,'RPI_TMR_GetEndTime: check usage of RPI_HW_Start');
+  end;
+end;
+
+procedure delay_us(Microseconds:longword);
+var qEndTimer:qword; // qTimer,qt:qword; i64:int64;
+begin 
+  try
+	if (Microseconds>0) then
+  	begin
+  	  RPI_SetTimeOut_us(qEndTimer,Microseconds);
 	
-	if (Microseconds>tightloop_us) then
-  	begin // low cpu usage
-  	   delay_nanos((Microseconds-tightloop_us)*1000);
-//     Move(mmap_arr^[STIMCLO],qt,Sizeof(qt));
-  	end; 
-    
-    repeat // rest in tight loop // high cpu usage!
-      Move(mmap_arr^[STIMCLO],qTimer,Sizeof(qTimer)); 
-    until (qTimer>=(qEndTimer)); 
-    
-(*  if (Microseconds>tightloop_us) then
-	  writeln('delay_us: ',Microseconds,'us delta:',(qTimer-qEndTimer),' tightloop entry:',(qEndTimer-qt)); *)
-  end;  
+	  if (Microseconds>RPI_TightLoop_us_c)	// delay with low CPU usage
+		then delay_nanos((Microseconds-RPI_TightLoop_us_c)*1000); 
+		
+//	  Move(mmap_arr^[STIMCLO],qt,Sizeof(qt)); // !!
+        
+      while (RPI_GetPrecisionCounter_us < qEndTimer) do; // tight loop with high CPU usage
+      
+(*    Move(mmap_arr^[STIMCLO],qTimer,Sizeof(qTimer));
+	  if (qEndTimer<qt) then i64:=-(qt-qEndTimer) else i64:=qEndTimer-qt; 
+	  writeln('delay_us: ',Microseconds:4,'us delta:',int64(qTimer-qEndTimer):4,' tightloop entry:',i64:4,' ',int64(Microseconds>RPI_TightLoop_us_c)); *)
+  	end;
+  except
+	LOG_Writeln(LOG_ERROR,'delay_us: '+Num2Str(Microseconds,0)+' check usage of RPI_HW_Start');
+  end;
 end;
 
 function  NanoSecondsBetween(ts1,ts2:timespec):int64;
@@ -2795,23 +3082,75 @@ end;
 function  MilliSecsBetween(td:TDateTime):int64;
 begin MilliSecsBetween:=MilliSecondsBetween(now,td); end;
 
-procedure TimeElapsed_us_Test;
-const usval_c=1000000;
-var tv_start,tv_end,tvh:timespec;
+procedure TimeElapsed_us_Test2(retrig_us,loops:longword);
+var tv,tv_start,tv_end:timespec; us:qword; n:longint;
 begin
-  writeln('rpi_timespecresolution: ',rpi_timespecresolution.tv_nsec,'ns');
-
+  n:=0;
   clock_gettime(CLOCK_REALTIME,@tv_start); 
-  delay_us(usval_c); 
+  while (n<loops) do
+  begin
+    if TimeElapsed_us(@tv,retrig_us) then inc(n);
+  end;
   clock_gettime(CLOCK_REALTIME,@tv_end);
-  writeln('TimeElapsed_us_Test(',usval_c,'us):      ',NanoSecondsBetween(tv_end,tv_start),'ns / ',MicroSecondsBetween(tv_end,tv_start),'us');
+  us:=MicroSecondsBetween(tv_end,tv_start);
+  
+  clock_gettime(CLOCK_REALTIME,@tv_start); 
+  tv_start:=tv;
+  for n:=1 to loops do TimeElapsed_us(@tv,retrig_us); // just test code efficency
+  clock_gettime(CLOCK_REALTIME,@tv_end); 
+  
+  writeln('TimeElapsed_us Test2:     ',us:9,'us (',100-(loops*retrig_us/us*100):5:3,'%) perf: ',(MicroSecondsBetween(tv_end,tv_start)/loops):0:3,'us/loop');
+end;
+
+procedure TimeElapsed_us_Test3(retrig_us,loops:longword);
+var qTstart,qTend,qT:qword; us:qword; n:longint;
+begin
+  n:=0; 
+  qT:=RPI_GetPrecisionCounter_us; 		// save starttime
+  qTstart:=qT;
+  while (n<loops) do
+  begin
+    if RPI_TimeElapsed_us(qT,retrig_us) then inc(n);
+  end;
+  qTend:=RPI_GetPrecisionCounter_us; 	// save endtime
+  us:=RPI_MicroSecondsBetween(qTend,qTstart);
+  
+  qT:=RPI_GetPrecisionCounter_us; 		// save starttime
+  qTstart:=qT;
+  for n:=1 to loops do RPI_TimeElapsed_us(qT,retrig_us); // just test code efficency
+  qTend:=RPI_GetPrecisionCounter_us; 	// save endtime
+  
+  writeln('RPI_TimeElapsed_us Test3: ',us:9,'us (',100-(loops*retrig_us/us*100):5:3,'%) perf: ',(RPI_MicroSecondsBetween(qTend,qTstart)/loops):0:3,'us/loop much more accurate and faster for us cycle times ');
+end;
+
+procedure TimeElapsed_us_Test; // piOS
+const usval_c=10000; retrig_us=10; loops_c=1000000;
+var tv_start,tv_end,tvh:timespec; qTstart,qTend,qT:qword;
+begin
+  writeln('Test(loops: ',loops_c,' ',(usval_c/1000):0:3,'ms ',usval_c:6,'us ',retrig_us,'us) rpi_timespecresolution: ',rpi_timespecresolution.tv_nsec,'ns');
+
+  qTstart:=RPI_GetPrecisionCounter_us; 		// save starttime
+  delay_us(usval_c); 
+  qTend:=RPI_GetPrecisionCounter_us; 		// save endtime
+  writeln('delay_us Test:            ',RPI_MicroSecondsBetween(qTend,qTstart):9,'us');
+
+  clock_gettime(CLOCK_REALTIME,@tv_start); 	// save starttime
+  SetTimeOut_us(@tvh,usval_c);
+  while not TimeElapsed_us(@tvh) do ;
+  clock_gettime(CLOCK_REALTIME,@tv_end); 	// save endtime
+  writeln('TimeElapsed_us Test:      ',MicroSecondsBetween(tv_end,tv_start):9,'us');
+
+  qTstart:=RPI_GetPrecisionCounter_us; 		// save starttime
+  qT:=RPI_SetTimeOut_us(usval_c);
+  while not RPI_TimeElapsed_us(qT) do ;
+  qTend:=RPI_GetPrecisionCounter_us; 		// save endtime
+  writeln('RPI_TimeElapsed_us Test:  ',RPI_MicroSecondsBetween(qTend,qTstart):9,'us');
 
   writeln;
-  SetTimeOut_us(@tv_start,@tvh,usval_c);
-  while not TimeElapsed_us(@tvh) do ;
-  clock_gettime(CLOCK_REALTIME,@tv_end); 			// real time
-  writeln('Test TimeElapsed(',usval_c,'us):         ',NanoSecondsBetween(tv_end,tv_start),'ns / ',MicroSecondsBetween(tv_end,tv_start),'us');
+  TimeElapsed_us_Test2(retrig_us,loops_c);
+  TimeElapsed_us_Test3(retrig_us,loops_c);
 end;
+
 {$ELSE}
 procedure delay_us(Microseconds:int64);
 // https://github.com/fundamentalslib/fundamentals5/blob/master/Source/Utils/flcTimers.pas
@@ -2823,7 +3162,8 @@ begin
 	if Microseconds>900 then
 	begin
 	  n:= longint((Microseconds-900) div 1000); // number of ms with at least 900us in tight loop
-      if n>0 then begin sysutils.sleep(n); end;	
+//    if (n>0) then begin sysutils.sleep(n); end;	
+      if (n>0) then begin delay_msec(n); end;
 	end;
     f:=int64(Microseconds*HighPrecisionMicrosecondFactor);
     repeat j:=GetHighPrecisionCounter; until (int64(j-i)>=f);
@@ -2833,7 +3173,7 @@ end;
 function  MicroSecondsBetween(us1,us2:int64):int64;
 begin MicroSecondsBetween:=int64((us1-us2)*HighPrecisionMicrosecondFactor); end;
 
-procedure TimeElapsed_us_Test;
+procedure TimeElapsed_us_Test; // windows
 const retrig_us=1000;
 var i,j,n:int64; td:TDateTime;
 begin
@@ -2858,16 +3198,58 @@ begin
   end;
 end;
 
-function  CalcUTCOffsetString(offset_Minutes:longint; withcolon:boolean):string; // e.g. '+02:00'
-var sh,sh1:string; mins,hours:longint;
+procedure TimeZoneString(TimeZoneString:string); begin _TZString:=TimeZoneString; end;
+function  TimeZoneString:string; begin TimeZoneString:=_TZString end;
+
+function  GetTimeZoneString:string;
+(* timedatectl --no-ask-password status
+               Local time: Fri 2021-08-13 12:54:16 UTC
+           Universal time: Fri 2021-08-13 12:54:16 UTC
+                 RTC time: Fri 2021-08-13 12:54:18
+                Time zone: Etc/UTC (UTC, +0000)
+System clock synchronized: yes
+              NTP service: active
+          RTC in local TZ: no
+*)
+var _tl:TStringList; n:longint; sh1,sh2:string;
 begin
-  if offset_Minutes<0 then sh:='-' else sh:='+'; 
-  mins:=abs(offset_Minutes) mod 60; hours:=abs(offset_Minutes) div 60;
-  sh1:='00'+Num2Str(hours,0); 
-  sh:=sh+copy(sh1,Length(sh1)-1,2); 
-  if withcolon then sh:=sh+':';
-  sh1:='00'+Num2Str(mins,0); sh:=sh+copy(sh1,Length(sh1)-1,2);
-//if sh='+00:00' then sh:='Z';
+  _tl:=TStringList.create;
+  call_external_prog(LOG_ERROR,'timedatectl --no-ask-password status',_tl);
+  if (_tl.count>0) then
+  begin
+    n:=1;
+//	showstringlist(_tl);
+  	while (n<=_tl.count) do
+  	begin
+	  if (_tl[n-1]<>'') then
+	  begin
+	    sh1:=CSV_Item(			_tl[n-1],':',1);
+	    sh2:=CSV_RightItems(	_tl[n-1],':',2);
+	    if (Pos('TIME ZONE',Upper(sh1))>0) then
+	    begin
+	      if (Length(sh2)>0) then // Etc/UTC (UTC, +0000)
+	    	TimeZoneString(Trimme(Select_Item(sh2,' (','',1),3)); // Etc/UTC
+//		  writeln('GetTimeZoneString:',TimeZoneString,':',CR);
+	      n:= _tl.count;
+	    end;
+	  end;
+	  inc(n);
+	end; // while
+  end;
+  _tl.free;
+  GetTimeZoneString:=TimeZoneString;
+end;
+
+function  CalcUTCOffsetString(offset_Minutes:longint; withcolon:boolean):string; // e.g. '+02:00'
+var sh:string[6]='-0000';
+begin
+  if (offset_Minutes<>0) then
+  begin  
+	if (offset_Minutes<=0) then sh:='-' else sh:='+';
+  	if withcolon 
+	  then sh:=sh+LeadingZero(abs(offset_Minutes) div 60)+':'+LeadingZero(abs(offset_Minutes) mod 60)
+	  else sh:=sh+LeadingZero(abs(offset_Minutes) div 60)+	  LeadingZero(abs(offset_Minutes) mod 60);
+  end else if withcolon then sh:='-00:00'; //	sh:='Z';
   CalcUTCOffsetString:=sh;
 end;
 
@@ -2894,27 +3276,32 @@ function  GetUTCOffsetString:string; // e.g. '+02:00'
 begin GetUTCOffsetString:=_TZOffsetString; end;
 
 function  GetUTCOffsetMinutes(offset_String:string):longint; // e.g. -02:00 -> -120
-var mins,hours:longint; 
+var mins,hours,li:longint; 
 begin
-  mins:=0; hours:=0;
+  li:=0;
   if (Upper(offset_String)<>'Z') and (offset_String<>'') then
   begin
     if (Pos(':',offset_String)<>0) then
     begin // e.g. -02:00
 	  if not Str2Num(CSV_Item(offset_String,':',2),mins)  then mins:= 0;
 	  if not Str2Num(CSV_Item(offset_String,':',1),hours) then hours:=0;
+	  li:=hours*60+mins;
 	end
 	else
 	begin // -0200
 	  case Length(offset_String) of
-		5:	begin
+		5:	begin // -0200
 			  if not Str2Num(copy(offset_String,4,2),mins)  then mins:= 0;
 			  if not Str2Num(copy(offset_String,1,3),hours) then hours:=0;
+			  li:=hours*60+mins;
+			end;
+	   2..4:begin // -120
+			  if not Str2Num(offset_String,li) then li:=0;
 			end;
 	  end; // case
 	end;
   end;
-  GetUTCOffsetMinutes:=hours*60+mins;
+  GetUTCOffsetMinutes:=li;
 end;
 
 function  GetDateTimeUTC(dt:TDateTime; tzofs:longint):TDateTime; begin GetDateTimeUTC:=IncMinute(dt,-tzofs); end;
@@ -2935,6 +3322,27 @@ begin
   GetDateTimefromUTC:=_ok;
 end;
 
+function  GetDateTimefromTimeDateCtlUTC(tstmp:string; var dt:TDateTime):boolean;
+// IN: 'Thu 2021-08-26 07:38:17 UTC'
+var _ok:boolean;
+begin
+  try
+	dt:=ScanDateTime('ddd yyyy-mm-dd hh:nn:ss',tstmp);
+	_ok:=true;
+  except
+    _ok:=false;
+  end;
+  GetDateTimefromTimeDateCtlUTC:=_ok;
+end;
+
+function  DateTime00MS(dt:TDateTime):TDateTime;
+// get rid of ms
+var YY,MM,DD,hh,mi,sec,ms:word; 
+begin
+  DecodeDateTime(dt,YY,MM,DD,hh,mi,sec,ms);
+  DateTime00MS:=EncodeDateTime(YY,MM,DD,hh,mi,sec,00);
+end;
+
 function  DateTime2FMT(fmt:integer; dt:TDateTime):string;
 var _dt1,_dt2:TDateTime; YY,MM,DD:word; sh:string;
 begin
@@ -2953,9 +3361,19 @@ begin
 		  end;
 	   6: sh:=DateTime2FMT(4,dt)+_TZOffsetString;
 	   7: sh:=DateTime2FMT(2,dt)+_TZOffsetString;
+	   8: sh:=FormatDateTime('YYYYMMDDhhmmss',dt);
+	   9: sh:=FormatDateTime('YYYY-MM-DD"T"hh:mm:ss',dt);
 	else  sh:=DateTime2FMT(1,dt);
   end; // case
   DateTime2FMT:=sh;
+end;
+
+function  Rfc822DateTimeEncode(dt:TDateTime):string; // Sat, 14 Aug 2021 07:57:03 +0000
+// https://www.freepascal.org/docs-html/rtl/sysutils/formatchars.html
+begin
+  Rfc822DateTimeEncode:=
+	FormatDateTime('ddd, dd mmm YYYY hh:mm:ss',
+	GetDateTimeUTC(dt, _TZLocal))+' -0000';
 end;
 
 function  GetXMLTimeStamp(dt:TDateTime):string; // YEAR-MM-DDThh:mm:ss.zzz+XX:XX
@@ -2970,6 +3388,7 @@ begin GetTZTimeStamp:=DateTime2FMT(4,dt); end;
 function  GetDateTimefromXMLTimeStamp(tstmp:string; var dt:TDateTime; var tzofs:longint):boolean;
 // IN: 2018-06-26T16:01:12.070+02:00
 //     2019-04-16T20:09:25.745+02:00
+// 	   2021-08-26T09:24:50.242Z,-120
 var _ok:boolean; p:longint; dats,tims:string; 
 begin    
   p:=Pos('T',tstmp);
@@ -2978,13 +3397,17 @@ begin
 	else begin tims:=tstmp; dats:=DateTime2FMT(3,now); end;
   
   				p:=Pos('Z',tims);	// 16:01:12.070Z
+  if (p>0) then inc(p);				// get rid of Z
   if (p=0) then p:=Pos('+',tims);	// 16:01:12.070+02:00
   if (p=0) then p:=Pos('-',tims);	// 16:01:12.070-02:00
   if (p>0) then
   begin
     tzofs:= GetUTCOffsetMinutes(copy(tims,p,Length(tims)));
+//writeln('tims:',tims,':tzofs:',tzofs,':p=',p,':lgt=',Length(tims));
+//tims:09:24:50.242Z-120:tzofs:0:p=14:lgt=17
     tims:=	copy(tims,1,p-1);
   end else tzofs:=0;
+//GetDateTimefromXMLTimeStamp:2021-08-26|09:24:50.242|20|2021-08-26T09:24:50.242Z-120
 //writeln;writeln('GetDateTimefromXMLTimeStamp:',dats,'|',tims,'|',tzofs,'|',tstmp);
   try
 	_ok:=	Str2DateTime(dats+' '+tims,'YYYY-MM-DD hh:mm:ss.zzz',dt);
@@ -3115,7 +3538,7 @@ begin
   if Pos('ORA',		slvl)>0 then lvl:=LOG_ORANGE; 
   if Pos('YLW',		slvl)>0 then lvl:=LOG_YELLOW; 
   if Pos('GRN',		slvl)>0 then lvl:=LOG_GREEN;
-  if Pos('LGR',		slvl)>0 then lvl:=LOG_LHTGRN; 
+  if Pos('LGR',		slvl)>0 then lvl:=LOG_LGREEN; 
   if Pos('BLU',		slvl)>0 then lvl:=LOG_BLUE;
   if Pos('BLK',		slvl)>0 then lvl:=LOG_BLACK;
   if Pos('WHT',		slvl)>0 then lvl:=LOG_WHITE; 
@@ -3134,14 +3557,14 @@ var  s:string;
 begin
   s:='UKN'; 
   case lvl of
-(*  LOG_WHITE,LOG_BLACK,LOG_BLUE,LOG_LHTGRN,
+(*  LOG_WHITE,LOG_BLACK,LOG_BLUE,LOG_LGREEN,
   	LOG_GREEN,LOG_YELLOW,LOG_ORANGE,
   	LOG_RED:	s:='COL'; *)
     LOG_RED:	s:='RED';
   	LOG_ORANGE:	s:='ORA';
   	LOG_YELLOW:	s:='YLW';
   	LOG_GREEN:	s:='GRN';
-  	LOG_LHTGRN:	s:='LGR';
+  	LOG_LGREEN:	s:='LGR';
   	LOG_BLUE:	s:='BLU';
   	LOG_BLACK:	s:='BLK';
   	LOG_WHITE:	s:='WHT';
@@ -3246,13 +3669,23 @@ begin
   if _LOG_LevelColor then 
   begin
 	case typ of
+		LOG_URGENT:		TextColor(LightRed);
         LOG_ERROR:		TextColor(red);
       	LOG_WARNING:	TextColor(yellow);
       	LOG_NOTICE:		TextColor(green);
       	LOG_MAGENTA:	TextColor(magenta);
       	LOG_WHITE:		TextColor(white);
       	LOG_BLACK:		TextColor(black);
-      	LOG_BLUE:		TextColor(blue);      	
+      	LOG_BLUE:		TextColor(blue); 
+      	LOG_CYAN:		TextColor(cyan); 
+      	LOG_BROWN:		TextColor(brown);
+      	LOG_LGRAY:		TextColor(LightGray);
+      	LOG_DGRAY:		TextColor(DarkGray); 
+      	LOG_LBLUE:		TextColor(LightBlue);  
+      	LOG_LGREEN:		TextColor(LightGreen);
+      	LOG_LCYAN:		TextColor(LightCyan);
+      	LOG_LRED:		TextColor(LightRed);
+      	LOG_LMAGENTA:	TextColor(LightMagenta);       	
     end; // case
   end;
 end;
@@ -3288,16 +3721,19 @@ begin
   end; 
 end;
 
-procedure LOG_Writeln(typ:T_ErrorLevel; msg:string); 
+procedure LOG_Writeln(typ,col:T_ErrorLevel; msg:string); 
 begin
   if (typ>=_LOG_Level) then 
   begin 
-	SetTextCol(typ); 
+	SetTextCol(col); 
 //	write(StdErr,#$0d+Get_LogString('','','',typ)+msg+#$0d+#$0a); 
 	writeln(StdErr,Get_LogString('','','',typ)+msg+#$0d); 
 	UnSetTextCol; 
   end; // else write(StdErr,#$0d);
 end;
+
+procedure LOG_Writeln(typ:T_ErrorLevel; msg:string); 
+begin LOG_Writeln(typ,typ,msg); end;
 
 procedure LOGSAY_tst;
 begin
@@ -3314,28 +3750,31 @@ end;
 
 function  Log_Shorting:boolean; begin Log_Shorting:=false; end; 
 
-procedure LOG_ShowStringList(typ:T_ErrorLevel; ts:TStringList); 
+procedure LOG_ShowStringList(typ1,typ2:T_ErrorLevel; ts:TStringList); 
 var i:longint; 
 begin 
-  if (typ>=_LOG_Level) then 
+  if (typ1>=_LOG_Level) then 
   begin 
     if LOG_Shorting then 
 	begin
 	  if ts.Count>=35 then
 	  begin
-	    for i := 1          to 13       do Log_Writeln(typ,ts[i-1]);
-		                                   Log_Writeln(typ,'<! Output shortend, total lines: '+Num2Str(ts.count,0)+'>');
-		for i := ts.Count-6 to ts.Count do Log_Writeln(typ,ts[i-1]);
+	    for i := 1          to 13       do Log_Writeln(typ1,typ2,ts[i-1]);
+		                                   Log_Writeln(typ1,typ2,'<! Output shortend, total lines: '+Num2Str(ts.count,0)+'>');
+		for i := ts.Count-6 to ts.Count do Log_Writeln(typ1,typ2,ts[i-1]);
 	  end
-	  else for i := 1 to ts.Count do Log_Writeln(typ,ts[i-1]);
+	  else for i := 1 to ts.Count do Log_Writeln(typ1,typ2,ts[i-1]);
 	end
 	else
     begin
-	  for i := 1 to ts.Count do Log_Writeln(typ,ts[i-1]);
+	  for i := 1 to ts.Count do Log_Writeln(typ1,typ2,ts[i-1]);
     end;	
     Flush(ErrOutput);	
   end; 
 end;
+
+procedure LOG_ShowStringList(typ:T_ErrorLevel; ts:TStringList); 
+begin LOG_ShowStringList(typ,typ,ts); end;
 
 function  LOG_Level:t_ErrorLevel; 		 begin LOG_Level:=_LOG_Level; end;
 procedure LOG_LevelSave;    			 begin _LOG_OLD_Level:=_LOG_Level; end;
@@ -3427,7 +3866,7 @@ begin
   	DBGDataptr:=		DataAdr;
   	DbgTL:=				TStringList.create;
   	DbgThreadRunning:=	false;
-  	clock_gettime(		CLOCK_REALTIME,@DbgStartTime); 
+  	DbgStartTime:=		0; 
   	DbgTime:=			DbgStartTime;	
   end; // with
 end;
@@ -3534,7 +3973,7 @@ begin
   DBGlog_WriteFileThread:=0;
 end;
 
-procedure DBGlogging(var dbgstruct:dbg_log_t; HighPrecCntr:timespec; DbgGetLogTrig:boolean);
+procedure DBGlogging(var dbgstruct:dbg_log_t; HighPrecCntr:qword; DbgGetLogTrig:boolean);
 begin
   try
 	with dbgstruct do
@@ -3585,7 +4024,7 @@ begin
 	begin
 	
 	  DBGlogLine:=	// adjust this code according to your .csv data needs
-	  	Num2Str(MicroSecondsBetween(DbgTime,DbgStartTime),0)+','+
+	  	Num2Str(RPI_MicroSecondsBetween(DbgTime,DbgStartTime),0)+','+
 	  	Num2Str(DBGDataArray1[0],0,2)+','+Num2Str(DBGDataArray1[1],0,2);	
 	  	
 	end;
@@ -3598,7 +4037,7 @@ end;
 procedure DBGlog_Test;
 // example with one logwriter, we can have multiple _dbglog:array[1..5] of DBG_log_t;
 // e.g. create .csv for https://github.com/danvk/dygraphs 
-var n:integer; _HighPrecCntr:timespec; _dbglog:array[1..1] of DBG_log_t;
+var n:integer; _HighPrecCntr:qword; _dbglog:array[1..1] of DBG_log_t;
 begin
   DBGlog_Open(
 		_dbglog[1],						// init sequence
@@ -3613,7 +4052,7 @@ begin
 		
   for n:= 0 to 9 do
   begin // work loop, runs 10sec
-  	clock_gettime(CLOCK_REALTIME,@_HighPrecCntr); 	// timestamp in usec
+  	_HighPrecCntr:=RPI_GetPrecisionCounter_us; 		// timestamp in usec
   	DBGlogging(_dbglog[1], _HighPrecCntr, (n=1) );	// log debug entry, start trigger@n=1
   	 
 	delay_msec(1000);
@@ -3645,7 +4084,11 @@ procedure BIT_Put(var v:word; 	  i:byte; b:boolean); begin v:=(v and ((1 shl i) 
 procedure BIT_Put(var v:longword; i:byte; b:boolean); begin v:=(v and ((1 shl i) xor High(longword))) or (longword(b) shl i); end;
 procedure BIT_Put(var v:qword; 	  i:byte; b:boolean); begin v:=(v and ((1 shl i) xor High(qword))) 	  or (qword(b) shl i); end;
 
-function  MSK_Get8(bitnum:byte):byte; begin MSK_Get8:=(1 shl (bitnum and $07)); end; //IN:  bitnum 0-7
+function  MSK_Get8(bitnum:byte):byte; 
+begin MSK_Get8:=(1 shl (bitnum and $07)); end; //IN:  bitnum 0-7
+
+function  MSK_Get16(bitnum:byte):word; 
+begin MSK_Get16:=(1 shl (bitnum and $0f)); end; //IN:  bitnum 0-15
 
 function  MSK_Get16_8(bitnum:byte; var idxofs:byte):byte;
 //IN:  bitnum 0-15
@@ -3668,24 +4111,45 @@ begin
   idxofs:=((bitnum and $ff) shr 3); 
   MSK_Get256_8:=(1 shl (bitnum mod 8));
 end;
+
+function  MSK2BitNum(mask:qword):integer;
+var i,j:integer;
+begin
+  i:=0; j:=-1;
+  while (i<64) do
+  begin
+  	if (((mask shr i) and 1)>0) then
+  	begin
+  	  j:= i;
+  	  i:=64; // exit loop
+  	end;
+  	inc(i);
+  end; // while
+  MSK2BitNum:=j;
+end;  
   
 procedure TL_prot_Init(var tlp:TL_prot_t);
 begin
   with tlp do
   begin
 	InitCriticalSection(TL_CS); 
-	TL:=TStringList.create; 
+	TL:=TStringList.create;
 	TL_modified:=false;
-	Thread_InitStruct0(ThCtl);
+	TL_initok:=	 true;
+    TL_stamp:=	 0; 
+    TL_hash:=	 MD5Hash4emptyString;
   end; // with
 end;
 procedure TL_prot_Stop(var tlp:TL_prot_t);
 begin
   with tlp do
   begin
-    Thread_InitStruct(ThCtl);
-    TL.free;   
-	DoneCriticalSection(TL_CS); 
+    TL_initok:=	 false;
+    TL_stamp:=	 0; 
+    TL_hash:=	 MD5Hash4emptyString;
+    TL_modified:=false;
+    TL.free;
+	DoneCriticalSection(TL_CS);
   end; // with
 end;
 
@@ -3725,9 +4189,12 @@ function  LNX_RTC3231_ReadTemp:real;
 // RTC delivers every 64sec a TEMP reading. resolution 0.25degree
 // /boot/config.txt: dtoverlay=i2c-rtc,ds3231
 //  echo $(cat /sys/bus/i2c/devices/1-0068/hwmon/hwmon1/temp1_input|awk '{print $0/1000}')
-const path='/sys/bus/i2c/devices/1-0068/hwmon/hwmon1/temp1_input';
+const 
+  OLDpath='/sys/bus/i2c/devices/1-0068/hwmon/hwmon1/temp1_input'; // not working 20210809
+  path=	  '/sys/bus/i2c/devices/i2c-1/1-0068/hwmon/hwmon2/temp1_input';
 var sh:string;
 begin
+  try
   {$IFDEF UNIX} 
 	if TimeElapsed(RTC3231_NextRead,64000) then
 	begin
@@ -3736,11 +4203,19 @@ begin
   	 	if (call_external_prog(LOG_NONE,
 	  	  'echo $(cat '+path+'|awk ''{print $0/1000}'')',sh)=0) then
 		  if not Str2Num(sh,RTC3231_LastTemp) then RTC3231_LastTemp:=NaN;
-	  end else RTC3231_LastTemp:=NaN;
+	  end 
+	  else 
+	  begin
+		RTC3231_LastTemp:=NaN;
+//		Log_Writeln(LOG_ERROR,'LNX_RTC3231_ReadTemp: invalid devpath '+path);
+	  end;
 	end;
   {$ELSE}
 	RTC3231_LastTemp:=NaN;
   {$ENDIF}
+  except
+	RTC3231_LastTemp:=NaN;
+  end;
   LNX_RTC3231_ReadTemp:=RTC3231_LastTemp;
 end;
 
@@ -3770,15 +4245,19 @@ begin
 end;
 
 function  LNX_WDOG_Thread(ptr:pointer):ptrint;
-var i64:int64; sh:string;
+var  _cnt,_fsec,_ms:longint; i64:int64; sh:string;
 begin
 //SAY(LOG_WARNING,'LNX_WDOG_Thread: start');
   try
-    Thread_SetName('WDOG'); 
+    Thread_SetName('WDOG');   
   	with wdog do
   	begin
+	  _fsec:=trunc(retival_msec/1000)*10; 
+	  _ms:=  retival_msec  mod  1000;
+  	  
 	  with ThreadCtrl do 
 	  begin 
+//		writeln('WDOG: ',retival_msec,'ms');
 	  	TermThread:=false; ThreadRunning:=true;
   	  	repeat
       	  if not TermThread then 
@@ -3791,7 +4270,16 @@ begin
 		  	  				else LOG_Writeln(LOG_ERROR,	 sh);
 		  	  if (LastChanceHandler_ptr<>nil) then LastChanceHandler_ptr;
 		  	end;
-          	delay_msec(retival_msec);
+		  	
+		  	_cnt:= 0; 
+		  	while ((_cnt<_fsec) and (not (terminateProg or TermThread))) do
+			begin // seconds loop
+	  		  delay_msec(100);
+	  		  inc(_cnt);
+			end; // while	  			
+		  	if ((_ms>0) and (not (terminateProg or TermThread))) then delay_msec(_ms);
+//         	delay_msec(retival_msec);  // replaced by interruptable loop above      	
+          	
 		  	if RetrigAsync then 
 		  	begin
 //		 	  SAY(LOG_WARNING,'WDOG: RetrigAsync');
@@ -4091,109 +4579,197 @@ begin
   end;
 end;
 
-function  LNX_SetDateTimeUTC(utc:TDateTime):boolean;
-var cmd:string;
+function  LNX_SetDateTimeUTC2(utc:TDateTime; hwclock:boolean):integer;
+var res:integer; cmd:string;
 begin
-  cmd:='timedatectl set-time '''+FormatDateTime('yyyy-mm-dd',utc)+' '+FormatDateTime('hh:nn:ss',utc)+'''';
-  LNX_SetDateTimeUTC:=(call_external_prog(LOG_NONE,cmd)=0);
+  cmd:='date -s "'+DateTime2FMT(2,utc)+'Z" >/dev/null'; // date -s "2021-08-26T09:42:32.632Z" >/dev/null
+  if hwclock then cmd:=cmd+' ; hwclock --utc --systohc';
+  res:=call_external_prog(LOG_NONE,cmd);
+  if (res=0)
+    then LOG_Writeln(LOG_WARNING,'LNX_SetDateTimeUTC2['+Num2Str(res,0)+']: '+cmd)
+	else LOG_Writeln(LOG_ERROR,  'LNX_SetDateTimeUTC2['+Num2Str(res,0)+']: can not exec: '+cmd);
+  LNX_SetDateTimeUTC2:=res;
 end;
 
+function  LNX_SetDateTimeUTC(utc:TDateTime):integer;
+// Set the system clock to the specified time. This will also update the RTC time accordingly. 
+// The time may be specified in the format "2012-10-30 18:17:16".
+var cmd:string;
+begin //timedatectl set-time '2021-08-26 14:47:20'
+  cmd:='timedatectl set-time '''+FormatDateTime('yyyy-mm-dd',utc)+' '+FormatDateTime('hh:nn:ss',utc)+'''';
+//LOG_Writeln(LOG_WARNING,'LNX_SetDateTimeUTC: '+cmd);
+  LNX_SetDateTimeUTC:=call_external_prog(LOG_NONE,cmd);
+end;
+  	  
 function  LNX_GetTZList(ts:TStringList; fmt:byte):integer;
-  function fmtentry(f1,f2:string):string; begin fmtentry:=f1+'*'+f2; end;
+  procedure fmtentry(fmt:byte; ofsmins:integer; f1,f2:string); 
+  begin 
+	ts.add(Trimme(f1+'*'+'(GMT'+CalcUTCOffsetString(ofsmins,true)+') '+f2,3)); 
+  end;
 var res:integer;
 begin
-  if (fmt=0) then
-  begin	// short list
-	res:=0; ts.clear;
-    ts.add(fmtentry('Etc/GMT+12','(GMT-12:00) International Date Line West'));
-    ts.add(fmtentry('Pacific/Midway','(GMT-11:00) Midway Island, Samoa'));
-    ts.add(fmtentry('Pacific/Honolulu','(GMT-10:00) Hawaii'));
-    ts.add(fmtentry('US/Alaska','(GMT-09:00) Alaska'));
-    ts.add(fmtentry('America/Los_Angeles','(GMT-08:00) Pacific Time (US & Canada)'));
-    ts.add(fmtentry('America/Tijuana','(GMT-08:00) Tijuana, Baja California'));
-    ts.add(fmtentry('US/Arizona','(GMT-07:00) Arizona'));
-    ts.add(fmtentry('America/Chihuahua','(GMT-07:00) Chihuahua, La Paz, Mazatlan'));
-    ts.add(fmtentry('US/Mountain','(GMT-07:00) Mountain Time (US & Canada)'));
-    ts.add(fmtentry('America/Managua','(GMT-06:00) Central America'));
-    ts.add(fmtentry('US/Central','(GMT-06:00) Central Time (US & Canada)'));
-    ts.add(fmtentry('America/Mexico_City','(GMT-06:00) Guadalajara, Mexico City, Monterrey'));
-    ts.add(fmtentry('Canada/Saskatchewan','(GMT-06:00) Saskatchewan'));
-    ts.add(fmtentry('America/Bogota','(GMT-05:00) Bogota, Lima, Quito, Rio Branco'));
-    ts.add(fmtentry('US/Eastern','(GMT-05:00) Eastern Time (US & Canada)'));
-    ts.add(fmtentry('US/East-Indiana','(GMT-05:00) Indiana (East)'));
-    ts.add(fmtentry('Canada/Atlantic','(GMT-04:00) Atlantic Time (Canada)'));
-    ts.add(fmtentry('America/Caracas','(GMT-04:00) Caracas, La Paz'));
-    ts.add(fmtentry('America/Manaus','(GMT-04:00) Manaus'));
-    ts.add(fmtentry('America/Santiago','(GMT-04:00) Santiago'));
-    ts.add(fmtentry('Canada/Newfoundland','(GMT-03:30) Newfoundland'));
-    ts.add(fmtentry('America/Sao_Paulo','(GMT-03:00) Brasilia'));
-    ts.add(fmtentry('America/Argentina/Buenos_Aires','(GMT-03:00) Buenos Aires, Georgetown'));
-    ts.add(fmtentry('America/Godthab','(GMT-03:00) Greenland'));
-    ts.add(fmtentry('America/Montevideo','(GMT-03:00) Montevideo'));
-    ts.add(fmtentry('America/Noronha','(GMT-02:00) Mid-Atlantic'));
-    ts.add(fmtentry('Atlantic/Cape_Verde','(GMT-01:00) Cape Verde Is.'));
-    ts.add(fmtentry('Atlantic/Azores','(GMT-01:00) Azores'));
-    ts.add(fmtentry('Africa/Casablanca','(GMT+00:00) Casablanca, Monrovia, Reykjavik'));
-    ts.add(fmtentry('Etc/UTC','(GMT+00:00) Greenwich Mean Time: Dublin, Edinburgh, Lisbon, London'));
-//	ts.add(fmtentry('Etc/Greenwich','(GMT+00:00) Greenwich Mean Time: Dublin, Edinburgh, Lisbon, London'));
-    ts.add(fmtentry('Europe/Berlin','(GMT+01:00) Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna'));
-    ts.add(fmtentry('Europe/Belgrade','(GMT+01:00) Belgrade, Bratislava, Budapest, Ljubljana, Prague'));
-    ts.add(fmtentry('Europe/Brussels','(GMT+01:00) Brussels, Copenhagen, Madrid, Paris'));
-    ts.add(fmtentry('Europe/Sarajevo','(GMT+01:00) Sarajevo, Skopje, Warsaw, Zagreb'));
-    ts.add(fmtentry('Africa/Lagos','(GMT+01:00) West Central Africa'));
-    ts.add(fmtentry('Asia/Amman','(GMT+02:00) Amman'));
-    ts.add(fmtentry('Europe/Athens','(GMT+02:00) Athens, Bucharest, Istanbul'));
-    ts.add(fmtentry('Asia/Beirut','(GMT+02:00) Beirut'));
-    ts.add(fmtentry('Africa/Cairo','(GMT+02:00) Cairo'));
-    ts.add(fmtentry('Africa/Harare','(GMT+02:00) Harare, Pretoria'));
-    ts.add(fmtentry('Europe/Helsinki','(GMT+02:00) Helsinki, Kyiv, Riga, Sofia, Tallinn, Vilnius'));
-    ts.add(fmtentry('Asia/Jerusalem','(GMT+02:00) Jerusalem'));
-    ts.add(fmtentry('Europe/Minsk','(GMT+02:00) Minsk'));
-    ts.add(fmtentry('Africa/Windhoek','(GMT+02:00) Windhoek'));
-    ts.add(fmtentry('Asia/Kuwait','(GMT+03:00) Kuwait, Riyadh, Baghdad'));
-    ts.add(fmtentry('Europe/Moscow','(GMT+03:00) Moscow, St. Petersburg, Volgograd'));
-    ts.add(fmtentry('Africa/Nairobi','(GMT+03:00) Nairobi'));
-    ts.add(fmtentry('Asia/Tbilisi','(GMT+03:00) Tbilisi'));
-    ts.add(fmtentry('Asia/Tehran','(GMT+03:30) Tehran'));
-    ts.add(fmtentry('Asia/Muscat','(GMT+04:00) Abu Dhabi, Muscat'));
-    ts.add(fmtentry('Asia/Baku','(GMT+04:00) Baku'));
-    ts.add(fmtentry('Asia/Yerevan','(GMT+04:00) Yerevan'));
-    ts.add(fmtentry('Asia/Kabul','(GMT+04:30) Kabul'));
-    ts.add(fmtentry('Asia/Yekaterinburg','(GMT+05:00) Yekaterinburg'));
-    ts.add(fmtentry('Asia/Karachi','(GMT+05:00) Islamabad, Karachi, Tashkent'));
-    ts.add(fmtentry('Asia/Calcutta','(GMT+05:30) Chennai, Kolkata, Mumbai, New Delhi'));
-    ts.add(fmtentry('Asia/Calcutta','(GMT+05:30) Sri Jayawardenapura'));
-    ts.add(fmtentry('Asia/Katmandu','(GMT+05:45) Kathmandu'));
-    ts.add(fmtentry('Asia/Almaty','(GMT+06:00) Almaty, Novosibirsk'));
-    ts.add(fmtentry('Asia/Dhaka','(GMT+06:00) Astana, Dhaka'));
-    ts.add(fmtentry('Asia/Rangoon','(GMT+06:30) Yangon (Rangoon)'));
-    ts.add(fmtentry('Asia/Bangkok','(GMT+07:00) Bangkok, Hanoi, Jakarta'));
-    ts.add(fmtentry('Asia/Krasnoyarsk','(GMT+07:00) Krasnoyarsk'));
-    ts.add(fmtentry('Asia/Hong_Kong','(GMT+08:00) Beijing, Chongqing, Hong Kong, Urumqi'));
-    ts.add(fmtentry('Asia/Kuala_Lumpur','(GMT+08:00) Kuala Lumpur, Singapore'));
-    ts.add(fmtentry('Asia/Irkutsk','(GMT+08:00) Irkutsk, Ulaan Bataar'));
-    ts.add(fmtentry('Australia/Perth','(GMT+08:00) Perth'));
-    ts.add(fmtentry('Asia/Taipei','(GMT+08:00) Taipei'));
-    ts.add(fmtentry('Asia/Tokyo','(GMT+09:00) Osaka, Sapporo, Tokyo'));
-    ts.add(fmtentry('Asia/Seoul','(GMT+09:00) Seoul'));
-    ts.add(fmtentry('Asia/Yakutsk','(GMT+09:00) Yakutsk'));
-    ts.add(fmtentry('Australia/Adelaide','(GMT+09:30) Adelaide'));
-    ts.add(fmtentry('Australia/Darwin','(GMT+09:30) Darwin'));
-    ts.add(fmtentry('Australia/Brisbane','(GMT+10:00) Brisbane'));
-    ts.add(fmtentry('Australia/Canberra','(GMT+10:00) Canberra, Melbourne, Sydney'));
-    ts.add(fmtentry('Australia/Hobart','(GMT+10:00) Hobart'));
-    ts.add(fmtentry('Pacific/Guam','(GMT+10:00) Guam, Port Moresby'));
-    ts.add(fmtentry('Asia/Vladivostok','(GMT+10:00) Vladivostok'));
-    ts.add(fmtentry('Asia/Magadan','(GMT+11:00) Magadan, Solomon Is., New Caledonia'));
-    ts.add(fmtentry('Pacific/Auckland','(GMT+12:00) Auckland, Wellington'));
-    ts.add(fmtentry('Pacific/Fiji','(GMT+12:00) Fiji, Kamchatka, Marshall Is.'));
-    ts.add(fmtentry('Pacific/Tongatapu','(GMT+13:00) Nuku''alofa'));
-  end
-  else
-  begin	// 700 entries, to long for weppage (loadingtime)
-  	res:=call_external_prog(LOG_NONE,'timedatectl list-timezones',ts);
-  	ts.insert(0,'Etc/UTC');
-  end;
+  case fmt of
+    1:	begin	// very very short list (not working with timedatectl set-timezone [TIMEZONE])
+//https://opensource.apple.com/source/system_cmds/system_cmds-230/zic.tproj/datfiles/etcetera
+    	  res:=0; ts.clear;
+//    	  fmtentry(fmt, 000,'Etc/UTC-12:00',	'International Date Line West');
+    	  fmtentry(fmt,-660,'Etc/UTC-11:00',	'');
+    	  fmtentry(fmt,-600,'Etc/UTC-10:00',	'Hawaii');
+    	  fmtentry(fmt,-540,'Etc/UTC-09:00',	'Alaska');
+    	  fmtentry(fmt,-480,'Etc/UTC-08:00',	'Pacific Time');
+    	  fmtentry(fmt,-420,'Etc/UTC-07:00',	'Mountain Time');
+    	  fmtentry(fmt,-360,'Etc/UTC-06:00',	'Central America');
+    	  fmtentry(fmt,-300,'Etc/UTC-05:00',	'Eastern Time');
+    	  fmtentry(fmt,-240,'Etc/UTC-04:00',	'Atlantic Time');
+    	  fmtentry(fmt,-210,'Etc/UTC-03:30',	'');
+    	  fmtentry(fmt,-180,'Etc/UTC-03:00',	'');
+    	  fmtentry(fmt,-120,'Etc/UTC-02:00',	'Mid-Atlantic');
+    	  fmtentry(fmt, -60,'Etc/UTC-01:00',	'Azores');
+    	  fmtentry(fmt,   0,'Etc/UTC',			'Greenwich Mean Time'); 
+    	  fmtentry(fmt,  60,'Etc/UTC+01:00',	'Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna');
+    	  fmtentry(fmt, 120,'Etc/UTC+02:00',	'');
+    	  fmtentry(fmt, 180,'Etc/UTC+03:00',	'Moscow');
+    	  fmtentry(fmt, 240,'Etc/UTC+04:00',	'');
+    	  fmtentry(fmt, 300,'Etc/UTC+05:00',	'Islamabad');
+    	  fmtentry(fmt, 330,'Etc/UTC+05:30',	'');
+    	  fmtentry(fmt, 345,'Etc/UTC+05:45',	'');
+    	  fmtentry(fmt, 360,'Etc/UTC+06:00',	'Almaty');
+    	  fmtentry(fmt, 390,'Etc/UTC+06:30',	'');
+    	  fmtentry(fmt, 420,'Etc/UTC+07:00',	'Bangkok');
+    	  fmtentry(fmt, 480,'Etc/UTC+08:00',	'Beijing');
+    	  fmtentry(fmt, 540,'Etc/UTC+09:00',	'Tokyo');
+    	  fmtentry(fmt, 570,'Etc/UTC+09:30',	'Adelaide');
+    	  fmtentry(fmt, 600,'Etc/UTC+10:00',	'');
+    	  fmtentry(fmt, 660,'Etc/UTC+11:00',	'');
+    	  fmtentry(fmt, 720,'Etc/UTC+12:00',	'Auckland');
+    	  fmtentry(fmt, 780,'Etc/UTC+13:00',	''); 	  
+    	end;
+    2:	begin	// very short list (working with timedatectl set-timezone [TIMEZONE])
+    	  res:=0; ts.clear;
+ //   	  fmtentry(fmt, 000,'Etc/GMT+12','International Date Line West');
+    	  fmtentry(fmt,-660,'Pacific/Midway',	'Midway Island, Samoa');
+    	  fmtentry(fmt,-600,'Pacific/Honolulu',	'Hawaii');
+    	  fmtentry(fmt,-540,'US/Alaska',		'Alaska');
+    	  fmtentry(fmt,-480,'America/Los_Angeles','Pacific Time (US & Canada)');
+    	  fmtentry(fmt,-420,'US/Mountain',		'Mountain Time (US & Canada)');
+    	  fmtentry(fmt,-360,'America/Managua',	'Central America');
+    	  fmtentry(fmt,-300,'US/Eastern',		'Eastern Time (US & Canada)');
+    	  fmtentry(fmt,-240,'Canada/Atlantic',	'Atlantic Time (Canada)');
+    	  fmtentry(fmt,-210,'Canada/Newfoundland','Newfoundland');
+    	  fmtentry(fmt,-180,'America/Argentina/Buenos_Aires','Buenos Aires, Georgetown');
+    	  fmtentry(fmt,-120,'America/Noronha',	'Mid-Atlantic');
+    	  fmtentry(fmt, -60,'Atlantic/Azores',	'Azores');
+    	  fmtentry(fmt,   0,'Etc/UTC',			'Greenwich Mean Time: Dublin, Edinburgh, Lisbon, London');
+    	  fmtentry(fmt,  60,'Europe/Berlin',	'Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna');
+    	  fmtentry(fmt, 120,'Europe/Athens',	'Athens, Bucharest, Istanbul');
+    	  fmtentry(fmt, 180,'Europe/Moscow',	'Moscow, St. Petersburg, Volgograd');
+    	  fmtentry(fmt, 240,'Asia/Muscat',		'Abu Dhabi, Muscat');
+    	  fmtentry(fmt, 300,'Asia/Karachi',		'Islamabad, Karachi, Tashkent');
+    	  fmtentry(fmt, 330,'Asia/Calcutta',	'Chennai, Kolkata, Mumbai, New Delhi');
+    	  fmtentry(fmt, 345,'Asia/Katmandu',	'Kathmandu');
+    	  fmtentry(fmt, 360,'Asia/Almaty',		'Almaty, Novosibirsk');
+    	  fmtentry(fmt, 390,'Asia/Rangoon',		'Yangon (Rangoon)');
+    	  fmtentry(fmt, 420,'Asia/Bangkok',		'Bangkok, Hanoi, Jakarta');
+    	  fmtentry(fmt, 480,'Asia/Hong_Kong',	'Beijing, Chongqing, Hong Kong, Urumqi');
+    	  fmtentry(fmt, 540,'Asia/Tokyo',		'Osaka, Sapporo, Tokyo');
+    	  fmtentry(fmt, 570,'Australia/Adelaide','Adelaide');
+    	  fmtentry(fmt, 600,'Australia/Canberra','Canberra, Melbourne, Sydney');
+		  fmtentry(fmt, 660,'Asia/Magadan',		'Magadan, Solomon Is., New Caledonia');
+    	  fmtentry(fmt, 720,'Pacific/Auckland',	'Auckland, Wellington');
+    	  fmtentry(fmt, 780,'Pacific/Tongatapu','Nuku''alofa');    	  
+    	end;
+    0:	begin	// short list (working with timedatectl set-timezone [TIMEZONE])
+		  res:=0; ts.clear;
+//		  fmtentry(fmt, 000,'Etc/GMT+12',		'International Date Line West');
+		  fmtentry(fmt,-660,'Pacific/Midway',	'Midway Island, Samoa');
+    	  fmtentry(fmt,-600,'Pacific/Honolulu',	'Hawaii');
+    	  fmtentry(fmt,-540,'US/Alaska',		'Alaska');
+    	  fmtentry(fmt,-480,'America/Los_Angeles','Pacific Time (US & Canada)');
+    	  fmtentry(fmt,-480,'America/Tijuana',	'Tijuana, Baja California');
+    	  fmtentry(fmt,-420,'US/Arizona',		'Arizona');
+    	  fmtentry(fmt,-420,'America/Chihuahua','Chihuahua, La Paz, Mazatlan');
+    	  fmtentry(fmt,-420,'US/Mountain',		'Mountain Time (US & Canada)');
+    	  fmtentry(fmt,-360,'America/Managua',	'Central America');
+    	  fmtentry(fmt,-360,'US/Central',		'Central Time (US & Canada)');
+    	  fmtentry(fmt,-360,'America/Mexico_City','Guadalajara, Mexico City, Monterrey');
+    	  fmtentry(fmt,-360,'Canada/Saskatchewan','Saskatchewan');
+    	  fmtentry(fmt,-300,'America/Bogota',	'Bogota, Lima, Quito, Rio Branco');
+    	  fmtentry(fmt,-300,'US/Eastern',		'Eastern Time (US & Canada)');
+    	  fmtentry(fmt,-300,'US/East-Indiana',	'Indiana (East)');
+    	  fmtentry(fmt,-240,'Canada/Atlantic',	'Atlantic Time (Canada)');
+    	  fmtentry(fmt,-240,'America/Caracas',	'Caracas, La Paz');
+    	  fmtentry(fmt,-240,'America/Manaus',	'Manaus');
+    	  fmtentry(fmt,-240,'America/Santiago',	'Santiago');
+    	  fmtentry(fmt,-210,'Canada/Newfoundland','Newfoundland');
+    	  fmtentry(fmt,-180,'America/Sao_Paulo','Brasilia');
+    	  fmtentry(fmt,-180,'America/Argentina/Buenos_Aires','Buenos Aires, Georgetown');
+    	  fmtentry(fmt,-180,'America/Godthab',	'Greenland');
+    	  fmtentry(fmt,-180,'America/Montevideo','Montevideo');
+    	  fmtentry(fmt,-120,'America/Noronha',	'Mid-Atlantic');
+    	  fmtentry(fmt, -60,'Atlantic/Cape_Verde','Cape Verde Is.');
+    	  fmtentry(fmt, -60,'Atlantic/Azores',	'Azores');
+    	  fmtentry(fmt,   0,'Africa/Casablanca','Casablanca, Monrovia, Reykjavik');
+    	  fmtentry(fmt,   0,'Etc/UTC',			'Greenwich Mean Time: Dublin, Edinburgh, Lisbon, London');
+//		  fmtentry(fmt,   0,'Etc/Greenwich',	'Greenwich Mean Time: Dublin, Edinburgh, Lisbon, London');
+    	  fmtentry(fmt,  60,'Europe/Berlin',	'Amsterdam, Berlin, Bern, Rome, Stockholm, Vienna');
+    	  fmtentry(fmt,  60,'Europe/Belgrade',	'Belgrade, Bratislava, Budapest, Ljubljana, Prague');
+    	  fmtentry(fmt,  60,'Europe/Brussels',	'Brussels, Copenhagen, Madrid, Paris');
+    	  fmtentry(fmt,  60,'Europe/Sarajevo',	'Sarajevo, Skopje, Warsaw, Zagreb');
+    	  fmtentry(fmt,  60,'Africa/Lagos',		'West Central Africa');
+    	  fmtentry(fmt, 120,'Asia/Amman',		'Amman');
+    	  fmtentry(fmt, 120,'Europe/Athens',	'Athens, Bucharest, Istanbul');
+    	  fmtentry(fmt, 120,'Asia/Beirut',		'Beirut');
+    	  fmtentry(fmt, 120,'Africa/Cairo',		'Cairo');
+    	  fmtentry(fmt, 120,'Africa/Harare',	'Harare, Pretoria');
+    	  fmtentry(fmt, 120,'Europe/Helsinki',	'Helsinki, Kyiv, Riga, Sofia, Tallinn, Vilnius');
+    	  fmtentry(fmt, 120,'Asia/Jerusalem',	'Jerusalem');
+    	  fmtentry(fmt, 120,'Europe/Minsk',		'Minsk');
+    	  fmtentry(fmt, 120,'Africa/Windhoek',	'Windhoek');
+    	  fmtentry(fmt, 180,'Asia/Kuwait',		'Kuwait, Riyadh, Baghdad');
+    	  fmtentry(fmt, 180,'Europe/Moscow',	'Moscow, St. Petersburg, Volgograd');
+    	  fmtentry(fmt, 180,'Africa/Nairobi',	'Nairobi');
+    	  fmtentry(fmt, 180,'Asia/Tbilisi',		'(Tbilisi');
+    	  fmtentry(fmt, 210,'Asia/Tehran',		'Tehran');
+    	  fmtentry(fmt, 240,'Asia/Muscat',		'Abu Dhabi, Muscat');
+    	  fmtentry(fmt, 240,'Asia/Baku',		'Baku');
+    	  fmtentry(fmt, 240,'Asia/Yerevan',		'Yerevan');
+    	  fmtentry(fmt, 270,'Asia/Kabul',		'Kabul');
+    	  fmtentry(fmt, 300,'Asia/Yekaterinburg','Yekaterinburg');
+    	  fmtentry(fmt, 300,'Asia/Karachi',		'Islamabad, Karachi, Tashkent');
+    	  fmtentry(fmt, 330,'Asia/Calcutta',	'Chennai, Kolkata, Mumbai, New Delhi');
+    	  fmtentry(fmt, 330,'Asia/Calcutta',	'Sri Jayawardenapura');
+    	  fmtentry(fmt, 345,'Asia/Katmandu',	'Kathmandu');
+    	  fmtentry(fmt, 360,'Asia/Almaty',		'Almaty, Novosibirsk');
+    	  fmtentry(fmt, 360,'Asia/Dhaka',		'Astana, Dhaka');
+    	  fmtentry(fmt, 390,'Asia/Rangoon',		'Yangon (Rangoon)');
+    	  fmtentry(fmt, 420,'Asia/Bangkok',		'Bangkok, Hanoi, Jakarta');
+    	  fmtentry(fmt, 420,'Asia/Krasnoyarsk',	'Krasnoyarsk');
+    	  fmtentry(fmt, 480,'Asia/Hong_Kong',	'Beijing, Chongqing, Hong Kong, Urumqi');
+    	  fmtentry(fmt, 480,'Asia/Kuala_Lumpur','Kuala Lumpur, Singapore');
+    	  fmtentry(fmt, 480,'Asia/Irkutsk',		'Irkutsk, Ulaan Bataar');
+    	  fmtentry(fmt, 480,'Australia/Perth',	'Perth');
+    	  fmtentry(fmt, 480,'Asia/Taipei',		'Taipei');
+    	  fmtentry(fmt, 540,'Asia/Tokyo',		'Osaka, Sapporo, Tokyo');
+    	  fmtentry(fmt, 540,'Asia/Seoul',		'Seoul');
+    	  fmtentry(fmt, 540,'Asia/Yakutsk',		'Yakutsk');
+    	  fmtentry(fmt, 570,'Australia/Adelaide','Adelaide');
+    	  fmtentry(fmt, 570,'Australia/Darwin',	'Darwin');
+    	  fmtentry(fmt, 600,'Australia/Brisbane','Brisbane');
+    	  fmtentry(fmt, 600,'Australia/Canberra','Canberra, Melbourne, Sydney');
+    	  fmtentry(fmt, 600,'Australia/Hobart',	'Hobart');
+    	  fmtentry(fmt, 600,'Pacific/Guam',		'Guam, Port Moresby');
+    	  fmtentry(fmt, 600,'Asia/Vladivostok',	'Vladivostok');
+    	  fmtentry(fmt, 660,'Asia/Magadan',		'Magadan, Solomon Is., New Caledonia');
+    	  fmtentry(fmt, 720,'Pacific/Auckland',	'Auckland, Wellington');
+    	  fmtentry(fmt, 720,'Pacific/Fiji',		'Fiji, Kamchatka, Marshall Is.');
+    	  fmtentry(fmt, 780,'Pacific/Tongatapu','Nuku''alofa');
+		end;
+  	  else
+  		begin	// 700 entries, to long for weppage (loadingtime)
+  		  res:=call_external_prog(LOG_NONE,'timedatectl list-timezones',ts);
+  		  ts.insert(0,'Etc/UTC');
+  		end;
+	end; // case
   LNX_GetTZList:=res;
 end;
 
@@ -4231,6 +4807,30 @@ begin
 	  token:=FormatDateTime('YYYYMMDDhhmmss',now); // last chance
   end;
   LNX_GetRandomAccessToken:=token;
+end;
+
+function  LNX_StrMod(part:byte; mode:TMode):string;
+var sh:string;
+begin
+  sh:='';
+  case part of
+     1:   begin // USR
+        	if ((mode and S_IRUSR)>0) then sh:=sh+'r';
+            if ((mode and S_IWUSR)>0) then sh:=sh+'w';
+            if ((mode and S_IXUSR)>0) then sh:=sh+'x';
+          end;
+     2:   begin // GRP
+            if ((mode and S_IRGRP)>0) then sh:=sh+'r';
+            if ((mode and S_IWGRP)>0) then sh:=sh+'w';
+            if ((mode and S_IXGRP)>0) then sh:=sh+'x';
+          end;
+     3:   begin // OTH
+            if ((mode and S_IROTH)>0) then sh:=sh+'r';
+            if ((mode and S_IWOTH)>0) then sh:=sh+'w';
+            if ((mode and S_IXOTH)>0) then sh:=sh+'x';
+          end;
+  end; // case
+  LNX_StrMod:=sh;
 end;
 
 function  LNX_chmod(filename:string; mode:TMode):cint;
@@ -4442,6 +5042,44 @@ begin
     res:=call_external_prog(LOG_NONE,cmd,sh); res:=0;
   end else res:=-1; 
   LNX_RemoveOldFiles:=res;
+end;
+
+function  LNX_RemoveFilesKeepLatest(fnhdr:string; uniqcnt:integer):integer;
+(* e.g. LNX_RemoveFilesKeepLatest('/path/to/files/bckexe_*',6);
+   ls -r /path/to/files/bckexe_* | awk -F_ 'a[substr($NF,1,6)]++' | xargs rm -f
+will keep latest files of each month
+bckexe_10000000556ff033_20210115140823.tgz
+bckexe_10000000556ff033_20210113071431.tgz
+bckexe_10000000556ff033_20210111191654.tgz
+bckexe_10000000556ff033_20210109195131.tgz
+bckexe_10000000556ff033_20210108180209.tgz
+bckexe_10000000556ff033_20201220162006.tgz
+bckexe_10000000556ff033_20201219143332.tgz
+bckexe_10000000556ff033_20201218212846.tgz
+...
+bckexe_10000000556ff033_20201206132455.tgz
+bckexe_10000000556ff033_20201203174956.tgz
+bckexe_10000000556ff033_20201125121330.tgz
+bckexe_10000000556ff033_20201123180211.tgz
+...
+bckexe_10000000556ff033_20201113180033.tgz
+bckexe_10000000556ff033_20201113175733.tgz
+...
+keep:
+bckexe_10000000556ff033_20210115140823.tgz
+bckexe_10000000556ff033_20201220162006.tgz
+bckexe_10000000556ff033_20201125121330.tgz
+delete all other files
+*)
+var res:integer; cmd,sh:string;
+begin
+  if (DirectoryExists(Get_Dir(fnhdr)) and (uniqcnt>0)) then
+  begin
+    cmd:=sudo+'ls -r '+fnhdr+' | awk -F_ ''a[substr($NF,1,'+Num2Str(uniqcnt,0)+')]++'' | xargs rm -f';
+//	SAY(LOG_INFO,'LNX_RemoveFilesKeepLatest['+Num2Str(uniqcnt,0)+']: '+cmd);
+    res:=call_external_prog(LOG_NONE,cmd,sh); res:=0;
+  end else res:=-1; 
+  LNX_RemoveFilesKeepLatest:=res;
 end;
 
 function  LNX_CertFormatTyp(certtyp:Cert_Type_t):string;
@@ -4770,6 +5408,9 @@ begin
   end;
 end;
 
+function  InLimits(value,minvalue,maxvalue:real):boolean;
+begin InLimits:=((value>=minvalue) and (value<=maxvalue)); end;
+
 function  Limits(var value:int64; minvalue,maxvalue:int64):int64;
 begin if value>maxvalue then value:=maxvalue; if value<minvalue then value:=minvalue; Limits:=value; end;
 function  Limits(var value:longint; minvalue,maxvalue:longint):longint;
@@ -4778,9 +5419,6 @@ function  Limits(var value:longword; minvalue,maxvalue:longword):longword;
 begin if value>maxvalue then value:=maxvalue; if value<minvalue then value:=minvalue; Limits:=value; end;
 function  Limits(var value:real; minvalue,maxvalue:real):real;
 begin if value>maxvalue then value:=maxvalue; if value<minvalue then value:=minvalue; Limits:=value; end;
-
-function  InLimits(value,minvalue,maxvalue:real):boolean;
-begin InLimits:=((value>=minvalue) and (value<=maxvalue)); end;
 
 function  MinMax(value:int64; var minvalue,maxvalue:int64):integer;
 var res:integer;
@@ -4829,7 +5467,8 @@ begin
   with stats do
   begin
     statready:=false;
-	idx:=Length(val_arr)-1;
+//	idx:=Length(val_arr)-1;
+	idx:=0;
 	trend:=0;
 	SUMval:=0;		MINval:=0;		MAXval:=0;
 	MEANval:=0;		StdDev:=0;
@@ -4896,23 +5535,28 @@ begin
 end;
 
 function  STAT_Inject(var stats:STAT_struct_t; newval:float):boolean;
-var filledup:boolean;
+var filled_up:boolean;
 begin
-  filledup:=false;
+  filled_up:=false;
   try
 	with STATS do
   	begin
   	  if statready then
   	  begin
+(* 	 	inc(idx);
+  	 	filled_up:=(idx>=Length(val_arr));
+  	 	if filled_up then idx:=0;
+	  	val_arr[idx]:=newval; *)
+
+		val_arr[idx]:=newval;
   	 	inc(idx);
-  	 	if (idx>=Length(val_arr)) then idx:=0;
-	  	val_arr[idx]:=newval;
-	  	filledup:=(idx>=(Length(val_arr)-1));
+  	 	filled_up:=(idx>=Length(val_arr));
+  	 	if filled_up then idx:=0;
 	  end;
   	end; // with
   except
   end;
-  STAT_Inject:=filledup;
+  STAT_Inject:=filled_up;
 end;
 
 procedure STAT_Calc(var stats:STAT_struct_t);
@@ -4953,6 +5597,142 @@ begin
   STAT_Close(_stat);
 end;
 
+function  ChgArrLW(var arr,adflt:Array of longword; var ArrOut:Array of longint):boolean;
+var chg:boolean; i,j:integer;
+begin
+  chg:=false;
+  try
+//  SetLength(ArrOut,Length(arr));
+  	for i:=1 to Length(arr) do 
+  	begin
+  	  ArrOut[i-1]:=i;
+  	  for j:= 1 to Length(adflt) do
+  	  begin
+  	 	if (arr[i-1]=adflt[j-1]) then 
+  	 	begin
+  	 	  if (i<>j) then chg:=true;
+//writeln(i,'/',j,' ',(i<>j),' 0x',HexStr(arr[i-1],2),' 0x',HexStr(adflt[i-1],2));
+  	 	  ArrOut[i-1]:=j;
+  	 	end;
+  	  end;
+  	end;
+  except
+	LOG_Writeln(LOG_ERROR,'ChgArrLW');
+  end;
+  ChgArrLW:=chg;
+end;
+
+function  MODarrLI(var arr:Array of longint; idx,newval:longint; sects,keys:string):boolean;
+var chg:boolean; i:longint; sh:string;
+begin
+  chg:=false;
+  try
+	chg:=(arr[idx-1]<>newval);
+//	write('arr:'); for i:= 1 to Length(arr) do write(arr[i-1]:2,' '); writeln;	
+	if chg then
+	begin
+	  arr[idx-1]:=newval;
+	  sh:='';
+	  for i:= 1 to Length(arr) do 
+		sh:=sh+Num2Str(arr[i-1],0)+',';
+	  BIOS_SetIniString(sects,keys,CSV_RemLastSep(sh,','),[BIOS_trim4])
+//writeln('MODarrLI['+keys+'/'+Num2Str(idx,0)+']: '+Num2Str(newval,0)+' '+Num2Str(arr[idx-1],0));
+	end;
+  except
+	LOG_Writeln(LOG_ERROR,'MODarrLI['+sects+'/'+keys+'/'+Num2Str(idx,0)+']: '+Num2Str(newval,0));
+  end;
+  MODarrLI:=chg;
+end;
+
+function  MODarrLW(var arr:Array of longword; idx:longint; newval:longword; sects,keys:string):boolean;
+var chg:boolean; i:longint; sh:string;
+begin
+  chg:=false;
+  try
+	chg:=(arr[idx-1]<>newval);
+	if chg then
+	begin
+	  arr[idx-1]:=newval;
+	  sh:='';
+	  for i:= 1 to Length(arr) do 
+		sh:=sh+'0x'+QW2Str(arr[i-1])+',';
+//		sh:=sh+Num2Str(arr[i-1],0)+',';
+	  BIOS_SetIniString(sects,keys,CSV_RemLastSep(sh,','),[BIOS_trim4])
+	end;
+  except
+	LOG_Writeln(LOG_ERROR,'MODarrLW['+sects+'/'+keys+'/'+Num2Str(idx,0)+']: '+Num2Str(newval,0));
+  end;
+  MODarrLW:=chg;
+end;
+
+function  ReMAParrLI(var arr,adflt:Array of longint; sects,keys,values:string):boolean;
+var chg:boolean; i,j:integer; sh:string;
+begin
+  chg:=false;
+  try
+	for i:=1 to Length(arr) do arr[i-1]:=adflt[i-1];
+	
+	if (keys<>'') 
+	  then sh:=Trimme(BIOS_GetIniString(sects,keys,values),3)
+	  else sh:='';
+  
+  	if (sh<>'') then
+  	begin
+	  for i:=1 to Length(arr) do 
+	  begin
+	  	if Str2Num(CSV_Item(sh,i),j) then
+	  	begin
+	      if (arr[i-1]<>j) then 
+	      begin
+		  	chg:=true;
+		  	arr[i-1]:=j;
+		  end;
+	  	end;
+	  end;
+  	end;
+  
+// 	if chg then LOG_Writeln(LOG_WARNING,'RemMAP['+keys+']: '+sh);
+
+  except
+	LOG_Writeln(LOG_ERROR,'RemMAP['+keys+']: '+values);
+  end;
+  ReMAParrLI:=chg;
+end;
+
+function  ReMAParrLW(var arr,adflt:Array of longword; sects,keys,values:string):boolean;
+var chg:boolean; i,j:integer; sh:string;
+begin
+  chg:=false;
+  try
+	for i:=1 to Length(arr) do arr[i-1]:=adflt[i-1];
+	
+	if (keys<>'') 
+	  then sh:=Trimme(BIOS_GetIniString(sects,keys,values),3)
+	  else sh:='';
+  
+  	if (sh<>'') then
+  	begin
+	  for i:=1 to Length(arr) do 
+	  begin
+	  	if Str2Num(CSV_Item(sh,i),j) then
+	  	begin
+	      if (arr[i-1]<>j) then 
+	      begin
+		  	chg:=true;
+		  	arr[i-1]:=j;
+		  end;
+	  	end;
+	  end;
+  	end;
+  
+//  if chg then LOG_Writeln(LOG_WARNING,'RemMAP['+keys+']: '+sh);
+
+  except
+	LOG_Writeln(LOG_ERROR,'RemMAP['+keys+']: '+values);
+  end;
+  ReMAParrLW:=chg;
+end;
+
 function  Str2Bool(s:string; var ein:boolean):boolean;
 var ok:boolean;
 begin
@@ -4969,8 +5749,10 @@ function  Bool2LVL(b:boolean) : string; 	 begin if b then Bool2LVL:='H'		else Bo
 function  Bool2Str(b:boolean) : string; 	 begin if b then Bool2Str:='TRUE'	else Bool2Str:='FALSE';  end;
 function  Bool2Swc(b:boolean) : string; 	 begin if b then Bool2Swc:='ON'		else Bool2Swc:='OFF';    end;
 function  Bool2OC (b:boolean) : string; 	 begin if b then Bool2OC:='OPEN'	else Bool2OC:='CLOSE';   end;
+function  Bool2DIR(b:boolean) : string; 	 begin if b then Bool2DIR:='OUT'	else Bool2DIR:='IN';     end;
 function  Bool2YN (b:boolean) : string; 	 begin if b then Bool2YN:='YES'		else Bool2YN:='NO';      end;
 function  Bool2YNS(b:boolean) : string; 	 begin if b then Bool2YNS:='Y'		else Bool2YNS:='N';      end;
+function  Bool2PF (b:boolean) : string; 	 begin if b then Bool2PF:='PASS'	else Bool2PF:='FAIL';    end;
 function  Bool2EA (b:boolean) : string; 	 begin if b then Bool2EA:='ENABLED'	else Bool2EA:='DISABLED';end;
 function  Bool2eas(b:boolean) : string; 	 begin if b then Bool2eas:='enable' else Bool2eas:='disable';end;
 function  Bool2UpDown(b:boolean):string; 	 begin if b then Bool2UpDown:='up'	else Bool2UpDown:='down';end;
@@ -4985,6 +5767,7 @@ function  Num2Str(num:longint):string; 		begin Num2Str:=Num2Str(num,0); end;
 function  Num2Str(num:longword):string;		begin Num2Str:=Num2Str(num,0); end;
 function  Num2Str(num:real;nk:byte):string;	begin Num2Str:=Num2Str(num,0,nk); end;
 function  Num2Bool(num:int64):boolean; begin Num2Bool:=(num>=0); end;
+
 function  Str2Num(s:string; var num:byte):boolean;     var code:integer; begin val(StringReplace(s,'$','0x',[rfReplaceAll,rfIgnoreCase]),num,code); Str2Num:=(code=0); end;
 function  Str2Num(s:string; var num:smallint):boolean; var code:integer; begin val(StringReplace(s,'$','0x',[rfReplaceAll,rfIgnoreCase]),num,code); Str2Num:=(code=0); end;
 function  Str2Num(s:string; var num:int64):boolean;    var code:integer; begin val(StringReplace(s,'$','0x',[rfReplaceAll,rfIgnoreCase]),num,code); Str2Num:=(code=0); end;
@@ -5006,6 +5789,16 @@ begin
   if (code<>0) and Str2Num(s,r) then begin num:=r; code:=0; end;
   Str2Num:=(code=0); 
 end;
+
+procedure Str2Num(s:string; var num:byte; dflt:byte);  			begin if not Str2Num(s,num) then num:=dflt; end;
+procedure Str2Num(s:string; var num:smallint; dflt:smallint);	begin if not Str2Num(s,num) then num:=dflt; end;
+procedure Str2Num(s:string; var num:int64; dflt:int64);			begin if not Str2Num(s,num) then num:=dflt; end;
+procedure Str2Num(s:string; var num:qword; dflt:qword);			begin if not Str2Num(s,num) then num:=dflt; end;
+procedure Str2Num(s:string; var num:longint; dflt:longint);		begin if not Str2Num(s,num) then num:=dflt; end;
+procedure Str2Num(s:string; var num:longword; dflt:longword);	begin if not Str2Num(s,num) then num:=dflt; end;
+procedure Str2Num(s:string; var num:real; dflt:real);			begin if not Str2Num(s,num) then num:=dflt; end;
+procedure Str2Num(s:string; var num:extended; dflt:extended);	begin if not Str2Num(s,num) then num:=dflt; end;
+
 function  Str2NumFMT(s:string; nk:byte):string;
 var r:real; i:integer; sh:string;
 begin
@@ -5062,6 +5855,7 @@ end;
 function  Get_SameCharString(cnt:longint;c:char):string; var l:longint; s:string; begin s:=''; for l:=1 to cnt do s:=s+c; Get_SameCharString:=s; end;
 //function  Hex   (nr:qword;lgt:byte) : string; begin Hex:=Format('%0:-*.*x',[lgt,lgt,nr]); end;
 //{$warnings off} function  Hex   (ptr:pointer;lgt:byte): string; begin Hex:=Hex(qword(ptr),lgt); end; {$warnings on}
+function  HexStr(s:shortstring):string;overload; var sh:string; i:longint; begin sh:=''; for i := 1 to Length(s) do sh:=sh+HexStr(ord(s[i]),2); HexStr:=sh; end;
 function  HexStr(s:string):string;overload; var sh:string; i:longint; begin sh:=''; for i := 1 to Length(s) do sh:=sh+HexStr(ord(s[i]),2); HexStr:=sh; end;
 function  LeadingZero(w:word):string; begin LeadingZero:=Format('%0:-*.*d',[2,2,w]); end;
 //function  Get_FixedStringLen(s:string;cnt:word;leading:boolean):string; var fmt:string; begin fmt:='%0:'; if not leading then fmt:=fmt+'-'; fmt:=fmt+'*.*s'; Get_FixedStringLen:=Format(fmt,[cnt,cnt,s]); end;
@@ -5093,69 +5887,94 @@ begin
   AdjZahl:=hs;
 end;
 
+function  QW2Str(qw:qword):string;
+var lgt:word; sh:string;
+begin
+  case qw of
+  		     0..$0000000000ff:	lgt:= 2;
+  		  $100..$00000000ffff:	lgt:= 4;
+  		$10000..$0000ffffffff:	lgt:= 8;
+  	$100000000..$ffffffffffff:	lgt:=12;
+	else 						lgt:=16;
+  end;
+  sh:=HexStr(qw,lgt);
+  QW2Str:=sh;
+end;
+
 procedure IPInfo_Init(intface:string; var IPInfo:IP_Info_t);
 begin
   with IPInfo do
   begin  
-    iface:=intface;		timestamp:=now;
+    iface:=intface;		alias:=iface;		timestamp:=now;
 	ip4addr:=noip_c;	ip6addr:=noip_c;	gwaddr:=noip_c;	nsaddr:=noip_c;	
   	domain:='';			hwaddr:='';			link:='';	
-  	ssid:='';			signal:='';			DNSname:='';
-  	stat:=false;		wireless:=false;	chan:=''; freq:='';
+  	ssid:='';			DNSname:='';
+  	signal_link:='';	signal_level:='';	signal_quality:='';
+  	stat:=false;		wireless:=false;	chan:=''; 			freq:='';
   end; // with
 end;
 
-procedure IPInfoShow(lvl:T_ErrorLevel; var IPInfo:IP_Info_t);
+procedure IPInfos_Init(var IPInfos:IP_Infos_t);
+begin
+  with IPInfos do
+  begin
+  	init:=false; 			hostname:=''; 		idx:=0;
+  	init1:=false;			samesubnet:=false;	
+  	devlst:=''; 		 	hostapd_extdev:=	ifeth_c;
+  	ip4ext1:=noip_c;		ip4ext2:=noip_c;	ip4ext:= noip_c;		
+	IPInfo_Init(ifwlan_c,	IP_Info[0]);
+	IPInfo_Init(ifeth_c,	IP_Info[1]);
+	IPInfo_Init(ifuap_c,	IP_Info[2]);
+  end; // with
+end;
+
+procedure IPInfo_Show(lvl:T_ErrorLevel; var IPInfo:IP_Info_t);
 begin
   with IPInfo do
   begin
-    SAY(lvl,alias+' Link:    '+link);
-    SAY(lvl,'iface:        '+iface);
-    SAY(lvl,'wireless:     '+Bool2Str(wireless));
-    SAY(lvl,'stat:         '+Bool2Str(stat));
-	SAY(lvl,'inet:         '+ip4addr);
-//	SAY(lvl,'inetextern:   '+ip4ext);
-	SAY(lvl,'inet6:        '+ip6addr);
-	SAY(lvl,'ether:        '+hwaddr);
-	SAY(lvl,'default via:  '+gwaddr);
-	SAY(lvl,'nameserver:   '+nsaddr);
-	SAY(lvl,'domain:       '+domain);
-	SAY(lvl,'DNSname:      '+DNSname);
-	if wireless then
+	if (iface<>'') then
 	begin
-	  SAY(lvl,'SSID:         '+ssid);
-	  SAY(lvl,'Channel:      '+chan);
-	  SAY(lvl,'Freq:         '+freq);
-	  SAY(lvl,'Signal:       '+signal);
+	  SAY(lvl,alias+' Link:    '+link);
+      SAY(lvl,'iface:        '+iface);
+      SAY(lvl,'wireless:     '+Bool2YNS(wireless));
+      SAY(lvl,'stat:         '+Bool2Str(stat));
+	  SAY(lvl,'inet:         '+ip4addr);
+	  SAY(lvl,'inet6:        '+ip6addr);
+	  SAY(lvl,'ether:        '+hwaddr);
+	  SAY(lvl,'default via:  '+gwaddr);
+	  SAY(lvl,'nameserver:   '+nsaddr);
+	  SAY(lvl,'domain:       '+domain);
+	  SAY(lvl,'DNSname:      '+DNSname);
+	  if wireless then
+	  begin
+	  	SAY(lvl,'SSID:         '+ssid);
+	  	SAY(lvl,'Channel:      '+chan);
+	  	SAY(lvl,'Freq:         '+freq);
+	  	SAY(lvl,'Signal link:  '+signal_link);
+	  	SAY(lvl,'Signal level: '+signal_level);
+	  	SAY(lvl,'Signal qual:  '+signal_quality);
+	  end;
 	end;
-  end;
+  end; // with
 end;
 
-procedure IPInfosShow(lvl:T_ErrorLevel; var IPInfos:IP_Infos_t);
+procedure IPInfos_Show(lvl:T_ErrorLevel; var IPInfos:IP_Infos_t);
 var i:longint;
 begin
   with IPInfos do
   begin
     LOG_Writeln(lvl,'################################################');
-	LOG_Writeln(lvl,'idx:'+Num2Str(idx,0)+' init:'+Bool2Str(init)+' samesubnet:'+Bool2Str(samesubnet));
-	LOG_Writeln(lvl,'devlst: '+devlst+' ip4ext:'+ip4ext+' ip6ext:'+ip6ext);
-	LOG_Writeln(lvl,'hostapd_extdev: '+hostapd_extdev+' hostname:'+hostname);
+	LOG_Writeln(lvl,'idx:'+Num2Str(idx,0)+' init:'+Bool2YNS(init)+' samesubnet:'+Bool2YNS(samesubnet)+' hostname:'+hostname);
+	LOG_Writeln(lvl,'devlst: '+devlst);
+	LOG_Writeln(lvl,'ip4ext: '+ip4ext+' ip4ext1:'+ip4ext1+' ip4ext2:'+ip4ext2);
+	LOG_Writeln(lvl,'hostapd_extdev: '+hostapd_extdev);
   	for i:= 0 to IP_infomax_c do 
   	begin
   	  LOG_Writeln(lvl,Num2Str(i,2)+' #############################################');
-  	  IPInfoShow(lvl,IP_Info[i]);
+  	  IPInfo_Show(lvl,IP_Info[i]);
   	end;
   	LOG_Writeln(lvl,'################################################');
   end; // with
-end;
-
-function  GetHostNameOS:string;
-var computer:string; {$IFDEF Win32}c:array[0..127] of Char; sz:dword;{$ENDIF}
-begin
-  computer:='';
-  {$IFDEF Win32} sz:=SizeOf(c); GetComputerName(c,sz); computer:=c;
-  {$ELSE} computer:=unix.GetHostName; {$ENDIF}
-  GetHostNameOS:=computer;
 end;
 
 procedure IPInfo_GetOS(var IPInfo:IP_Info_t);
@@ -5163,18 +5982,20 @@ procedure IPInfo_GetOS(var IPInfo:IP_Info_t);
 // ip -f inet addr show wlan0 | grep -Po 'inet \K[\d.]+'
 // IN: eth0 or wlan0
 // eth: enx???????? wlan: wlx????????
+// https://www.hpl.hp.com/personal/Jean_Tourrilhes/Linux/Linux.Wireless.Extensions.html
   procedure xx(srch,istr:string; nr:longint; var ostr:string);
   begin 
     if 	(Pos(srch,istr)>0) and ((ostr='') or (ostr=noip_c)) then 
 	  ostr:=CSV_Item(istr,' ',nr);
   end;
-var res:integer; n:longint; _tl:TStringList; sh:string;
+var res,sig:integer; n:longint; _tl:TStringList; sh,sh1:string;
 begin
 //LOG_Writeln(LOG_WARNING,'  IPInfo_GetOS+');
   _tl:=TStringList.create;   // echo wlan0 Link: `cat /sys/class/net/wlan0/carrier`
   with IPInfo do
   begin
     IPInfo_Init(iface,IPInfo);
+    
     sh:=sudo+'ip a show '+iface+' ; '+
   		 	 'echo '+iface+' Link: `cat /sys/class/net/'+iface+'/carrier` ; ';
   	wireless:=((Pos('wlan',lower(iface))>0) or (Pos('wlx',lower(iface))>0));
@@ -5183,7 +6004,7 @@ begin
 	sh:=sh+	'echo SSID: `iwgetid -r` ; '+
 			'echo Chan: `iwgetid -c | awk -F '':'' ''{print $2}''` ; '+
 			'echo Freq: `iwgetid -f | awk -F '':'' ''{print $2}''` ; '+
-			'echo Signal: `cat /proc/net/wireless | tail -1 | awk ''{print $3}''` ; ';
+			'echo Signal: `cat /proc/net/wireless | tail -1 | awk ''{print $3","$4}''` ; ';
 //  	 wlan0: 0000   60.  -50.  -256        0      0      0     32      0        0
   	end;
   	sh:=sh+	'ip route show ; '+
@@ -5216,108 +6037,206 @@ begin
       	  end;
       	  if (Pos('Signal: ',sh)>0) then 
       	  begin
-    	  	signal:=		Trimme(Select_RightItems(sh,' ','',2),3);
-//		  	writeln('sig:',signal,':',sh);
-    	  	if (signal='') or (signal='tus')
-    	  	  then signal:=	none_c
-    		  else signal:=	StringReplace(signal,'.','%',[]);
+    	  	sh1:=			Trimme(Select_RightItems(sh,' ','',2),3);
+		  	signal_link:=	CSV_Item(sh1,1);
+		  	signal_level:=	CSV_Item(sh1,2);
+    	  	if (signal_link='') or (signal_link='tus') then 
+    	  	begin
+    	  	  signal_link:=none_c; signal_level:=none_c; signal_quality:=nodata_c;
+    	  	end
+    		else 
+    		begin 
+    		  signal_link:= GetNumChar2(signal_link)+'%';
+    		  signal_level:=GetNumChar2(signal_level);  
+    		  if not Str2Num(signal_level,sig) then sig:=999;
+  			  case sig of
+ 			     -64..  0:	signal_quality:='excellent';	// 66 - 100 %
+			     -69..-65:	signal_quality:='very good';	// 59 -	 65
+ 			     -89..-70:	signal_quality:='acceptable';	// 30 -  58
+  			  	-110..-90:	signal_quality:='very poor';	//  0 -  29  
+    			else		signal_quality:= nodata_c;
+  			  end; // case
+  			  signal_level:=signal_level+' dBm';  
+    		end;
+//    		writeln(sh,' sh1:',sh1,':',signal_link,':',signal_level,':',signal_quality);
       	  end;
       	end;
       end; // for
   	end else LOG_Writeln(LOG_ERROR,'GetIPInfos: '+Num2Str(res,0));
-  	if (link='1') then link:='UP' else link:='DOWN';
+  	
+  	link:=Upper(Bool2UpDown(link='1'));
+  	
   	_tl.free;
-  	stat:=((link='UP') and (ip4addr<>noip_c));
+  	stat:=((Upper(link)='UP') and (ip4addr<>noip_c));
   	if stat then DNSname:=LNX_ResolveIP2name(CSV_Item(ip4addr,'/',1));
+
 //GetIPInfos[wlan0]: MAC:b8:27:eb:d9:a6:01 IP4:10.8.81.135/24 IP6:noIPAdr GW:10.8.81.1 DNS:10.8.81.1 Domain:muo.basis.biz ext:188.192.178.135
-  	sh:='GetIPInfos['+alias+'/'+iface+']: MAC:'+hwaddr+' IP4:'+ip4addr+' IP6:'+ip6addr+' GW:'+gwaddr+' DNS:'+nsaddr+' Domain:'+domain+' dnsname:'+DNSname+' wireless:'+Bool2Str(wireless);
+(*  sh:='GetIPInfos['+alias+'/'+iface+']: MAC:'+hwaddr+
+		' IP4:'+ip4addr+' IP6:'+ip6addr+' GW:'+gwaddr+
+		' DNS:'+nsaddr+' Domain:'+domain+
+		' dnsname:'+DNSname+' wireless:'+Bool2Str(wireless); *)
 //	if stat then SAY(LOG_INFO,sh) else SAY(LOG_WARNING,sh);
 //	IPInfoShow(LOG_INFO,IPInfo);
+
   end; // with
 //LOG_Writeln(LOG_WARNING,'  IPInfo_GetOS-');
 end;
 
-procedure  IPInfo_GetOS(var IPInfos:IP_Infos_t);
-var ok:boolean; n,i1,i2,anz,_idx:longint; devnam:string;
+function  TH_IPInfo_GetOS(ptr:pointer):ptrint;
+//function  TH_IPInfo_GetOS(var IPInfos:IP_Infos_t):ptrint;
+var ok:boolean; n,i1,i2,_idx:longint; devnam:string;
 begin
+//LOG_Writeln(LOG_WARNING,'start TH_IPInfo_GetOS');
+  Thread_SetName('IPInfo_GetOS');  
   ok:=false;
-//LOG_Writeln(LOG_WARNING,'IPInfo_GetOS+');
-  with IPInfos do
-  begin
-    if not init then 	// access HW
-    begin
-      hostname:=GetHostNameOS;
-      if (call_external_prog(LOG_NONE,'ls -1r /sys/class/net/',devlst)<>0) then devlst:='';
-      devlst:=StringReplace(devlst,LineEnding,',',[rfReplaceAll]);	// wlan0,lo,eth0,ap0
-// https://unix.stackexchange.com/questions/22615/how-can-i-get-my-external-ip-address-in-a-shell-script
-//    if (call_external_prog(LOG_NONE,'dig @resolver1.opendns.com ANY myip.opendns.com -4 +short',ip4ext)<>0) then ip4ext:=noip_c;	
-//    if (call_external_prog(LOG_NONE,'dig @resolver1.opendns.com ANY myip.opendns.com -6 +short',ip6ext)<>0) then ip6ext:=noip_c;	
-      if (call_external_prog(LOG_NONE,'dig txt o-o.myaddr.test.l.google.com @ns1.google.com +short -4',ip4ext)<>0) then ip4ext:=noip_c;	
-      if (call_external_prog(LOG_NONE,'dig txt o-o.myaddr.test.l.google.com @ns1.google.com +short -6',ip6ext)<>0) then ip6ext:=noip_c;
-      ip4ext:=StringReplace(ip4ext,'"','',[rfReplaceAll]);	
-      ip6ext:=StringReplace(ip6ext,'"','',[rfReplaceAll]);
-      if (ip4ext='') then ip4ext:=noip_c; if (ip6ext='') then ip6ext:=noip_c;
-// writeln('devlist:',devlst,':');
-      samesubnet:=false;
-      anz:=CSV_Count(devlst);
-	  for n:= 1 to anz do 
+  with IP_Infos_ptr(ptr)^ do
+  begin	  
+    hostname:=GetHostNameOS;
+//	LOG_Writeln(LOG_WARNING,'IPInfo_GetOS#1');
+ 
+    if (call_external_prog(LOG_NONE,'ls -1r /sys/class/net/',devlst)<>0) then devlst:='';
+//	LOG_Writeln(LOG_WARNING,'IPInfo_GetOS#2');
+    devlst:=StringReplace(devlst,LineEnding,',',[rfReplaceAll]);	// wlan0,lo,eth0,ap0 
+// 	writeln('devlist:',devlst,':');
+	for n:= 1 to CSV_Count(devlst) do 
+	begin
+	  devnam:=CSV_Item(devlst,n);	// e.g. wlan0 or wlx?????
+	  _idx:=-1;
+	  if (Pos('wlan0',devnam)>0) or (Pos('wlx',devnam)>0)	then _idx:=IP_infoWLAN0idx_c;
+	  if (Pos('wlan1',devnam)>0) 							then _idx:=IP_infoWLAN1idx_c;
+	  if (Pos('eth',  devnam)>0) or (Pos('enx',devnam)>0)	then _idx:=IP_infoETH0idx_c;
+	  if (devnam=ifuap_c)									then _idx:=IP_infoUAP0idx_c; // IP_infomax_c
+
+	  if (_idx>=0) and (_idx<=IP_infomax_c) then
 	  begin
-	    devnam:=CSV_Item(devlst,n);	// e.g. wlan0 or wlx?????
-	    _idx:=-1;
-	    if (Pos('wlan0',devnam)>0) or (Pos('wlx',devnam)>0)	then _idx:=IP_infoWLAN0idx_c;
-	    if (Pos('wlan1',devnam)>0) 							then _idx:=IP_infoWLAN1idx_c;
-	    if (Pos('eth',  devnam)>0) or (Pos('enx',devnam)>0)	then _idx:=IP_infoETH0idx_c;
-	    if (devnam=ifuap_c)									then _idx:=IP_infoUAP0idx_c; // IP_infomax_c
-
-	    if (_idx>=0) and (_idx<=IP_infomax_c) then
-	    begin
-	      IP_Info[_idx].iface:=devnam;
-		  IPInfo_GetOS(IP_Info[_idx]);
-//		  if (IP_Info[_idx].iface=ifuap_c) then IP_Info[_idx].ssid:='';		  
-		  if not ok then 
+	    IP_Info[_idx].iface:=devnam;
+		IPInfo_GetOS(IP_Info[_idx]);
+//		if (IP_Info[_idx].iface=ifuap_c) then IP_Info[_idx].ssid:='';		  
+		if not ok then 
+		begin // only once
+		  if IP_Info[_idx].stat then 
 		  begin
-		  	if IP_Info[_idx].stat then 
-		  	begin
-			  ok:=true;
-			  idx:=_idx;
-		  	end;
+			ok:=true;
+			idx:=_idx;
 		  end;
+		end;
 // IPInfoShow(LOG_INFO,IP_Info[_idx]);
-		end; // else LOG_Writeln(LOG_ERROR,'IPInfo_GetOS: wrong idx '+Num2Str(_idx,0));
-	  end; // for
-	  init:=true;
-	end; // if
-
+	  end; // else LOG_Writeln(LOG_ERROR,'IPInfo_GetOS: wrong idx '+Num2Str(_idx,0));
+	end; // for
+	  
+    samesubnet:=false;
+//	LOG_Writeln(LOG_WARNING,'IPInfo_GetOS#3');
 	hostapd_extdev:=ifeth_c;
 	if (not IP_Info[IP_infoETH0idx_c].stat) then
 	begin
-	  if IP_Info[IP_infoWLAN0idx_c].stat then hostapd_extdev:=IP_Info[IP_infoWLAN0idx_c].iface;	// wlan0
-	  if IP_Info[IP_infoWLAN1idx_c].stat then hostapd_extdev:=IP_Info[IP_infoWLAN1idx_c].iface;	// wlan1
-	end else 				  				  hostapd_extdev:=IP_Info[IP_infoETH0idx_c].iface;  // eth0
+	  if IP_Info[IP_infoWLAN0idx_c].stat then hostapd_extdev:=IP_Info[IP_infoWLAN0idx_c].iface; // wlan0
+	  if IP_Info[IP_infoWLAN1idx_c].stat then hostapd_extdev:=IP_Info[IP_infoWLAN1idx_c].iface; // wlan1
+	end else 				  				  hostapd_extdev:=IP_Info[IP_infoETH0idx_c ].iface; // eth0
 	
 (*	for n:= 1 to 2 do
 	begin
 	  if not samesubnet then 
 		samesubnet:=
 		  ((IP_Info[n-1].ip4addr<>noip_c) and (IP_Info[n].ip4addr<>noip_c) and 
-		  	IP4AddrsInSameSubnet(IP_Info[n-1].ip4addr,IP_Info[n].ip4addr));
+	  	    IP4AddrsInSameSubnet(IP_Info[n-1].ip4addr,IP_Info[n].ip4addr));
 	end; *)
 
 	i1:=IPInfo_GetIdx(ifeth_c); i2:=IPInfo_GetIdx(ifwlan_c);
 	samesubnet:=
-	  ((IP_Info[i1].ip4addr<>noip_c) and (IP_Info[i2].ip4addr<>noip_c) and 
-		IP4AddrsInSameSubnet(IP_Info[i1].ip4addr,IP_Info[i2].ip4addr));
+	  	((IP_Info[i1].ip4addr<>noip_c) and (IP_Info[i2].ip4addr<>noip_c) and 
+		  IP4AddrsInSameSubnet(IP_Info[i1].ip4addr,IP_Info[i2].ip4addr));
+//writeln('idx:',idx,' samesubnet:',samesubnet);	  
+	  
+	init1:=true;
 
-//writeln('idx:',idx,' samesubnet:',samesubnet);
+//	https://unix.stackexchange.com/questions/22615/how-can-i-get-my-external-ip-address-in-a-shell-script
+//	if (call_external_prog(LOG_NONE,'dig @resolver1.opendns.com ANY myip.opendns.com -4 +short',ip4ext)<>0) then ip4ext:=noip_c;
+
+//	LOG_Writeln(LOG_WARNING,'IPInfo_GetOS#4');
+    if (call_external_prog(LOG_NONE,'dig txt o-o.myaddr.test.l.google.com @ns1.google.com +short -4',ip4ext1)=0) then 
+    begin
+	  ip4ext1:=StringReplace(ip4ext1,'"','',[rfReplaceAll]);	
+      if (ip4ext1='') 		then ip4ext1:=noip_c; 
+    end else ip4ext1:=noip_c;
+    ip4ext:=ip4ext1;	
+
+//	LOG_Writeln(LOG_WARNING,'IPInfo_GetOS#5');
+//	curl -s http://whatismyip.akamai.com/	
+	if (ip4ext<>noip_c) then
+	begin
+	  if (call_external_prog(LOG_NONE,'curl -s http://whatismyip.akamai.com/',ip4ext2)=0) then 
+      begin
+      	ip4ext2:=StringReplace(ip4ext2,'"','',[rfReplaceAll]);	
+      	if (ip4ext2='') 		then ip4ext2:=noip_c;
+      	if (ip4ext2<>noip_c)	then ip4ext:=ip4ext2; 
+      end else ip4ext2:=noip_c;
+    end;
+	  
+//	LOG_Writeln(LOG_WARNING,'IPInfo_GetOS#9');
+	init:=true;
+  end; // with
+  
+//LOG_Writeln(LOG_WARNING,'end  TH_IPInfo_GetOS');
+  EndThread;  
+  TH_IPInfo_GetOS:=0;
+end;
+
+procedure  IPInfo_GetOS(var IPInfos:IP_Infos_t);
+begin
+//LOG_Writeln(LOG_WARNING,'IPInfo_GetOS+');
+  with IPInfos do
+  begin
+    if not init then 	// access HW
+    begin
+	  BeginThread(@TH_IPInfo_GetOS,@IPInfos); // get infos async
+	end; // if
   end; // with
 //LOG_Writeln(LOG_WARNING,'IPInfo_GetOS-');
 end;
 
 procedure IPInfo_GetOS; 
 begin 
-  IP_Infos.init:=false;		// force OS read
+  IP_Infos.init1:=false;	
+  IP_Infos.init:= false;		// force OS read
   IPInfo_GetOS(IP_Infos); 
 end; 
+
+function  IPInfo_Wait:boolean;
+var _idx:longint;
+begin
+  _idx:=0;
+  while ((_idx<100) and (not IP_Infos.init)) do
+  begin
+	delay_msec(10);
+	inc(_idx);
+  end;
+//LOG_Writeln(LOG_ERROR,'delay:'+Num2Str(_idx*10,0)+'ms');
+  IPInfo_Wait:=IP_Infos.init;
+end;
+
+function  IPInfo_Wait1:boolean;
+var _idx:longint;
+begin
+  _idx:=0;
+  while ((_idx<100) and (not IP_Infos.init1)) do
+  begin
+	delay_msec(10);
+	inc(_idx);
+  end;
+//LOG_Writeln(LOG_ERROR,'delay:'+Num2Str(_idx*10,0)+'ms');
+  IPInfo_Wait1:=IP_Infos.init1;
+end;
+
+procedure IPInfo_Test;
+var i:longint;
+begin
+  IPInfo_GetOS;
+  for i:= 1 to 30 do
+  begin
+    delay_msec(1000);
+    IPInfos_Show(LOG_WARNING, IP_Infos);
+  end;
+end;
 
 function  IPInfo_GetInterfaceName(intidx:longint):string;
 var sh:string;
@@ -5346,93 +6265,110 @@ begin
   IPInfo_GetIdx:=_idx;
 end;
 
-function  IP_iface(aliasname:string):string;
-// IN: wlan0 OUT: wlan0 or wlxxxxxxx
+function  IPInfo_GetWLANSignal(iface:string):longint; 	// 999,0-100
+// 999: not avail // 0-100%
+var _sig:longint;
 begin
-//IPInfo_GetOS;
-  IP_iface:=IP_Infos.IP_Info[IPInfo_GetIdx(aliasname)].iface;
-end;
-function  IP4_Addr(iface:string):string;
-begin
-//IPInfo_GetOS;
-  IP4_Addr:=IP_Infos.IP_Info[IPInfo_GetIdx(iface)].ip4addr;
-end;
-function  IP6_Addr(iface:string):string;
-begin
-//IPInfo_GetOS;
-  IP6_Addr:=IP_Infos.IP_Info[IPInfo_GetIdx(iface)].ip6addr;
-end;
-
-function  GetIPAdr(iface:string; var ipaddr:string; ip4:boolean):boolean;
-begin
-  if ip4 then ipaddr:=IP4_Addr(iface) else ipaddr:=IP6_Addr(iface);
-  GetIPAdr:=((ipaddr<>'') and (ipaddr<>noip_c));
-end;
-
-function  GetMACAdr(iface:string; var hwaddr:string):boolean;
-begin
-  hwaddr:=IP_Infos.IP_Info[IPInfo_GetIdx(iface)].hwaddr; 
-  GetMACAdr:=(hwaddr<>'');
-end;
-
-function  GetDomainName(iface:string):string;
-begin
-//IPInfo_GetOS;
-  GetDomainName:=IP_Infos.IP_Info[IPInfo_GetIdx(iface)].domain;
-end;
-
-function  GetDomainName:string;
-var sh:string;
-begin
-//IPInfo_GetOS;
-  with IP_Infos do
-  begin
-    if (idx>=0) and (idx<=IP_infomax_c) then sh:=IP_Infos.IP_Info[idx].domain else sh:='';
-  end; // with
-  GetDomainName:=sh;
-end;
-
-function  GetMainDomainName:string;
-var n:longint; domain:string;
-begin
-  domain:=GetDomainName;	// def.ghi.com
-  n:=Anz_Item(domain,'.','');
-  if (n>=2) then domain:=Select_RightItems(domain,'.','',(n-1)); // ghi.com
-  GetMainDomainName:=domain;
-end;
-
-function  GetHostName:string; 
-begin 
-//IPInfo_GetOS;
-  GetHostName:=IP_Infos.hostname;
-end;
-
-function  IS_Online(ip4:boolean):boolean;
-var _ok:boolean;
-begin
-  _ok:=false;
-  with IP_Infos do
-  begin
-	if ip4 	then _ok:=(ip4ext<>noip_c)
-			else _ok:=(ip6ext<>noip_c);
-  end; // with
-  IS_Online:=_ok;
-end;
-
-function  GetWLANSignal(iface:string):longint; 	// -1,0-100
-// -1: not avail // 0-100%
-var _idx,_sig:longint;
-begin
-  _sig:=-1;
-  _idx:=IPInfo_GetIdx(iface);
-  with IP_Infos.IP_Info[_idx] do
+  _sig:=999;
+  with IP_Infos.IP_Info[IPInfo_GetIdx(iface)] do
   begin
 	if wireless then 
-	  if not Str2Num(GetNumChar(signal),_sig) then _sig:=-1;
+	  if not Str2Num(GetNumChar2(signal_link),_sig) then _sig:=999;
   end; // with
-(*SAY(LOG_WARNING,'GetWLANSignal: '+iface+' '+Num2Str(_idx,0)+' '+Num2Str(_sig,0));
-IPInfoShow(LOG_WARNING,IP_Infos.IP_Info[_idx]); *)
-  GetWLANSignal:=_sig;
+  IPInfo_GetWLANSignal:=_sig;
+end;
+
+function  IPInfo_GetWLANSigDB(iface:string):longint; 	// 999,-100..0
+// 999: not avail // -100...0db
+var _sig:longint;
+begin
+  _sig:=999;
+  with IP_Infos.IP_Info[IPInfo_GetIdx(iface)] do
+  begin
+	if wireless then 
+	  if not Str2Num(GetNumChar2(signal_level),_sig) then _sig:=999;
+  end; // with
+  IPInfo_GetWLANSigDB:=_sig;
+end;
+
+function  IPInfo_iface(aliasname:string):string;
+// IN: wlan0 OUT: wlan0 or wlxxxxxxx
+begin IPInfo_iface:=IP_Infos.IP_Info[IPInfo_GetIdx(aliasname)].iface; end;
+
+function  IPInfo_Addr4(iface:string):string;
+begin IPInfo_Addr4:=IP_Infos.IP_Info[IPInfo_GetIdx(iface)].ip4addr; end;
+
+function  IPInfo_Addr6(iface:string):string;
+begin IPInfo_Addr6:=IP_Infos.IP_Info[IPInfo_GetIdx(iface)].ip6addr; end;
+
+function  IPInfo_GetIPAdr(iface:string; var ipaddr:string; ip4:boolean):boolean;
+begin
+  if ip4 then ipaddr:=IPInfo_Addr4(iface) else ipaddr:=IPInfo_Addr6(iface);
+  IPInfo_GetIPAdr:=((ipaddr<>'') and (ipaddr<>noip_c));
+end;
+
+function  IPInfo_GetMACAdr(iface:string; var hwaddr:string):boolean;
+begin
+  hwaddr:=IP_Infos.IP_Info[IPInfo_GetIdx(iface)].hwaddr; 
+  IPInfo_GetMACAdr:=(hwaddr<>'');
+end;
+
+function IPInfo_MACAddr(iface:string; fmt:byte):string;
+// formats mac addr of given 'iface'. If not avail, cpu snr is used
+var n:longint; sh:string;
+begin 
+  sh:=GetHexChar(IP_Infos.IP_Info[IPInfo_GetIdx(iface)].hwaddr);
+  if (Length(sh)<12) then sh:=Trimme(cpu_snr,4);
+  case fmt of
+    1..12: 	begin // use trailing chars
+      		  n:=Length(sh); 
+      		  if (n>=fmt) then sh:=copy(sh,n-fmt+1,fmt) else sh:='';
+      		end;
+  end; // case
+  IPInfo_MACAddr:=sh;  
+end;
+
+function  IPInfo_AddrExt(ip4:boolean):string;
+begin IPInfo_AddrExt:=IP_Infos.ip4ext; end;
+
+function  IPInfo_IsOnline(ip4:boolean):boolean;
+begin IPInfo_IsOnline:=(IPInfo_AddrExt(ip4)<>noip_c); end;
+
+function  IPInfo_GetDomainName(iface:string):string;
+begin IPInfo_GetDomainName:=IP_Infos.IP_Info[IPInfo_GetIdx(iface)].domain; end;
+
+function  IPInfo_GetDomainName:string;
+var sh:string;
+begin
+  with IP_Infos do
+  begin
+    if (idx>=0) and (idx<=IP_infomax_c) 
+      then sh:=IP_Infos.IP_Info[idx].domain 
+      else sh:='';
+  end; // with
+  IPInfo_GetDomainName:=sh;
+end;
+
+function  IPInfo_GetMainDomainName:string;
+var n:longint; domain:string;
+begin
+  domain:=IPInfo_GetDomainName;	// def.ghi.com
+  n:=Anz_Item(domain,'.','');
+  if (n>=2) then domain:=Select_RightItems(domain,'.','',(n-1)); // ghi.com
+  IPInfo_GetMainDomainName:=domain;
+end;
+
+function  IPInfo_GetHostName:string;
+// 20210729 renamed from GetHostName. conflicting unix unit 
+begin IPInfo_GetHostName:=IP_Infos.hostname; end;
+
+function  GetHostNameOS:string;
+var computer:string; {$IFDEF Win32}c:array[0..127] of Char; sz:dword;{$ENDIF}
+begin
+  computer:='';
+  {$IFDEF Win32} sz:=SizeOf(c); GetComputerName(c,sz); computer:=c;
+  {$ELSE} computer:=unix.GetHostName; {$ENDIF}
+  GetHostNameOS:=computer;
 end;
 
 function  RPI_cxt_GPIOopts(flgs:s_port_flags):string;
@@ -5567,34 +6503,13 @@ begin
   RPI_WLANavailChan:=CSV_RemLastSep(sh,'|');
 end;
 
-function MAC_Addr(iface:string; fmt:byte):string;
-var n:longint; sh:string;
-begin 
-//IPInfo_GetOS;
-  sh:=GetHexChar(IP_Infos.IP_Info[IPInfo_GetIdx(iface)].hwaddr);
-  if (Length(sh)<12) then sh:=cpu_snr;
-  case fmt of
-    1..12: 	begin
-      		  n:=Length(sh); 
-      		  if (n>=fmt) then sh:=copy(sh,n-fmt+1,fmt) else sh:='';
-      		end;
-  end; // case
-  MAC_Addr:=sh;  
-end;
-
 function  MAC_isRPI(macsubstr:string):boolean;
 begin
   macsubstr:=FilterChar(upper(macsubstr),'0123456789abcdefABCDEF');
   MAC_isRPI:=( (Pos('B827EB',macsubstr)=1) or (Pos('DCA632',macsubstr)=1) );
 end;
 
-function  IP4_AddrExt:string;
-begin
-//IPInfo_GetOS;
-  IP4_AddrExt:=IP_Infos.ip4ext;
-end;
-
-function  IP4_AddrValid(ipstr:string):boolean;
+function  IP4AddrValid(ipstr:string):boolean;
 // e.g. 192.168.1.2/32
 const cnt_c=4;
 var ok:boolean; n,anz,li:longint; sh,sh1,sh2:string; 
@@ -5625,7 +6540,7 @@ begin
 	  end else ok:=false;
 	end;
   end;
-  IP4_AddrValid:=ok;
+  IP4AddrValid:=ok;
 end;
 
 function  IP4AddrListValid(ipliststr:string):boolean;
@@ -5637,16 +6552,16 @@ begin
   for n:=1 to Anz_Item(ipliststr,',','') do
   begin
     sh:=CSV_Item(ipliststr,n);
-	if not IP4_AddrValid(sh) then 
+	if not IP4AddrValid(sh) then 
 	begin
 	  ok:=false;
-	  LOG_Writeln(LOG_ERROR,'IP4AddrListValid: '+sh+' no valid entry in list '+ipliststr);
+//	  LOG_Writeln(LOG_ERROR,'IP4AddrListValid: '+sh+' no valid entry in list '+ipliststr);
 	end;
   end;
   IP4AddrListValid:=ok;
 end;
 
-function  IP6_AddrValid(ipstr:string):boolean;
+function  IP6AddrValid(ipstr:string):boolean;
 // e.g. 2001:0db8:85a3:08d3:1319:8a2e:0370:7344/48
 const cnt_c=8;
 var ok:boolean; n,anz,li:longint; sh,sh1,sh2:string; 
@@ -5677,7 +6592,7 @@ begin
 	  end else ok:=false;
 	end;
   end;
-  IP6_AddrValid:=ok;
+  IP6AddrValid:=ok;
 end;
 
 function  IP6AddrListValid(ipliststr:string):boolean;
@@ -5688,10 +6603,10 @@ begin
   for n:=1 to CSV_Count(ipliststr) do
   begin
     sh:=CSV_Item(ipliststr,n);
-	if not IP6_AddrValid(sh) then 
+	if not IP6AddrValid(sh) then 
 	begin
 	  ok:=false;
-	  LOG_Writeln(LOG_ERROR,'IP6AddrListValid: '+sh+' no valid entry in list '+ipliststr);
+//	  LOG_Writeln(LOG_ERROR,'IP6AddrListValid: '+sh+' no valid entry in list '+ipliststr);
 	end;
   end;
   IP6AddrListValid:=ok;
@@ -5705,13 +6620,13 @@ begin
   for n:=1 to CSV_Count(ipliststr) do
   begin
     sh:=CSV_Item(ipliststr,n);
-	if not (IP4_AddrValid(sh) or IP6_AddrValid(sh)) then 
+	if not (IP4AddrValid(sh) or IP6AddrValid(sh)) then 
 	begin
 	  ok:=false;
-	  LOG_Writeln(LOG_ERROR,'IPAddrListValid: '+sh+' no valid entry in list '+ipliststr);
+//	  LOG_Writeln(LOG_ERROR,'IPAddrListValid: '+sh+' no valid entry in list '+ipliststr);
 	end;
   end;
-writeln('IPAddrListValid:',ipliststr,':',ok);
+//writeln('IPAddrListValid:',ipliststr,':',ok);
   IPAddrListValid:=ok;
 end;
 
@@ -5722,7 +6637,7 @@ function  IP4AddrsInSameSubnet(ip4adr1,ip4adr2:string):boolean;
 var _ok:boolean; subm:longint; ipn1,ipn2:string;
 begin
   _ok:=false;
-  if IP4_AddrValid(ip4adr1) and IP4_AddrValid(ip4adr2) then
+  if IP4AddrValid(ip4adr1) and IP4AddrValid(ip4adr2) then
   begin
     if not 	 Str2Num(CSV_Item(ip4adr2,'/',2),subm) then 
 	  if not Str2Num(CSV_Item(ip4adr1,'/',2),subm) then subm:=24;
@@ -5740,7 +6655,7 @@ begin
   IP4AddrsInSameSubnet:=_ok;
 end;
 
-function  ShortString(fmt,maxlgt,divdr:longint; str:string):string;
+function  ShortStrng(fmt,maxlgt,divdr:longint; str:string):string;
 const shrtA='..'; shrtE='\u2026'; // horizontalEllipsis
 var li1,li2:longint; sh:string;
 begin
@@ -5764,10 +6679,10 @@ begin
       		end;
        20:	sh:=shrtE+copy(str,Length(str)-maxlgt+1+1,maxlgt);				// cut left
        40:	sh:=copy(str,1,(maxlgt-1))+shrtE;								// cut right
-      else	sh:=ShortString(40,maxlgt,divdr,str);
+      else	sh:=ShortStrng(40,maxlgt,divdr,str);
     end;
   end else sh:=str;
-  ShortString:=sh;
+  ShortStrng:=sh;
 end;
 
 function  Num2Limit(var Value:real; MinOut,MaxOut:real):boolean;
@@ -5966,7 +6881,7 @@ begin
     y:=(x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;   
   except
     y:=x;
-	LOG_Writeln(LOG_ERROR,'Scale: wrong value pairs');
+	LOG_Writeln(LOG_ERROR,'ScaleR: wrong value pairs');
   end;
   scale:=y;
 end;
@@ -5982,9 +6897,137 @@ begin
 			  else y:=(x - in_min) * (out_max - out_min-1) div (in_max - in_min) + out_min;
   except
 	y:=x;
-	LOG_Writeln(LOG_ERROR,'Scale: wrong value pairs');
+	LOG_Writeln(LOG_ERROR,'ScaleI: wrong value pairs');
   end;
   scale:=y;
+end;
+
+function  scale(x,in_min,in_max,out_min,out_max:int64):int64;
+var y:longint;
+begin
+  try
+	if (x = in_max) 
+	  then y:=out_max
+	  else  if (out_min < out_max)
+			  then y:=(x - in_min) * (out_max - out_min+1) div (in_max - in_min) + out_min
+			  else y:=(x - in_min) * (out_max - out_min-1) div (in_max - in_min) + out_min;
+  except
+	y:=x;
+	LOG_Writeln(LOG_ERROR,'ScaleI64: wrong value pairs');
+  end;
+  scale:=y;
+end;
+  
+function  DIST_Init(var struct:Distribution_t; ArrSize:word; fmin,fmax:real):boolean;
+var _ok:boolean; _li:longint;
+begin
+  _ok:=false;
+  try
+	with struct do
+	begin
+	  if (Length(range)=0) then
+	  begin
+	  	siz:=ArrSize+2;	// + below-vmin above-vmax
+	  	if (siz<=2) then inc(siz);
+	 	SetLength(range,siz);		 	
+	  	if (fmin<=fmax) 
+		  then begin vmin:=fmin; vmax:=fmax; end
+		  else begin vmin:=fmax; vmax:=fmin; end;
+	  	step:=(vmax-vmin)/(siz-2);
+	  	cnt:=0;
+	  	_ok:=(Length(range)=siz);
+	  	if _ok then 
+		  for _li:=0 to (siz-1) do range[_li]:=0;
+	  end else LOG_Writeln(LOG_ERROR,'DIST_Init: already inited');
+	end; /// with
+  except
+	LOG_Writeln(LOG_ERROR,'DIST_Init');
+  end;
+  DIST_Init:=_ok;
+end;
+
+procedure DIST_End(var struct:Distribution_t);
+begin 
+  try
+	with struct do
+	begin
+	  siz:=0;
+  	  SetLength(range,0); 
+  	end; // with
+  except
+	LOG_Writeln(LOG_ERROR,'DIST_End');
+  end;
+end; 
+
+function  DIST_Insert(var struct:Distribution_t; valIN:real):longint;
+var _idx:longint;
+begin
+  try
+	with struct do
+	begin
+	  if (valIN<vmin) then _idx:=0
+		else
+		  if (valIN>vmax) 
+			then _idx:=(siz-1)
+			else _idx:=round(scale(valIN,vmin,vmax,1,(siz-2)));
+//writeln('Insert[',_idx:3,']: ',valIN:8:5);
+	  inc(range[_idx]);
+	  inc(cnt);
+	end; // with
+  except
+    LOG_Writeln(LOG_ERROR,'DIST_Insert['+Num2Str(_idx,0)+']: '+Num2Str(valIN,0,5));
+    _idx:=-1;
+  end;
+  DIST_Insert:=_idx;
+end;
+
+procedure DIST_Show(var struct:Distribution_t; hdr:string);
+var _idx:longint; r:real;
+begin
+  with struct do
+  begin  	
+    if (hdr<>'') then writeln(hdr);
+    if (Length(range)>0) then
+    begin
+	  r:=vmin;
+      write('rng: ',vmin:6:1,'<');
+      for _idx:= 1 to (siz-2) do 
+      begin
+	  	r:=r + step; write(r:6:1,' ');
+	  end;
+      write(vmax:6:1,'>'); writeln;
+    
+      write('vals:');
+	  for _idx:= 0 to (siz-1) do write(range[_idx]:6,' ');
+	  writeln;
+	
+  	  write('dist:');
+      for _idx:= 0 to (siz-1) do write((range[_idx]/cnt*100):6:1,' ');
+  	  write('%'); writeln;
+  	end;
+  end; // with 
+end;
+
+procedure DIST_Test;
+// show value distribution: <2.0 [-2.0 ... +2.0] >2.0 // use 2 buckets inside + 2 for below/above
+var dist:DISTribution_t;
+begin
+  if DIST_Init(dist,2,-2.0,2.0) then
+  begin
+    DIST_Insert	(dist,-2.0001);
+    DIST_Insert	(dist,-2);
+    DIST_Insert	(dist,-2);
+    DIST_Insert	(dist,-2);
+    DIST_Insert	(dist, 2);
+    DIST_Insert	(dist, 2);
+    DIST_Insert	(dist, 2);
+    DIST_Insert	(dist, 2.0001);
+	DIST_Insert	(dist,-1.9999);
+	DIST_Insert	(dist, 0);
+	DIST_Insert	(dist, 1.9999);
+    DIST_Show	(dist,'');
+    DIST_End	(dist)
+  end else writeln('can not init');
 end;
 
 function  LeadingZeros(l:longint;digits:byte):string;
@@ -6040,7 +7083,10 @@ begin
   fildat:=0; fn:=PrepFilePath(filname);
   if FileExists(fn) then 
   begin
-    {$I-} fa:=FileAge(fn); if fa<>-1 then fildat:=FileDateToDateTime(fa); {$I+}
+    {$I-} 
+      fa:=FileAge(fn); 
+      if (fa<>-1) then fildat:=FileDateToDateTime(fa); 
+    {$I+}
   end;
   GetFileAge:=fildat;
 end;
@@ -6120,6 +7166,26 @@ begin
   FileIsRecent:=FileIsRecent(filepath,seconds_old,0);
 end;
 
+function  ContentHasChangedTimeStamp(const hashOld,hashNew:string; timeStampOld,timeStampNew:TDateTime):TDateTime;
+var modifyTStamp:TDateTime; _modHash,_modDate:boolean;
+begin
+  _modHash:=(hashOld<>hashNew); 							// hash has changed
+  _modDate:=(timeStampOld<timeStampNew);					// content is new
+  
+//_modDate:=(CompareDateTime(timeStampOld,timeStampNew)<0); // content is new
+//negative number if timeStampOld is earlier than timeStampNew, 
+//zero if they are equal, or 
+//positive number if timeStampOld is later than timeStampNew.
+
+  				   modifyTStamp:=timeStampOld;
+  if _modDate then modifyTStamp:=timeStampNew;
+  if _modHash then modifyTStamp:=now;
+  
+//LOG_Writeln(LOG_WARNING,LOG_MAGENTA,'ContentHasChangedTimeStamp['+Bool2YNS(_modHash or _modDate)+'/'+Bool2YNS(_modHash)+'/'+Bool2YNS(_modDate)+']: Hash old:'+HashTagFMT(hashOld)+' new:'+HashTagFMT(hashNew)+' Dat old:'+DateTime2FMT(8,timeStampOld)+' new:'+DateTime2FMT(8,timeStampNew));
+  
+  ContentHasChangedTimeStamp:=modifyTStamp;
+end;
+
 function  Trimme(s:string; modus:byte):string;
 begin
   case modus of
@@ -6190,6 +7256,9 @@ begin GetHexChar:=FilterChar(s,'0123456789ABCDEFabcdef'); end;
 
 function GetNumChar(s:string):string;
 begin GetNumChar:=FilterChar(s,'0123456789'); end;
+
+function GetNumChar2(s:string):string;
+begin GetNumChar2:=FilterChar(s,'0123456789-+'); end;
 
 function GetAlphaNumChar(s:string):string;
 begin GetAlphaNumChar:=FilterChar(s,'0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'); end;
@@ -6269,7 +7338,12 @@ begin
   GetPrintableChars:=sh;
 end;
 
-function  HashTag(modus:byte; filname,comment1,comment2:string):string;
+function  HashTagFMT(hash:string):string;
+begin
+  HashTagFMT:=StringReplace(hash,MD5Hash4emptyString,'<---- MD5Hash4emptyContent ---->',[rfReplaceAll]);
+end;
+
+function  HashTag(modus:byte; const filname,InString,comment:string):string;
 var hash,sh,fn:string; dt:TDateTime; m:TMemoryStream; f:file of byte; oldfilemode:byte; siz:int64;
 begin
   hash:=''; fn:=PrepFilePath(filname);
@@ -6288,7 +7362,7 @@ begin
 			  close(f); {$I+} 
 			  sh:=FormatDateTime('yyyy-mm-dd',dt)+'T'+ // YEAR-MM-DDThh:mm:ss.zz
 			      FormatDateTime('hh:nn:ss.zz',dt)+';'+
-				  Num2Str(siz,0)+';'+Num2Str(modus,0)+';'+comment1+';'+comment2;
+				  Num2Str(siz,0)+';'+Num2Str(modus,0)+';'+InString+';'+comment;
 		      hash:=MD5Print(MD5String(sh)); 
 		    end
 		    else LOG_Writeln(LOG_Error,'HashTag: file does not exist: '+fn);
@@ -6299,8 +7373,8 @@ begin
 		    begin hash:=''; LOG_Writeln(LOG_Error,'HashTag: file does not exist: '+fn); end;
 		    m.free;
 	      end;
-	   3: begin // MD5 Hash auf String 'comment1'
-	        hash:=MD5Print(MD5String(comment1)); 
+	   3: begin // MD5 Hash auf String 'InString'
+	        hash:=MD5Print(MD5String(InString)); 
 	      end;
 	 else LOG_Writeln(LOG_ERROR,'HashTag: wrong modus '+Num2Str(modus,0));
   end; // case
@@ -6308,7 +7382,7 @@ begin
   HashTag:=hash;
 end;
 
-function  HashTag(var InString:string):string; begin HashTag:=HashTag(3,'',InString,''); end;
+function  HashTag(const InString:string):string; begin HashTag:=HashTag(3,'',InString,''); end;
 
 procedure FSplit(fullfilename:string; var Directory,FName,Extension:string; extwithdot:boolean);
 var anz:integer; ext:string;
@@ -6389,8 +7463,29 @@ begin
   PrepFilePath:=s;
 end;
 
+function  escSEP(const strng:string):string;
+var li,lj:longint; sh:string;
+begin
+  sh:='';
+  for li:=1 to Length(strng) do
+  begin
+    lj:=0;
+    while (lj<=sep_max_c) do
+    begin
+      if strng[li]=sep[lj] then
+      begin
+        sh:=sh+esc_char_c;
+    	lj:=sep_max_c;
+      end;
+      inc(lj);
+    end; // while
+    sh:=sh+strng[li];
+  end; // for
+  escSEP:=sh;
+end;
+
 function  Select_Item(const strng,trenner,trenner2,dflt:string;itemno:longint):string;
-const esc_char='\';
+//const esc_char_c='\';
 var   str,hs,tr1,tr2 : string; bcnt,trcnt : longint; dhk_start,esc_start,xx,ende:boolean;
   function detsep(s,seporig,notuse1,notuse2:string):string;
   (* find unique Byte as Seperator *)
@@ -6417,7 +7512,7 @@ begin
   begin
     if (xx) and ((str[bcnt] = tr2)) and (not esc_start) then dhk_start:= not dhk_start;
     if (str[bcnt]=tr1) and (not dhk_start) then INC(trcnt);
-	if (str[bcnt]<>esc_char) then esc_start := false;
+	if (str[bcnt]<>esc_char_c) then esc_start := false;
     if (trcnt=itemno) and ((str[bcnt]<>tr1) or dhk_start) then hs:=hs+str[bcnt];
 (* writeln(str[bcnt],' ',bcnt:2,' ',trcnt:2,'    '); *) 
 	INC(bcnt);
@@ -6540,7 +7635,7 @@ begin
   StringListMinMaxValue:=(b1 and b2);
 end;
 
-procedure StringListSnap(StrListIn,StrListOut:TStringList; srchstrng:string);
+procedure StringListSnap(StrListIn,StrListOut:TStringList; const srchstrng:string);
 var i:longint;
 begin
   StrListOut.clear;
@@ -6550,7 +7645,15 @@ begin
   end;
 end;
 
-function  SearchStringInList(StrList:TStringList; srchstrng:string):string;
+function  xxxSearchStringInList(StrList:TStringList; const srchstrng:string):string;
+var sh:string; n:longint;
+begin
+  n:=StrList.IndexOf(srchstrng); // not case sensitive !!!!!!
+  if (n>=0) then sh:=StrList[n] else sh:='';
+  xxxSearchStringInList:=sh;
+end;
+
+function  SearchStringInList(StrList:TStringList; const srchstrng:string):string;
 var sh:string; n:longint;
 begin
   n:=1; sh:='';
@@ -6562,7 +7665,7 @@ begin
   SearchStringInList:=sh;
 end;
 
-function  SearchStringInListIdx(StrList:TStringList; srchstrng:string; occurance,StartIdx:longint):longint;
+function  SearchStringInListIdx(StrList:TStringList; const srchstrng:string; occurance,StartIdx:longint):longint;
 // return idx, where searchstring occurs to the 'occurance' count. If not then return -1;
 // if occurence>0 then search list from 1. to last record
 // if occurence<0 then search list from end to 1. record
@@ -6571,44 +7674,71 @@ begin
   found:=false; ret:=-1; occhelp:=0;
   if occurance>0 then
   begin // von 1-Ende durchsuchen
-    n:=StartIdx; if n<0 then n:=0;
+    n:=StartIdx; 
+    if n<0 then n:=0;
+
     while (n<StrList.Count) and not found do
     begin
       if (Pos(srchstrng,StrList[n])>0) then 
 	  begin 
 	    inc(occhelp); 
-	    if (occhelp=occurance) then begin found :=true; ret:=n; end; 
+	    if (occhelp=occurance) then 
+	    begin 
+	      found:=true; 
+	      ret:=  n; 
+	    end; 
 	  end;
       inc(n);  
     end;
+    
+(*  repeat
+	  n:=StrList.IndexOf(srchstrng, n);  // would be nice to have a startidx and case sensitivity
+	  if (n>=0) then 
+	  begin
+		inc(occhelp);
+		found:=(occhelp>=occurance);
+		if found then ret:=n;
+		inc(n);
+	  end;
+    until (n<0) or found; *)
+
   end;
   if occurance<0 then
   begin // von Ende-1 durchsuchen
-    n:=StartIdx; if (n<=0) or (n>=StrList.Count) then n:=StrList.Count-1; // new 20190709
+    n:=StartIdx; 
+    if (n<=0) or (n>=StrList.Count) then n:=StrList.Count-1; // new 20190709
     while (n>=0) and not found do
     begin
-      if (Pos(srchstrng,StrList[n])>0) then begin inc(occhelp); if (occhelp=abs(occurance)) then begin found :=true; ret:=n; end; end;
+      if (Pos(srchstrng,StrList[n])>0) then 
+      begin 
+    	inc(occhelp); 
+    	if (occhelp=abs(occurance)) then 
+    	begin 
+    	  found:=true; 
+    	  ret:=  n; 
+    	end; 
+      end;
       dec(n);  
     end;
   end;
   SearchStringInListIdx:=ret;
 end;
 
-function  GiveStringListIdx(StrList:TStringList; srchstrng:string; var idx:longint; occurance,StartIdx:longint):boolean;
+function  GiveStringListIdx(StrList:TStringList; const srchstrng:string; var idx:longint; occurance,StartIdx:longint):boolean;
 var ok:boolean;
 begin
   idx:=SearchStringInListIdx(StrList, srchstrng, occurance, StartIdx); 
   if (idx>=0) and (idx<StrList.count) then ok:=true else ok:=false;  
   GiveStringListIdx:=ok;
 end;
-function  GiveStringListIdx(StrList:TStringList; srchstrng:string; var idx:longint; occurance:longint):boolean;
+function  GiveStringListIdx(StrList:TStringList; const srchstrng:string; var idx:longint; occurance:longint):boolean;
 var StrtIdx:longint;
 begin 
   StrtIdx:=0; if (occurance<0) then StrtIdx:=-1;
   GiveStringListIdx:=GiveStringListIdx(StrList,srchstrng,idx,occurance,StrtIdx); 
 end;
 
-function  GiveStringListIdx(StrList:TStringList; srchstrngSTART,srchstrngEND:string; var idx:longint):boolean;
+function  GiveStringListIdx(StrList:TStringList; const srchstrngSTART,srchstrngEND:string; var idx:longint):boolean;
 var ok,ende:boolean; sh:string; n,p1,p2:longint;
 begin
   ok:=false; ende:=false; n:=1;
@@ -6627,7 +7757,7 @@ begin
   GiveStringListIdx:=ok;
 end;
 
-function  GiveStringListIdx2(StrList:TStringList; srchstrng:string; var idxStart,idxEnd:longint):boolean;
+function  GiveStringListIdx2(StrList:TStringList; const srchstrng:string; var idxStart,idxEnd:longint):boolean;
 begin
   idxStart:=SearchStringInListIdx(StrList,srchstrng, 1,0);
   idxEnd:=  SearchStringInListIdx(StrList,srchstrng,-1,0);
@@ -6709,34 +7839,28 @@ procedure String2StringList(str:string; StrList:TStringList);
 var _tl:TStringList;
 begin
   _tl:=TStringList.create;
-  StringSplit(LF,StringReplace(str,CRLF,LF,[rfReplaceAll]),_tl);
+  StringSplit(LF,str,_tl);
   StringListAdd2List(StrList,_tl,true);
   _tl.free;
-end;
-
-procedure OLDString2StringList(str:string; StrList:TStringList);
-var li:longint; sh:string;
-begin
-  sh:=StringReplace(str,CRLF,LF,[rfReplaceAll]);
-  for li:= 1 to Anz_Item(sh,LF,'') do 
-    StrList.add(Select_Item(sh,LF,'','',li));
 end;
 
 function  StringList2String(StrList:TStringList; tr:string):string;
 var li,anz:longint; sh:string;
 begin
-  sh:=''; anz:=StrList.count;
-  for li:= 1 to anz do
+  if (Length(tr)>0) then
   begin
-//	sh:=sh+Trimme(StrList[li-1],3);	// 5:repl TAB with ' ', remove leading&trailing ' '
-    sh:=sh+StrList[li-1];	
-    if li<anz then sh:=sh+tr;
-  end;
+  	sh:=''; anz:=StrList.count;
+  	for li:= 1 to anz do
+  	begin
+      sh:=sh+StrList[li-1];	
+      if (li<anz) then sh:=sh+tr;
+  	end;
+  end else sh:=StrList.Text;
   StringList2String:=sh;
 end;
 
 function  StringList2String(StrList:TStringList):string;
-begin StringList2String:=StringList2String(StrList,LineEnding); end;
+begin StringList2String:=StrList.Text; end;
 
 function  StringList2TextFile(filname:string; StrListOut:TStringList):boolean;
 { Write StringList to TextFile }
@@ -6808,80 +7932,87 @@ begin
 end;
 
 function  StringListAdd2List(StrList1,StrList2:TStringList; append:boolean):longword; 
-//Adds StringList2 to Stringlist1. result is size of Stringlist in bytes
-var n:longint; siz:longword;  
-begin 
-  siz:=0;
-  if not append then
-  begin // add to front
-	for n := StrList2.count downto 1 do 
-    begin
-	  StrList1.insert(0,StrList2[n-1]); 
-	  inc(siz,Length(StrList2[n-1]));
-	end; 
-  end
-  else 
-  begin // append
-    for n := 1 to StrList2.count do 
-    begin
-	  StrList1.add(  StrList2[n-1]);
-	  inc(siz,Length(StrList2[n-1]));
+//Adds StringList2 to Stringlist1. result is size of Stringlist1 in bytes
+var lgt:longword; memStream:TMemoryStream;
+begin
+  try
+	memStream:=TMemoryStream.Create;
+
+	if append then
+	begin
+	  StrList1.SaveToStream(memStream);
+	  StrList2.SaveToStream(memStream); 
 	end
+	else
+	begin
+	  StrList2.SaveToStream(memStream);
+	  StrList1.SaveToStream(memStream); 
+	end;
+
+  	memStream.Seek(0, soFromBeginning);
+	StrList1.LoadFromStream(memStream);
+	lgt:=Length(StrList1.Text);
+  
+	memStream.free;
+  except
+	LOG_Writeln(LOG_ERROR,'StringListAdd2List');
+	lgt:=0;
   end;
-  StringListAdd2List:=siz;
+  StringListAdd2List:=lgt;
 end;
 
 function  StringListAdd2List(StrList1,StrList2:TStringList):longword; 
 begin StringListAdd2List:=StringListAdd2List(StrList1,StrList2,true); end;
 
-function  TextFile2StringList(filname:string; StrListOut:TStringList; var hash:string):boolean;
+function  TextFile2StringList(const filname:string; StrListOut:TStringList):boolean;
 { Read TextFile into a StringList (also possible from stdin, if filename='' ) }
-var b:boolean; fn:string;
+var ok:boolean; fn:string;
 begin
-  b:=true; fn:=PrepFilePath(filname);
-  {$I-} 
-  if FileExists(fn) then 
-  begin
-    StrListOut.LoadFromFile(fn); hash:=MD5Print(MD5String(StringList2String(StrListOut,''))); 
-	Log_Writeln(LOG_DEBUG,'Read  from file: '+fn+' lines: '+Num2Str(StrListOut.count,0)+' hash: '+hash); 
-  end 
-  else 
-  begin 
-    b:=false; hash:=''; 
-//	LOG_Writeln(LOG_Error,'TextFile2StringList: could not read file '+fn);
-  end; 
-  {$I+}
-  TextFile2StringList:=b;
+  try
+	fn:=PrepFilePath(filname);
+  	{$I-} 
+  	  ok:=FileExists(fn);
+  	  if ok then 
+  	  begin
+    	StrListOut.LoadFromFile(fn);
+//		hash:=MD5Print(MD5String(StrListOut.Text)); // do this outside of this func, if needed
+		Log_Writeln(LOG_DEBUG,'Read  from file: '+fn+' lines: '+Num2Str(StrListOut.count,0)); 
+	  end; 
+  	{$I+}
+  except
+	ok:=false; 
+  end;
+  if not ok then LOG_Writeln(LOG_Error,'TextFile2StringList: could not read file '+filname);
+  TextFile2StringList:=ok;
 end;
 
-function  TextFile2StringList(filname:string; StrListOut:TStringList; append:boolean; var hash:string):boolean;
+function  TextFile2StringList(const filname:string; StrListOut:TStringList; append:boolean):boolean;
 var tl:TStringList; ok:boolean; 
 begin
-  ok:=false; 
   if append then
   begin
     tl:=TStringList.create;
-    ok:=TextFile2StringList(filname,tl,hash);
+    ok:=TextFile2StringList(filname,tl);
 	if ok then StringListAdd2List(StrListOut,tl);
 	tl.free;
   end
   else 
   begin
     StrListOut.clear;
-    ok:=TextFile2StringList(filname,StrListOut,hash);
+    ok:=TextFile2StringList(filname,StrListOut);
   end;
   TextFile2StringList:=ok;
 end;
 
 function  TextFileContentCheck(file1,file2:string; mode:byte):boolean;
-var ok:boolean; ts1,ts2:TStringList; i:longint; hash:string;
+var ok:boolean; ts1,ts2:TStringList; i:longint;
 begin
   ok:=false;
   if FileExists(file1) and FileExists(file2) then
   begin
     ts1:=TStringList.create; ts2:=TStringList.create;
-    if TextFile2StringList(file1,ts1,false,hash) then 
-      if TextFile2StringList(file2,ts2,false,hash) then
+    if TextFile2StringList(file1,ts1) then 
+      if TextFile2StringList(file2,ts2) then
 	    if (ts1.count=ts2.count) and (ts1.count>0) then
         begin
 	      ok:=true;
@@ -6935,7 +8066,7 @@ begin
 //	  write(s,' 0x',HexStr(s));
 	  write(s+#$0d);
 	  SetTimeOut(timo,10000);
-	end else sleep(50);
+	end else delay_msec(50);
   until TimeElapsed(timo);
 end;
 
@@ -7039,6 +8170,54 @@ end;
 procedure BIOS_SetDfltSection(section:string);   begin IniFileDesc.dfltsection:=section; end;
 procedure BIOS_SetDfltFlags(flags:s_BIOS_flags); begin IniFileDesc.dfltflags:=flags; end;
 
+function  GetARRIdx(bracketset:byte; var aidx,algt:longint; var key:string):boolean;
+// IN:  bset:1 NGINX_mode{60,4}		OUT: aidx:60 algt:4 key:NGINX_mode 			ok:true
+// IN:  bset:1 NGINX_mode{62}		OUT: aidx:62 algt:1 key:NGINX_mode 			ok:true
+// IN:  bset:0 NGINX_mode[3]{60,4}	OUT: aidx: 3 algt:1 key:NGINX_mode{60,4}	ok:true
+var ok:boolean; li1,li2:longint; brO,brC:char; sh1,sh2:string;
+begin
+  ok:=false;
+  
+  case bracketset of
+  	  1: begin brO:='{'; brC:='}'; end;
+  	  2: begin brO:='('; brC:=')'; end;
+  	  3: begin brO:='<'; brC:='>'; end;
+    else begin brO:='['; brC:=']'; end;
+  end; // case
+
+  li1:=Pos(brO,key); li2:=Pos(brC,key);
+  if (li1>0) and (li2>li1) then
+  begin // e.g. NGINX_mode{60,4} -> aidx:60 algt:4
+    ok:=true;
+    algt:=li2-li1-1;					// 4
+    sh1:=copy(key,li1+1,algt);			// 60,4
+
+    if (algt>=3) and (Pos(',',sh1)>0) then
+    begin								// 60,4
+      sh2:=CSV_Item(sh1,2);				// 4
+      sh1:=CSV_Item(sh1,1);				// 60
+      ok:= Str2Num( sh2,algt);
+    end else algt:=1;
+    
+    if ok then
+    begin
+      ok:=Str2Num(sh1,aidx);
+	  if ok then
+	  begin
+		key:=copy(key,1,    li1-1) +
+			 copy(key,li2+1,Length(key)); // get rid of bracket part -> NGINX_mode
+	  end;
+	end;
+  end;
+  
+  if not ok then
+  begin
+	aidx:=-1; algt:=-1;
+  end;  
+//if (Pos('NGINX_mode',name)>0) then writeln('-GetARRIdx'+brO,aidx,brC+':',name,CR);
+  GetARRIdx:=ok;
+end;
+
 function  BIOS_GetIniString(section,name,default:string; flgs:s_BIOS_Flags):string;
 // e.g. configfile.ini content:
 // [SECNAME1]
@@ -7049,15 +8228,51 @@ function  BIOS_GetIniString(section,name,default:string; flgs:s_BIOS_Flags):stri
 // e.g. BIOS_GetIniString('SECNAME2','PARA1',false);
 // return: 'Value 1'
 // if Parameter is not found, then return default-string
-var sh:string; bol:boolean; i64:int64; qw:qword; e:extended;
+var bol1,bol2:boolean; aidx1,bidx1,aidx2,algt2:longint; 
+	i64:int64; qw:qword; e:extended; sh:string; 
 begin
-  sh:=default; 
+  sh:=default; aidx1:=-1; bidx1:=-1; aidx2:=-1; algt2:=-1; bol1:=false; bol2:=false;
   with IniFileDesc do
   begin
 	if ok then
 	begin // read in and check. if checks not met then use default value. default val is not checked
 	  if (section='') and (dfltsection<>'') then section:=dfltsection;
+
+//writeln('#0 aidx1: ',aidx1:2,' bidx1: ',bidx1,' aidx2: ',aidx2,' algt2: ',algt2,' sh: ',sh);
+	  
+	  if (BIOS_tryARRidx 	IN flgs) then 
+	  begin // indexed access e.g. MYVALARR[3]=A,B,C,D,E,F,G,H
+	    bol1:=GetARRIdx(0,aidx1,bidx1,name);
+	  end;
+
+//writeln('#1 aidx1: ',aidx1:2,' bidx1: ',bidx1,' aidx2: ',aidx2,' algt2: ',algt2,' sh: ',sh);
+	  
+	  if (BIOS_tryARRidx 	IN flgs) then
+	  begin // indexed BIT access e.g. NGINX_mode{8}=0x000000000007E101
+	  	bol2:=GetARRIdx(1,aidx2,algt2,name);
+	  end;
+	  
 	  sh:=inifilbuf.ReadString(section,name,default);
+
+//writeln('#2 aidx1: ',aidx1:2,' bidx1: ',bidx1,' aidx2: ',aidx2,' algt2: ',algt2,' sh: ',sh);
+	  
+	  if (aidx1>=1) and bol1 and
+	  	 (BIOS_tryARRidx 	IN flgs) then 
+	  begin
+		sh:=CSV_Item(sh,aidx1);
+		if (bidx1>0) then sh:=CSV_Item(sh,'|',bidx1);
+	  end;	  
+//writeln('#3 aidx1: ',aidx1:2,' bidx1: ',bidx1,' aidx2: ',aidx2,' algt2: ',algt2,' sh: ',sh);
+	  if (aidx2>=0) and (aidx2<=63) and bol2 and
+	  	 (BIOS_tryARRidx 	IN flgs) then 
+	  begin
+		sh:=Trimme(sh,3);
+		if Str2Num(sh,qw)
+		  then sh:=Num2Str(((qw and ((qword(1 shl algt2)-1) shl aidx2)) shr aidx2),0)
+		  else sh:='';
+	  end;  
+//writeln('#4 aidx1: ',aidx1:2,' bidx1: ',bidx1,' aidx2: ',aidx2,' algt2: ',algt2,' sh: ',sh);
+	  	 
 	  if (BIOS_UnESC 		IN flgs) then sh:=SB_UnESC(sh);
 	  if (BIOS_Printable 	IN flgs) then sh:=StringPrintable(sh);
 	  if (BIOS_trim1 		IN flgs) then sh:=Trimme(sh,1);
@@ -7065,7 +8280,7 @@ begin
 	  if (BIOS_trim3 		IN flgs) then sh:=Trimme(sh,3);
 	  if (BIOS_trim4 		IN flgs) then sh:=Trimme(sh,4);
 // checks
-	  if (BIOS_bool 		IN flgs) then if not Str2Bool(sh,bol)		then sh:=default;
+	  if (BIOS_bool 		IN flgs) then if not Str2Bool(sh,bol1)		then sh:=default;
 	  if (BIOS_float 		IN flgs) then 
 	  begin
 	    sh:=Trimme(sh,3);
@@ -7106,9 +8321,17 @@ begin
 		try StrToDateTime(sh); except sh:=default; end;
 	  end;
 	  if (BIOS_PrefDflt		IN flgs) and (default<>'')					then sh:=default;
+	  
+(*	  if ((BIOS_RemOnDflt	IN flgs) and (sh=default)) then
+  	  begin // not working with ReadString
+  	  	BIOS_DeleteKey(section,name);
+  	  	LOG_Writeln(LOG_WARNING,'BIOS_GetIniString['+section+'/'+name+'/'+default+']: value=default, entry deleted'); 
+  	  end; *)
+  	  
 	end; // else Log_Writeln(LOG_ERROR,'BIOS_GetIniString: INI-File not opened');
   end; // with
   if (sh='') then sh:=default;
+  
   BIOS_GetIniString:=sh;
 end;
 function  BIOS_GetIniString(section,name,default:string):string;
@@ -7166,6 +8389,15 @@ function  BIOS_SetIniString(section,name,value:string):boolean;
 begin BIOS_SetIniString:=BIOS_SetIniString(section,name,value,IniFileDesc.dfltflags); end;
 function  BIOS_SetIniString(name,value:string):boolean;	
 begin BIOS_SetIniString:=BIOS_SetIniString(IniFileDesc.dfltsection,name,value,IniFileDesc.dfltflags); end;
+
+function  BIOS_SetDelIniString(section,name,value:string):boolean;	
+var ok:boolean;
+begin
+  if (value<>'')
+	then ok:=BIOS_SetIniString(	section,name,value,[])
+	else ok:=BIOS_DeleteKey(	section,name);
+  BIOS_SetDelIniString:=ok;
+end;
 
 procedure BIOS_Test;
 var fil:text; sh:string;
@@ -7697,14 +8929,15 @@ end;
 function  MD5_HashGET(filnam:string; var MD5hash:string):boolean;
 // MD5_HashGET('/tmp/rfm.tgz',myhashstr)
 //38398e53aa45f86427ada3e9331c24f9  rfm.tgz.md5
-var ok:boolean;
+var ok:boolean; sh:string;
 begin
+  ok:=false; MD5hash:='';
   if FileExists(filnam) then
   begin
-    call_external_prog(LOG_NONE,'md5sum '+filnam,MD5hash); 
-    MD5hash:=CSV_Item(Trimme(MD5hash,4),' ',1);
+    call_external_prog(LOG_NONE,'md5sum '+filnam,sh); 
+    MD5hash:=CSV_Item(Trimme(sh,4),' ',1);
 	ok:=(MD5hash<>'');
-  end else ok:=false;
+  end;
   MD5_HashGET:=ok;
 end;
 
@@ -7713,12 +8946,13 @@ function  MD5_HashCreateFile(filnam,MD5filnam:string; var MD5hash:string):boolea
 //38398e53aa45f86427ada3e9331c24f9  rfm.tgz.md5
 var ok:boolean;
 begin
+  ok:=false; MD5hash:='';
   if FileExists(filnam) and DirectoryExists(Get_Dir(MD5filnam)) then
   begin
     call_external_prog(LOG_NONE,'md5sum '+filnam+' > '+MD5filnam,MD5hash); 
     MD5hash:=CSV_Item(Trimme(MD5hash,4),' ',1);
 	ok:=(MD5hash<>'');
-  end else ok:=false;
+  end;
   MD5_HashCreateFile:=ok;
 end;
 
@@ -7726,7 +8960,7 @@ function  MD5_HashGETFile(MD5filnam:string; var MD5hash:string):boolean;
 //38398e53aa45f86427ada3e9331c24f9  rfm.tgz.md5
 var ok:boolean; res:longint;
 begin
-  ok:=false;
+  ok:=false; MD5hash:='';
   if (GetFileSize(MD5filnam)>0) then
   begin
     res:=call_external_prog(LOG_NONE,'tail '+MD5filnam,MD5hash); 
@@ -8161,7 +9395,7 @@ begin
 	Thread_SetName('CURL_Thread'); 
 	with Thread_Ctrl_ptr(ptr)^ do 
 	begin 	
-//	  SAY(LOG_INFO,'CURL+: '+ThreadCmdStr);
+//	  SAY(LOG_WARNING,'CURL_Thread: '+ThreadCmdStr);
       ThreadRetCode:=call_external_prog(LOG_NONE,ThreadCmdStr,ThreadRetStr);	// sync. call
 //	  if (ThreadRetCode<>0) then LOG_Writeln(LOG_ERROR,'CURLThread: '+CURL_ErrDesc(ThreadRetCode));
 	  TermThread:=true;					// signal that Thread will end soon
@@ -8675,7 +9909,7 @@ begin
 							  if FileExists(filnam) then
 							  begin
 							    tl:=TStringList.create;
-								if TextFile2StringList(filnam,tl,sh) then
+								if TextFile2StringList(filnam,tl) then
 								begin
 								  if (tl.count>0) then 
 								  begin
@@ -9030,13 +10264,13 @@ begin
 	  writeln('linkpath:   ',linkpath,' linked to ',slavepath);
 	  writeln('do a cat ',linkpath,' on screen2, to see data which was written to master device');
 	  writeln('do a echo xxxxx >> ',linkpath,' on screen3 to pass data which the master can read');
-	  sleep(5000); 
+	  delay_msec(5000); 
 	  writeln('Start to write Hello#<nr> to master device');
       repeat   
 	    str:=TermIO_Read(termio,true); 					// async read from master device
 		if str<>'' then DoActionOnReceivedInput(str);		// process input data, if something was red
 	    TermIO_Write(termio,'Hello#'+Num2Str(loop,0)+LF);	// write to  master device
-        sleep(1000); inc(loop);
+        delay_msec(1000); inc(loop);
       until (loop>maxloops);
 	  writeln('closing '+linkpath);
 	  fpclose(fdmaster);
@@ -9376,19 +10610,24 @@ begin // in: CPU:41.8'C out: labl:CPU value:41.8'C
 end;
 
 procedure Get_SDcard_RDSpeed;
+// requires installed sw package 'hdparm' -> apt-get install hdparm
 var cmd,sh:string;
 begin
+  try
 //Timing buffered disk reads: 128 MB in  3.01 seconds =  42.47 MB/sec
-  cmd:='hdparm -t /dev/mmcblk0 2>/dev/null | grep -i "timing" | awk -F ''='' ''{print $2}''';
+  cmd:='hdparm -t /dev/mmcblk0 2>/dev/null | grep -i ''timing'' | awk -F ''='' ''{print $2}''';
   call_external_prog(LOG_NONE,cmd,sh);
   sh:=Trimme(sh,3); // 42.47 MB/sec
   if (sh<>'') then SD_speedRD:=sh;
+  except
+    
+  end;
 end;
 
 procedure Get_CPU_INFO_Init;   
 // https://en.wikipedia.org/wiki/Raspberry_Pi
 const proc1_c='cat /proc/cpuinfo'; proc2_c='cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo'; 
-	  proc3_c='cat /etc/debian_version';
+	  proc3_c='cat /etc/debian_version'; proc4_c='lsb_release -a 2>/dev/null | grep escription | awk -F '':'' ''{print $2}''';
 var ts:TStringlist; sh:string; anz:longint; lw:longword; 
   function cpuinfo_unix(infoline:string; var cnt:longint):string;
   var s:string; i:integer;
@@ -9430,7 +10669,7 @@ var ts:TStringlist; sh:string; anz:longint; lw:longword;
   end;
   function  AnalyzeRevCode(cpurevs:string):string;
 // https://www.raspberrypi.org/documentation/hardware/raspberrypi/revision-codes/README.md
-  var F,M,C,P,R:byte; sh:string;
+  var F,M,C,P,R,NOQuuuWu:byte; sh:string;
   begin
 	sh:='';
 	if Str2Num('0x'+cpurevs,lw) then
@@ -9465,16 +10704,17 @@ var ts:TStringlist; sh:string; anz:longint; lw:longword;
 	  begin // 1: new style flag
 	  	connector_pin_count:=40;	GPIO_map_idx:=2;	cpu_hw:='';
 		status_led_GPIO:=47;		I2C_busnum:=1; 
-// 		uuuuuuuuFMMMCCCCPPPPTTTTTTTTRRRR
+// 		NOQuuuWuFMMMCCCCPPPPTTTTTTTTRRRR			// 32Bit
 		R:=			((lw and $0000000f));			// Revision		4Bit
 		RPI_bType:=	((lw and $00000ff0) shr  4);	// Type			8Bit
 		P:=			((lw and $0000f000) shr 12);	// Processor	4Bit
 		C:=			((lw and $000f0000) shr 16);	// Manufacturer	4Bit
 		M:=			((lw and $00700000) shr 20);	// Memory size	3Bit
-//		u:=			((lw and $ff000000) shr 24);	// Unused		8Bit
-//		writeln(cpurevs,' F:',F,' R:',R,' T:',T,' P:',P,' C:',C,' M:',M);
+		NOQuuuWu:=	((lw and $f0000000) shr 28); 	// combined 	8Bit
+//		writeln(cpurevs,' F:',F,' R:',R,' T:',T,' P:',P,' C:',C,' M:',M,' NOQW:',NOQW);
 // a020d3 F:1 R:3 T:13 P:2 C:0 M:2
 // rev1.3;1GB;3B+;BCM2837;a020d3;40;4;Sony UK
+// rev1.1;2GB;4B;BCM2711;b03111;40;4;armv7l;Sony UK
 		sh:=sh+'rev1.'+Num2Str(R,0)+';';
 		case M of // Memory size
 		    0: sh:=sh+'256MB';
@@ -9500,8 +10740,11 @@ var ts:TStringlist; sh:string; anz:longint; lw:longword;
 		  $0c: sh:=sh+'Zero W';
 		  $0d: sh:=sh+'3B+';
 		  $0e: sh:=sh+'3A+';
+		  $0f: sh:=sh+'internal use only';
 		  $10: sh:=sh+'CM3+';
 		  $11: sh:=sh+'4B';
+		  $13: sh:=sh+'400';
+		  $14: sh:=sh+'CM4';
 		  else sh:=sh+'0x'+HexStr(RPI_bType,2);
 		end; // case					
 		sh:=sh+';';
@@ -9510,7 +10753,7 @@ var ts:TStringlist; sh:string; anz:longint; lw:longword;
 		    1: cpu_hw:='BCM2836';
 		    2: cpu_hw:='BCM2837';
 		    3: cpu_hw:='BCM2711';
-		  else cpu_hw:=cpu_hw+'0x'+HexStr(P,2);
+		  else cpu_hw:='0x'+HexStr(P,2);
 		end; // case
 		sh:=sh+cpu_hw+';'+cpurevs+';'+Num2Str(connector_pin_count,0)+';'+Num2Str(cpu_cores,0)+';'+cpu_machine+';';
 		case C of // Manufacturer
@@ -9522,6 +10765,7 @@ var ts:TStringlist; sh:string; anz:longint; lw:longword;
 		    5: sh:=sh+'Stadium';
 		  else sh:=sh+'0x'+HexStr(C,2);
 		end; // case
+		sh:=sh+';0x'+HexStr(NOQuuuWu,2);
 	  end;
 	end; // else Log_Writeln(LOG_ERROR,'Get_CPU_INFO_Init: Rev:'+cpurevs+' Hardware:'+cpu_hw+' Processor:'+cpu_proc+' no known platform');
 	AnalyzeRevCode:=sh;
@@ -9529,7 +10773,7 @@ var ts:TStringlist; sh:string; anz:longint; lw:longword;
 
 begin
    cpu_snr:='';   cpu_hw:='';   cpu_proc:=''; cpu_rev:=''; cpu_mips:=''; cpu_feat:=''; cpu_rev_num:=0;
-   cpu_fmin:='';  cpu_fcur:=''; cpu_fmax:=''; os_rev:='';  uname:=''; 	 cpu_machine:='';
+   cpu_fmin:='';  cpu_fcur:=''; cpu_fmax:=''; os_rev:='';  uname:=''; 	 cpu_machine:=''; lsb_rel:='';
    cpu_cores:=0;  I2C_busnum:=0; status_led_GPIO:=0;  	   whoami:='';
    RPI_bType:=0;  RPI_ThrottleGet; RPI_FreqARMGet;
    for lw:=1 to max_pins_c do RPIHDR_Desc[lw]:='';
@@ -9538,12 +10782,13 @@ begin
   {$IFDEF UNIX}  
     call_external_prog(LOG_NONE,'whoami',whoami);
 	ts:=TStringList.Create;
-	call_external_prog(LOG_NONE,proc3_c,sh); 			 os_rev:= 		RM_CRLF(sh);
+	call_external_prog(LOG_NONE,proc3_c,sh); 			 os_rev:= 		RM_CRLF(sh); 
 	call_external_prog(LOG_NONE,proc2_c+'_min_freq',sh); cpu_fmin:=		RM_CRLF(sh);
 	call_external_prog(LOG_NONE,proc2_c+'_cur_freq',sh); cpu_fcur:=		RM_CRLF(sh);
 	call_external_prog(LOG_NONE,proc2_c+'_max_freq',sh); cpu_fmax:=		RM_CRLF(sh);
 	call_external_prog(LOG_NONE,'uname -srvmo',		sh); uname:=   		RM_CRLF(sh);
 	call_external_prog(LOG_NONE,'uname -m',			sh); cpu_machine:=	RM_CRLF(sh);
+	call_external_prog(LOG_NONE,proc4_c,sh); lsb_rel:=Trimme(GetPrintableChars(sh,' ',#$7f),4);
 
     if not getvcgencmd('arm', cpu_freq)	then cpu_freq:= 700000000; 	
     lw:=round(2*pllc_freq_c/1000000);
@@ -9580,14 +10825,6 @@ begin
   end;
   Bin:=h;
 end; { Bin }
-
-function  RPI_GetBuildDateTimeString:string;
-var sh:string;
-begin
-  sh:=StringReplace(prog_build_date,'/','-',[rfReplaceAll,rfIgnoreCase]);
-  sh:=sh+'T'+prog_build_time;
-  RPI_GetBuildDateTimeString:=sh;
-end;
 
 procedure RPI_HDR_SetDesc(HWPin:longint; desc:string);
 begin if (HWPin>=1) and (HWPin<=max_pins_c) then RPIHDR_Desc[HWPin]:=copy(desc,1,mdl); end;
@@ -10744,17 +11981,17 @@ begin
   CEPstring:=CSV_RemLastSep(sh,#$00);
 end;
 
-function  HAT_custom(tl:TStringList; keys,dflts,tr1,tr2:string):string;
+function  HAT_custom(tl:TStringList; const keys,dflts:string):string;
+// entry: KEYS=<valueString>
 var sh:string;
 begin
-  sh:=SearchStringInList(tl,keys);
-  if (sh<>'')
-	then sh:=Select_RightItems(sh,tr1,tr2,2)
-	else sh:=dflts;
+  sh:=tl.values[keys];	// <valueString>
+  if (Length(sh)=0) then sh:=dflts;
   HAT_custom:=CSV_RemLastSep(sh,#$00);
 end;
-function  HAT_custom(tl:TStringList; keys,dflts:string):string;
-begin HAT_custom:=HAT_custom(tl,keys,dflts,' ','"'); end;
+
+function  HAT_custom(tl:TStringList; const keys:string):string; // with no default
+begin HAT_custom:=HAT_custom(tl,keys,''); end; 
 
 function  HAT_vendor:string;	 begin HAT_vendor:= 	CEPstring('cat '+PrepFilePath(LNX_DevTree+'/hat/vendor')); end;
 function  HAT_product:string; 	 begin HAT_product:=	CEPstring('cat '+PrepFilePath(LNX_DevTree+'/hat/product')); end;
@@ -11189,7 +12426,7 @@ begin
 //	  writeln('pwm_SW_Thread: Start of ',description,' with PWMSW (GPIO',Num2Str(gpio,0),')');
 //	  , period(us):',PWM.pwm_period_us,' dtycycl(us):',PWM.pwm_dutycycle_us,' restcycl(us):',PWM.pwm_restcycle_us);
       Thread_SetName(description);
-	  while not ThreadCtrl.TermThread do
+	  while (not terminateProg) and (not ThreadCtrl.TermThread) do
 	  begin			
 	    if PWM.pwm_sigalt then
 		begin
@@ -11571,7 +12808,7 @@ begin
     SAY(LOG_INFO,'');
 	SAY(LOG_INFO,'ThreadInfo:        '+ThreadInfo);
 //	SAY(LOG_INFO,'ThreadID:          ',TThreadID);
-	SAY(LOG_INFO,'ThreadRunning:     '+Bool2Str(ThreadRunning)+' TermThread: '+Bool2Str(TermThread));
+	SAY(LOG_INFO,'ThreadRunning:     '+Bool2YNS(ThreadRunning)+' TermThread: '+Bool2YNS(TermThread));
 	SAY(LOG_INFO,'ThreadFunc:      0x'+HexStr(ThreadFunc));
 	SAY(LOG_INFO,'ThreadTimeOut:     '+FormatDateTime('YYYYMMDD hh:mm:ss.zzz',ThreadTimeOut));
 	SAY(LOG_INFO,'ThreadCmdStr:      '+ThreadCmdStr);
@@ -11591,7 +12828,7 @@ begin
   with ThreadCtrl do
   begin
     TermThread:=true; 	ThreadRunning:=false; ThreadRetCode:=0; 
-    ThreadRetStr:='';	ThreadInfo:='';
+    ThreadRetStr:='';	ThreadInfo:=''; 	  ThreadPrio:=0;
     ThreadProgress:=0; 	ThreadProgressOld:=-maxint; ThreadTimeOut:=now; 
     ThreadID:=TThreadID(0);
   end; // with
@@ -11604,6 +12841,7 @@ begin
   begin
 	ThreadFunc:=ThFunc;
   	ThreadCmdStr:='';
+  	ThreadFlags:=[];
   	for n:=0 to 4 do
   	begin
   	  ThreadPara[n]:=0; UsrData[n]:=0; ThreadParaStr[n]:='';
@@ -11616,9 +12854,33 @@ begin
   Thread_InitStruct (ThreadCtrl);
   Thread_InitStruct2(ThreadCtrl,nil);
 end;
+ 
+(*function  Thread_SetPriority(aThreadID:TThreadID; class_priority:Thread_ClassPrio_t; prio:integer):boolean;
+// https://forum.lazarus.freepascal.org/index.php?topic=19968.0
+// https://www.mail-archive.com/fpc-devel@lists.freepascal.org/msg17573.html
+// https://bugs.freepascal.org/view.php?id=16785
+// https://man7.org/linux/man-pages/man7/sched.7.html
+//   Thread_ClassPrio_t = (SCHED_OTHER,SCHED_FIFO,SCHED_RR); 
+var aPriority,res:integer; param:sched_param;
+begin // 0-99
+  param.sched_priority:=prio;
+  aPriority:=ord(class_priority);
+  res:=pthread_setschedparam(pthread_t(aThreadID),aPriority,@param);
+  Thread_SetPriority:=(res=0);
+end; *)
+
+procedure Thread_mySetPrio(aThreadID:TThreadID; prio:longint);
+var sh:string;
+begin
+  if (aThreadID<>TThreadID(0)) then
+  begin // how to map ThreadID to id from top command ? work in progress
+	sh:='renice -n '+Num2Str(Limits(prio,-15,15),0)+' -p '+Num2Str(aThreadID,0);
+	LOG_Writeln(LOG_WARNING,'Thread_mySetPrio['+Num2Str(aThreadID,0)+']: '+Num2Str(prio,0)+' '+sh);
+  end;
+end;
 
 function  Thread_Start(var ThreadCtrl:Thread_Ctrl_t; funcadr:TThreadFunc; 
-					   paraadr:pointer; delaymsec:longword; prio:longint):boolean;
+					   paraadr:pointer; delaymsec:longword; prio:integer):boolean;
 begin
   with ThreadCtrl do
   begin
@@ -11627,6 +12889,9 @@ begin
 	ThreadRunning:=(ThreadID<>TThreadID(0));
 	if ThreadRunning and (delaymsec>0) then delay_msec(delaymsec); // let thread time to start
 	if ThreadRunning and (prio<>0) then ThreadSetPriority(ThreadID,prio);
+//	if ThreadRunning and (prio<>0) then Thread_mySetPrio(ThreadID,prio);
+//	if ThreadRunning and (prio<>0) then Thread_SetPriority(ThreadID,SCHED_OTHER,prio);
+	ThreadPrio:=ThreadGetPriority(ThreadID);
 	if ThreadRunning then SetTimeOut(ThreadTimeOut,15000); 
 	Thread_Start:=ThreadRunning;
   end;
@@ -11638,11 +12903,15 @@ begin
   begin
     TermThread:=true;
 //  if ThreadRunning then ThreadRunning:=(WaitForThreadTerminate(ThreadID,waitmsec)=0); // does not work on raspian
-	if (waitmsec>0) then
+(*)	if (waitmsec>0) then
 	begin
 	  delay_msec(waitmsec); 
 	  if ThreadRunning then ThreadRunning:=(not (KillThread(ThreadID)=0));
-	end else ThreadRunning:=false;
+	end else ThreadRunning:=false; *)
+
+	if (waitmsec>0) then delay_msec(waitmsec); 
+	if ThreadRunning then ThreadRunning:=(not (KillThread(ThreadID)=0));
+
 	Thread_InitStruct(ThreadCtrl); 
 	Thread_End:=ThreadRunning;
   end;
@@ -11888,7 +13157,7 @@ begin
 end;
 
 procedure FREQ_DetTurnRate(var FREQ_Struct:FREQ_Determine_t; steps:longint); 
-var ms:longint; 
+var ms:longint;
 begin
   with FREQ_Struct do
   begin  
@@ -11897,7 +13166,7 @@ begin
 	begin
 	  if fdet_enab then
 	  begin
-	  	ms:=MilliSecondsBetween(now,fSyncTime); 
+	  	ms:=MilliSecondsBetween(fSyncTime,now); 
 	  	if (ms<>0) then 
 	  	begin
 		  fTurnRate_Hz:=((fcnt-fcntold)*1000/ms); fcntold:=fcnt;
@@ -12114,7 +13383,7 @@ begin
 			  then writeln('WAVE_Test['+Num2Str(n,2)+']: '+Num2Str(wa[idx],6,3))
 			  else LOG_Writeln(LOG_ERROR,'WAVE_Test: #2');
 			inc(n);
-		  end else sleep(10); 
+		  end else delay_msec(10); 
 		end; // with
 	  end; // while
 	
@@ -12551,8 +13820,8 @@ begin
 		mask_pol:=0;
 	  end;
 	end;
-	FRQ_SetStruct(GPIO_struct);	FRQ_freq_Hz:=-1; // set default values for frq
-    PWM_SetStruct(GPIO_struct); PWM.PWM_freq_hz:=-1; // set default values for pwm
+	FRQ_SetStruct (GPIO_struct);	 FRQ_freq_Hz:=-1; // set default values for frq
+    PWM_SetStruct (GPIO_struct); PWM.PWM_freq_hz:=-1; // set default values for pwm
 //  GPIO_ShowStruct(GPIO_struct);
   end;
 end;
@@ -12638,8 +13907,6 @@ begin
 	GPIO_Setup:=initok; 
   end; // with
 end;
-
-procedure xyx(reg1,reg2,mask:longword); begin mmap_arr^[reg1]:=mask; mmap_arr^[reg2]:=mask; end;
   
 procedure Toggle_Pin_very_fast(gpio:longword; cnt:qword);
 // just to show how fast (without overhead) we can toggle PINxx. 
@@ -12662,8 +13929,8 @@ begin
 	    {$warnings off} 
 	      if fastway then
 		  begin // >20MHz
-//          xyx(regset,regclr,mask_1Bit); // 15MHz, takes 30% times longer ??!!
-	        mmap_arr^[regset]:=mask_1Bit; (* High*) mmap_arr^[regclr]:=mask_1Bit; (* Low *)
+	        mmap_arr^[regset]:=mask_1Bit; (* High*) 
+	        mmap_arr^[regclr]:=mask_1Bit; (* Low *)
 		  end
 		  else 
 		  begin // 2-3Mhz only ???!!!
@@ -12693,8 +13960,8 @@ begin
   GPIO_set_OUTPUT(RPI_status_led_GPIO);   
   for lw := 1 to looptimes do
   begin
-    writeln(looptimes-lw+1:3,'. Set StatusLED (GPIO',RPI_status_led_GPIO,') to 1'); LED_Status(true);  sleep(waittime_ms);
-	writeln(looptimes-lw+1:3,'. Set StatusLED (GPIO',RPI_status_led_GPIO,') to 0'); LED_Status(false); sleep(waittime_ms);
+    writeln(looptimes-lw+1:3,'. Set StatusLED (GPIO',RPI_status_led_GPIO,') to 1'); LED_Status(true);  delay_msec(waittime_ms);
+	writeln(looptimes-lw+1:3,'. Set StatusLED (GPIO',RPI_status_led_GPIO,') to 0'); LED_Status(false); delay_msec(waittime_ms);
 	writeln;
   end;
   writeln('End of GPIO_PIN_TOGGLE_TEST');
@@ -12715,7 +13982,7 @@ begin
 //Log_Writeln(LOG_DEBUG,'GPIO_set_PIN: '+Num2Str(gpio,0)+' level '+Bool2Str(highlevel));
 //Writeln('GPIO_set_PIN: '+Num2Str(gpio,0)+' level '+Bool2Str(highlevel));
   if highlevel then GPIO_set_BIT(GPSET,gpio,true,false) else GPIO_set_BIT(GPCLR,gpio,true,false);
-  { sleep(1); }
+  { delay_msec(1); }
 end;
 
 function  GPIO_get_PIN   (gpio:longword):boolean;
@@ -12729,7 +13996,7 @@ end;
 procedure GPIO_Pulse(gpio,pulse_ms:longword);
 begin
   GPIO_set_pin(gpio,true);
-  delay_msec(pulse_ms);
+  if (not terminateProg) then delay_msec(pulse_ms);
   GPIO_set_pin(gpio,false);
 end;
 
@@ -12821,16 +14088,16 @@ begin
 	  if (i>(dutyrange-1)) then 
 	  begin 
 	    PWM_Write(GPIO_struct,dutyrange-1);	
-		writeln('Loop(',cnt,'/',dutyrange,'): reached max. pwm value: ',dutyrange-1); sleep(30); 
+		writeln('Loop(',cnt,'/',dutyrange,'): reached max. pwm value: ',dutyrange-1); delay_msec(30); 
 		GPIO_ShowStruct(GPIO_struct); 
 		i:=0; inc(cnt);
 	  end else PWM_Write(GPIO_struct,i);
 //    if (i=(dutyrange div 2)) then readln;  // for measuring with osci
-	  if HWPWM then begin inc(i); sleep(10); end else begin inc(i,10); sleep(10); end;	// ms
+	  if HWPWM then begin inc(i); delay_msec(10); end else begin inc(i,10); delay_msec(10); end;	// ms
 	until (cnt>maxcnt);
 	PWM_Write     (GPIO_struct,0);	// set last value to 0
 	PWM_SetStruct (GPIO_struct); 	// reset to PWM default values
-    sleep(100); // let SW Thread time to terminate
+    delay_msec(100); // let SW Thread time to terminate
   end else Log_Writeln(LOG_ERROR,'GPIO_PWM_Test: GPIO'+Num2Str(GPIO_struct.gpio,0)+' Init has failed'); 	
 end;
 
@@ -13117,6 +14384,48 @@ begin
   GPIO_get_HDR_PIN:=lvl;
 end;
 
+procedure BEEP_SetStruct(var BEEP_struct:BEEP_struct_t; beepgpio:longint; beepcnt,beepHighms,beepLOWms:longword);
+begin
+  with BEEP_struct do
+  begin
+    gpio:=beepgpio; cnt:=beepcnt; High_ms:=beepHighms; Low_ms:=beepLOWms; USRbrk:=true;
+  end; // with
+end;
+
+procedure GPIO_Beep(var BEEP_struct:BEEP_struct_t);
+var _cnt:longword;
+begin
+  with BEEP_struct do
+  begin
+	if (gpio>=0) then
+	begin
+	  _cnt:=1; USRbrk:=false;
+      while (_cnt<=cnt) and (not USRbrk) and (not terminateProg) do
+      begin
+	  	GPIO_Pulse(gpio,High_ms);
+      	if (Low_ms>0) and (_cnt<cnt) and (not USRbrk) 
+      	  then delay_msec(Low_ms);
+      	inc(_cnt);
+      end;
+	end;
+  end; // with
+end;
+
+function  GPIO_BeepThread(BEEPstructPTR:pointer):ptrint;
+begin
+  try
+	with BEEP_struct_t(BEEPstructPTR^) do
+	begin
+//	  Thread_SetName('GPIO_BeepThread['+Num2Str(gpio,0)+']'); 
+      GPIO_Beep(BEEP_struct_t(BEEPstructPTR^));
+    end; // with
+  except
+	LOG_Writeln(LOG_ERROR,'GPIO_BeepThread');
+  end;
+  EndThread;  
+  GPIO_BeepThread:=0;
+end;
+
 function  ENC_GetVal(hdl:integer; ctrsel:integer):real; 
 var val:real;
 begin 
@@ -13140,6 +14449,8 @@ begin
 			  7: val:=ord(kbdupcnt);
 			  8: val:=ord(kbddwncnt);
 			  9: val:=ord(kbdswitch); 
+			 10: val:=countermark;
+			 11: begin countermark:=counter; val:=countermark; end;
 	    	else val:=counter;
 	      end; // case
 	    end; // with
@@ -13154,6 +14465,8 @@ function  ENC_GetCycles    (hdl:integer):real;		begin ENC_GetCycles:=    ENC_Get
 function  ENC_GetValPercent(hdl:integer):real;		begin ENC_GetValPercent:=ENC_GetVal(hdl, 3); end;
 function  ENC_GetSwitch    (hdl:integer):real;		begin ENC_GetSwitch:=    ENC_GetVal(hdl, 2); end;
 function  ENC_GetSwPtime   (hdl:integer):real;		begin ENC_GetSwPtime:=   ENC_GetVal(hdl, 5); end;
+function  ENC_GetMark	   (hdl:integer):real;		begin ENC_GetMark:=		 ENC_GetVal(hdl,10); end;
+function  ENC_SetMark	   (hdl:integer):real;		begin ENC_SetMark:=		 ENC_GetVal(hdl,11); end;
 
 procedure ENC_IncSwCnt (var ENCInfo:ENC_CNT_struct_t; cnt:integer);
 begin inc(ENCInfo.switchcounter,cnt); end;
@@ -13213,87 +14526,119 @@ function  ENC_Device(ptr:pointer):ptrint;
 	1	0	1		1			1	1 step clockwise
 	2	1	1		0			2	2 steps clockwise or counter-clockwise (fault condition)
 	3	1	0		1			3	1 step counter clockwise *)
-var   hdl,cyclold:longint; regval:longword; dt,dt2:TDateTime; sw_change,swpress,sw1stpress:boolean;
+var	hdl,cyclold:longint; regval:longword; dt,dt2:TDateTime;
+	sw_change,swpress,sw1stpress:boolean; wtim:longword;
 begin 
   hdl:=PtrUInt(ptr); 
   if (hdl>=0) and (hdl<Length(ENC_struct)) then
   begin
     with ENC_struct[hdl] do
     begin
-	  Thread_SetName(desc);  
-	  ThreadCtrl.ThreadRunning:=true; ThreadCtrl.TermThread:=false;
-//    writeln('ThreadStart ',TermThread,' ',sleeptime_ms); 
-	  InitCriticalSection(ENC_CS);  
-	  SyncTime:=now; dt:=SyncTime; dt2:=dt; sw1stpress:=true; sw_change:=false; 
-      repeat
-        cyclold:=CNTInfo.cycles;
-		regval:=mmap_arr^[A_Sig.regget];
-		if (((regval and A_Sig.mask_1Bit) xor A_Sig.mask_pol)>0) then a:=1 else a:=0;
-		if (A_Sig.regget<>B_Sig.regget) then regval:=mmap_arr^[B_Sig.regget];
-	    if (((regval and B_Sig.mask_1Bit) xor B_Sig.mask_pol)>0) then b:=1 else b:=0;
-		seq:=(a xor b) or (b shl 1);
-		if (S_Sig.gpio>=0) then 
-		begin  // switch
-		  if (B_Sig.regget<>S_Sig.regget) then regval:=(mmap_arr^[S_Sig.regget]);
+      with ThreadCtrl do
+      begin
+    	ThreadRunning:=true; TermThread:=false;
+		Thread_SetName(desc);
 
-		  swpress:=(((regval and S_Sig.mask_1Bit) xor S_Sig.mask_pol)>0);
-		  if swpress then
-		  begin // switch is pressed
-			if sw1stpress then 
-		  	begin	
-		      SetTimeOut(dt,sleeptime_ms);	// Retrigger press time	
-		      dt2:=now;						// switch pressed start time 
-			  sw1stpress:=false;  
-		  	end
-		  	else 
-		  	begin
-			  EnterCriticalSection(ENC_CS); 
+	  	InitCriticalSection(ENC_CS);  
+	  	SyncTime:=now; dt:=SyncTime; dt2:=dt; 
+	  	sw1stpress:=true; wtim:=sleeptime_ms;
+	  	
+      	repeat
+      	  sw_change:=false;
+          cyclold:=CNTInfo.cycles;
+		  										regval:=mmap_arr^[A_Sig.regget];
+		  if (((regval and A_Sig.mask_1Bit) xor A_Sig.mask_pol)>0) then a:=1 else a:=0;
+
+		  if (A_Sig.regget<>B_Sig.regget) then 	regval:=mmap_arr^[B_Sig.regget];
+	      if (((regval and B_Sig.mask_1Bit) xor B_Sig.mask_pol)>0) then b:=1 else b:=0;
+
+		  seq:=(a xor b) or (b shl 1);
+
+		  if (S_Sig.gpio>=0) then 
+		  begin  // switch
+		  	if (B_Sig.regget<>S_Sig.regget) then regval:=(mmap_arr^[S_Sig.regget]);
+
+		 	swpress:=(((regval and S_Sig.mask_1Bit) xor S_Sig.mask_pol)>0);
+		  	if swpress then
+		  	begin // switch is pressed
+			  if sw1stpress then 
+		  	  begin	
+		      	SetTimeOut(dt,sleeptime_ms);	// Retrigger press time	
+		      	dt2:=now;						// switch pressed start time 
+			  	sw1stpress:=false;  
+		  	  end
+		  	  else 
+		  	  begin
+			  	EnterCriticalSection(ENC_CS); 
 			  
-			  	if TimeElapsed(dt,SwitchRepeatTime_ms) then 
-			  	begin
-				  inc(CNTInfo.switchcounter);
-			  	  sw_change:=true; 
-			  	end;
+			  	  if TimeElapsed(dt,SwitchRepeatTime_ms) then 
+			  	  begin
+				  	inc(CNTInfo.switchcounter);
+			  	  	sw_change:=true; 
+			  	  end;
 			  	
-			  LeaveCriticalSection(ENC_CS); 
-		  	end;
-		  end else sw1stpress:=true;
+			 	LeaveCriticalSection(ENC_CS); 
+		  	  end;
+		  	end else sw1stpress:=true;
 		  
-		  if sw_change or (swpress and not sw1stpress) then 
-			CNTInfo.switchlastpresstime:=MilliSecondsBetween(now,dt2); // last switch press time
-		  		  
-		end; 
-		delta:=0;	  
-		if seq<>seqold then  
-		begin // turning wheel
-//		  fpc calc neg mod wrong Ex: (ÿ144)%5=5ÿ(144%5)=5ÿ(4)=1(ÿ144)%5=5ÿ(144%5)=5ÿ(4)=1
-		  if seqold>seq	then delta:=4-(abs(seq-seqold) mod 4) else delta:=(seq-seqold) mod 4;
-		  if delta=3	then delta:=-1
-			            else if delta=2 then if deltaold<0 then delta:=-delta; 
-		  SetTimeOut(CNTInfo.fIntervalResetTime,CNTInfo.Interval_ms); 
-		  EnterCriticalSection(ENC_CS); 
-			FREQ_DetTurnRate(CNTInfo.TurnRateStruct,delta); 
-			if s2minmax then
-			begin
-			  if (CNTInfo.counter+delta)<0 then CNTInfo.counter:=0 else inc(CNTInfo.counter,delta);
-			  if CNTInfo.counter>(CNTInfo.countermax-1) then CNTInfo.counter:=CNTInfo.countermax-1;
-			end
-			else begin inc(CNTInfo.counter,delta); end;
-//			CNTInfo.counter:=CNTInfo.counter mod CNTInfo.countermax;			// 0 - countermax-1
-			CNTInfo.counter:=MOD_Euclid(CNTInfo.counter,CNTInfo.countermax);	// 0 - countermax-1
-			CNTInfo.cycles:= CNTInfo.counter div CNTInfo.steps_per_cycle;
-		  LeaveCriticalSection(ENC_CS);
-//        writeln('Seq:',seq,' seqold:',seqold,' delta:',delta,' deltaold:',deltaold,' b:',b,' a:',a);		  
-		  deltaold:=delta; seqold:=seq;
-		end else if TimeElapsed(CNTInfo.fIntervalResetTime) then FREQ_CounterReset(CNTInfo.TurnRateStruct);	 
-		if (beepgpio>=0) and ((CNTInfo.cycles<>cyclold) or sw_change) then GPIO_Pulse(beepgpio,1);
-		delay_msec(sleeptime_ms);
-		sw_change:=false; 
-	  until ThreadCtrl.TermThread;
-//    writeln('ENC_Device: Thread will terminate');
-	  DoneCriticalSection(ENC_CS);
+		  	if sw_change or (swpress and not sw1stpress) then 
+			  CNTInfo.switchlastpresstime:=MilliSecondsBetween(now,dt2); // last switch press time	  
+		  end; // switch
+		  
+		  delta:=0;
+		  if (seq<>seqold) then  
+		  begin // turning wheel
+		  	if (seqold>seq) 
+		  	  then delta:=4-(abs(seq-seqold) mod 4) 
+		  	  else delta:=(seq-seqold) mod 4;
+		  	  
+		  	if (delta<>3) then
+		  	begin
+		  	  if (delta=2) then 
+		  	  begin
+		  	    if (deltaold<0) then delta:=-delta;
+		  	  end; 
+		  	end else delta:=-1;
+			  
+		  	SetTimeOut(CNTInfo.fIntervalResetTime,CNTInfo.Interval_ms); 
+		  	SetTimeOut(CNTInfo.DelayResetTime,100);
+
+		  	EnterCriticalSection(ENC_CS); 
+			  FREQ_DetTurnRate(CNTInfo.TurnRateStruct,delta); 
+			  
+			  inc(CNTInfo.counter,delta);
+			  if s2minmax 	// 0 - countermax-1
+				then Limits(CNTInfo.counter,0,CNTInfo.countermax-1)		
+			  	else CNTInfo.counter:=MOD_Euclid(CNTInfo.counter,CNTInfo.countermax);
+
+			  CNTInfo.cycles:= CNTInfo.counter div CNTInfo.steps_per_cycle;
+		  	LeaveCriticalSection(ENC_CS);
+
+//        	writeln('Seq:',seq,' seqold:',seqold,' delta:',delta,' deltaold:',deltaold,' b:',b,' a:',a,CR);	
+//writeln('cycles:',CNTInfo.cycles,' counter:',CNTInfo.counter,' cmax:',CNTInfo.countermax,' delta:',delta,CR);	 
+ 
+		  	deltaold:=delta; seqold:=seq; wtim:=0;
+		  end 
+		  else 
+		  begin
+		  	if TimeElapsed(CNTInfo.fIntervalResetTime) 
+		  	  then FREQ_CounterReset(CNTInfo.TurnRateStruct);
+		  	
+		  	if TimeElapsed(CNTInfo.DelayResetTime)
+		  	  then wtim:=sleeptime_ms; 
+		  end;
+
+		  if ((cyclold<>CNTInfo.cycles) or sw_change) then
+		  begin 
+		    if (BEEP.gpio>=0) then BeginThread(@GPIO_BeepThread,@BEEP);
+		  end else if (wtim>0) then delay_msec(wtim);
+
+	  	until terminateProg or TermThread;
+
+	  	DoneCriticalSection(ENC_CS);
+	  	ThreadRunning:=false;
+	  end; // with
 	  EndThread;
-	  ThreadCtrl.ThreadRunning:=false;
 	end; // with
   end else LOG_Writeln(LOG_ERROR,'ENC_Device: hdl '+Num2Str(hdl,0)+' out of range');
   ENC_Device:=0;
@@ -13317,8 +14662,9 @@ begin
     counter:=0;			counterold:=0; 			countermax:=$ffff;			
     switchcounter:=0;	switchcounterold:=0;	switchcountermax:=$ffff;	
     enc:=0; 			encold:=0;  			Interval_ms:=1000;
-    fIntervalResetTime:=now;					switchlastpresstime:=0;
-    ENC_InfoKBDInit		(CNTInfo,#38,#40,#13);
+    fIntervalResetTime:=now;					DelayResetTime:=now;
+    switchlastpresstime:=0;
+    ENC_InfoKBDInit		(CNTInfo,#38,#40,#13);  countermark:=0;
     FREQ_InitStruct		(TurnRateStruct, 250);	
   end; // with
 end;
@@ -13344,16 +14690,22 @@ begin
 	  ok:=(GPIO_Setup(A_Sig) and GPIO_Setup(B_Sig));
 	  if (S_Sig.gpio>=0) then ok:=ok and GPIO_Setup(S_Sig);
       if ok then 
-      begin	// Pins are available
+      begin	// Pins are available     
         ENC_InfoInit(CNTInfo);  CNTInfo.Handle:=hdl; 
 		s2minmax:=stick2minmax; sleeptime_ms:=ENC_SyncTime_c; 
 		SwitchRepeatTime_ms:=ENC_SwRepeatTime_c;
 	    seqold:=2; deltaold:=0; SwitchFiredSpecFunc:=nil;
 		if stepspercycle>0 then CNTInfo.steps_per_cycle:=stepspercycle;
 		CNTInfo.cycles:=round(ctrpreset/CNTInfo.steps_per_cycle);
-		idxcounter:=0; beepgpio:=beepergpio; 
-		if ((beepgpio>=0) and 
-		   (GPIO_MAP_GPIO_NUM_2_HDR_PIN(beepgpio)>=0)) then GPIO_set_output(beepgpio);
+		idxcounter:=0;
+
+		if ((beepergpio>=0) and 
+		   (GPIO_MAP_GPIO_NUM_2_HDR_PIN(beepergpio)>=0)) then 
+		begin
+      	  BEEP_SetStruct (BEEP,beepergpio,1,1,0); // 1x Beep with 1msec
+		  GPIO_set_output(BEEP.gpio);	  
+		end else BEEP_SetStruct(BEEP,UKN,0,0,0);	
+		
 		with CNTInfo do
 		begin
 		  ENC_activity:=false;
@@ -13361,6 +14713,7 @@ begin
 		  counterold:=counter; countermax:=counter+1;
 		  if ctrmax>counter then countermax:=ctrmax+1; // wg. counter mod countermax
 		end; // with
+		
 		ENC_GetCounter(CNTInfo);
 //		ThreadCtrl.ThreadID:=BeginThread(@ENC_Device,pointer(hdl)); // Start Encoder Thread
 		Thread_Start(ThreadCtrl,@ENC_Device,pointer(PtrUInt(hdl)),0,-1); // Start Encoder Thread
@@ -13369,7 +14722,10 @@ begin
     end; // with
   end
   else 
-  if (hdl>ENC_cnt) then LOG_Writeln(LOG_ERROR,'ENC_RotEncInit: increase ENC_Cnt:'+Num2Str(ENC_cnt,0)+' hdl:'+Num2Str(hdl,0));
+  begin
+  	if (hdl>ENC_cnt) then 
+  	  LOG_Writeln(LOG_ERROR,'ENC_RotEncInit: increase ENC_Cnt:'+Num2Str(ENC_cnt,0)+' hdl:'+Num2Str(hdl,0));
+  end;
   ENC_Setup:=_ok;
 end;
 
@@ -13485,10 +14841,11 @@ begin
 	      end;
 		  delay_msec(SyncTime_ms);
 		end; // with
-	  until ThreadCtrl.TermThread;
+	  until terminateProg or ThreadCtrl.TermThread;
 	  DoneCriticalSection(TRIG_CS);
 	end; // with
   end;
+  EndThread;
   TRIG_IN_Thread:=0;
 end;
 
@@ -13537,10 +14894,11 @@ begin
 		  LeaveCriticalSection(TRIG_CS); 
 		  delay_msec(SyncTime_ms);
 		end; // with
-	  until ThreadCtrl.TermThread;
+	  until terminateProg or ThreadCtrl.TermThread;
 	  DoneCriticalSection(TRIG_CS);
 	end; // with
   end;
+  EndThread;
   TRIG_OUT_Thread:=0;
 end;
 
@@ -13604,7 +14962,7 @@ end;
 
 procedure Show_Buffer(var data:I2C_databuf_t);
 begin
-  if LOG_Level<=LOG_DEBUG then LOG_Writeln(LOG_DEBUG,HexStr(data.buf)); 
+  if LOG_Level<=LOG_DEBUG then LOG_Writeln(LOG_DEBUG,HexStr(data.buf.str)); 
 end;
 
 {$IFDEF UNIX}
@@ -13672,7 +15030,7 @@ begin
   begin
     Log_Writeln(LOG_DEBUG,'I2C Struct[0x'+HexStr(busnum,2)+']:');
 	Log_Writeln(LOG_DEBUG,' .hdl: '+Num2Str(hdl,0));
-	Log_Writeln(LOG_DEBUG,' .buf: 0x'+HexStr(buf)); 
+	Log_Writeln(LOG_DEBUG,' .buf: 0x'+HexStr(buf.str)); 
   end;  
 end;
 
@@ -13762,7 +15120,7 @@ begin
 end;
 
 procedure I2C_CleanBuffer(busnum:byte);
-begin with I2C_buf[busnum] do begin hdl:=-1; buf:=''; reperr:=true; test:=false; end; end;
+begin with I2C_buf[busnum] do begin hdl:=-1; buf.str:=''; reperr:=true; test:=false; end; end;
 
 procedure I2C_Start(busnum:integer);
 var _I2C_path:string;
@@ -13832,7 +15190,7 @@ begin
       if lgt>SizeOf(buf) then 
       begin
         LOG_Writeln(LOG_ERROR,info+'Length exceed buflgt, got: '+Num2Str(len,0)+' max: '+Num2Str(SizeOf(buf),0));
-        lgt:=SizeOf(buf);
+        lgt:=SizeOf(buf.str);
       end;
       {$warnings on}
       {$IFDEF UNIX}
@@ -13848,7 +15206,7 @@ begin
         begin
           LOG_Writeln(LOG_ERROR,info+'failed to select device: '+LNX_ErrDesc(fpgeterrno));
           ERR_MGMT_UPD(errhdl,_IOC_NONE,lgt,false);	  
-	      buf:='';
+	      buf.str:='';
 		  exit(rslt);
         end;
 	    if (Lcmds>0) then
@@ -13858,23 +15216,23 @@ begin
           begin
             LOG_Writeln(LOG_ERROR,info+'failed to write Register: '+LNX_ErrDesc(fpgeterrno));
             ERR_MGMT_UPD(errhdl,_IOC_WRITE,lgt,false);
-		    buf:='';
+		    buf.str:='';
 			exit(rslt);
           end;
 	    end;
-		SetLength(buf,1);
-        rslt:=fpRead(hdl,buf[1],lgt);  
+		SetLength(buf.str,1);
+        rslt:=fpRead(hdl,buf.str[1],lgt);  
       {$ENDIF}
       if test then I2C_Display_struct(busnum,'I2C_bus_read:');
       if rslt<0 then
       begin
         LOG_Writeln(LOG_DEBUG,info+'failed to read device: '+LNX_ErrDesc(fpgeterrno));
         ERR_MGMT_UPD(errhdl,_IOC_READ,lgt,false);
-		buf:='';
+		buf.str:='';
       end
       else
       begin
-	    SetLength(buf,rslt);
+	    SetLength(buf.str,rslt);
 		ERR_MGMT_UPD(errhdl,_IOC_READ,rslt,true);
         if rslt<lgt then
 	      LOG_Writeln(LOG_ERROR,info+'Short read, errnum: '+Num2Str(rslt,0)+' expected length: '+Num2Str(lgt,0)+' got: '+Num2Str(rslt,0));
@@ -13894,7 +15252,171 @@ begin
   I2C_bus_read:=I2C_bus_read(busnum,baseadr,cmds,len,errhdl); 
 end;
 
-function  I2C_bus_WrRd(busnum,baseadr:word; const WRbuf:string; WRflgs:word; var RDbuf:string; RDflgs:word; RDlen:byte; errhdl:integer):integer;
+procedure I2C_prep_IOmsg(var iomsg:I2C_msg_t; baseadr,flgs,lgt:word; bufptr:pointer);
+begin
+  with iomsg do
+  begin
+	addr:=	baseadr;
+	flags:=	flgs;
+	len:=	lgt;	
+	bptr:=	bufptr;
+  end; // with
+end;
+
+procedure I2C_prep_IOmsg(var rdwr:I2C_rdwr_ioctl_data_t; var multmsgs:I2C_rdwr_mult_msgs_t; baseadr:word; const WRbuf:string; WRflgs:word; var RDbuf:I2C_stringbuf_t; RDflgs,RDlen:word);
+begin
+  with multmsgs do
+  begin
+  	with rdwr do
+  	begin
+  	
+	  if (Length(WRbuf)>0) and (nmsgs<I2C_RDWR_IOCTL_MAX_MSGS) then
+	  begin
+	  	I2C_prep_IOmsg(msgs[nmsgs],baseadr,(I2C_M_WR or WRflgs),Length(WRbuf),@WRbuf[1]);	  	
+	  	inc(nmsgs);
+	  end;
+	  
+	  if (RDlen>0) and (nmsgs<I2C_RDWR_IOCTL_MAX_MSGS) then
+	  begin
+	  	if (RDlen<=c_max_Buffer) then
+	  	begin
+	  	  SetLength(RDbuf.str,0);
+		  I2C_prep_IOmsg(msgs[nmsgs],baseadr,(I2C_M_RD or RDflgs),RDlen,@RDbuf.str[1]);
+	  	  inc(nmsgs);
+	  	end else LOG_Writeln(LOG_ERROR,'I2C_prep_IOmsg['+Num2Str(busno,0)+'/'+HexStr(baseadr,2)+']: rdlen:'+Num2Str(RDlen)+'/'+Num2Str(c_max_Buffer,0)+' max reached');
+	  end;	 
+	   
+	end; // with
+  end; // with
+end;
+  
+procedure I2C_init_ROOTmsg(var rdwr:I2C_rdwr_ioctl_data_t; msgptr:I2C_msg_ptr; msgcnt:longword);
+begin
+  with rdwr do
+  begin
+	rdwr.msgs:=	msgptr;
+	rdwr.nmsgs:=msgcnt;	
+  end; // with
+end;
+
+procedure I2C_init_MULTmsgs(var multmsgs:I2C_rdwr_mult_msgs_t; busnum:word; errhndl:integer; wipe:boolean);
+var i:integer;
+begin
+  with multmsgs do
+  begin
+	errhdl:=	errhndl;
+	busno:=		busnum;
+	if wipe then
+	begin
+	  for i:= 1 to Length(msgs) do
+	  	I2C_prep_IOmsg(msgs[i-1],I2C_UseNoReg,I2C_M_RD,0,nil);
+	end;
+  end; // with
+end;
+ 
+procedure I2C_show_MULTmsgs(var rdwr:I2C_rdwr_ioctl_data_t; var multmsgs:I2C_rdwr_mult_msgs_t);
+var i:integer; _bptr:I2C_stringbuf_ptr; sh,sh1:string;
+begin
+  with multmsgs do
+  begin
+	sh:='hdl:'+Num2Str(I2C_buf[busno].hdl,0);
+  	for i:=1 to rdwr.nmsgs do
+  	begin
+	  with msgs[i-1] do
+  	  begin
+  	    _bptr:=I2C_stringbuf_ptr(bptr-1);
+  	  	if ((flags and I2C_M_RD)<>0) then 
+  	  	begin
+  	  	  sh1:=' buf:0x'+HexStr(ShortString(_bptr^.str));
+		  sh1:=sh+' msg:'+Num2Str(i,0)+'/'+Num2Str(rdwr.nmsgs,0)+' addr:0x'+HexStr(addr,2)+' bptr:0x'+HexStr(_bptr)+' len:'+Num2Str(len,0)+' flags:0x'+HexStr(flags,4)+sh1;
+		  writeln(sh1,CR);
+		end else sh1:='';
+	  end; // with
+  	end;
+  end; // with
+end;
+
+function  I2C_xfer(var rdwr:I2C_rdwr_ioctl_data_t; var multmsgs:I2C_rdwr_mult_msgs_t):integer;
+// https://github.com/raspberrypi/linux/blob/rpi-5.10.y/drivers/i2c/busses/i2c-bcm2835.c#L436
+var rslt,i:integer; rdlen:longword; _bptr:I2C_stringbuf_ptr; _sh:string;
+begin
+  with multmsgs do
+  begin
+  	try
+//    writeln('I2C_xfer+:',I2C_buf[busno].hdl);
+	  if (rdwr.nmsgs>0) then
+	  begin	
+	  	if (I2C_buf[busno].hdl>=0) then
+	  	begin
+        {$IFDEF UNIX}
+          rslt:=fpIOCTL(I2C_buf[busno].hdl,I2C_RDWR,@rdwr);
+		{$ELSE}
+		  rslt:=-1;
+      	{$ENDIF}
+      	  
+		  if (rslt<0) then
+    	  begin
+    	    if I2C_buf[busno].reperr then
+    	    begin
+    	      _sh:='I2C_xfer[0x'+HexStr(busno,2)+'/0x'+HexStr(msgs[0].addr,2)+'/'+Num2Str(rslt,0)+'/'+Num2Str(I2C_buf[busno].hdl,0);
+    		  if (errhdl<>NO_ERRHNDL) 
+    		    then _sh:=_sh+' '+
+    				Num2Str(ERR_MGMT_GetInfo(errhdl,0),0)+'/'+
+    	  			Num2Str(ERR_MGMT_GetInfo(errhdl,1),0)+'/'+
+    	  			Num2Str(ERR_MGMT_GetInfo(errhdl,2),0);
+    	      LOG_Writeln(LOG_ERROR,_sh+']: failed to read device: '+LNX_ErrDesc(fpgeterrno));
+//    	      I2C_show_MULTmsgs(rdwr,multmsgs);
+    	    end;
+    	  end;
+    	  
+    	  rdlen:=0; 
+    	  for i:= 1 to rdwr.nmsgs do 
+    	  begin
+    	    with msgs[i-1] do
+    	    begin
+    		  if (bptr<>nil) then
+    		  begin
+    	      	if ((flags and I2C_M_RD)<>0) then
+    	      	begin
+    	      	  _bptr:=I2C_stringbuf_ptr(bptr-1);	// position to length byte of bufferpointer (ShortString)
+    		  	  if (rslt<0)
+    		  	  	then SetLength(_bptr^.str,0)
+    		  	  	else SetLength(_bptr^.str,len);
+//writeln(i:2,': 0x',HexStr(_bptr^.str),' len:',len,' ',HexStr(_bptr),' ',HexStr(pointer(_bptr)-1)+CR);
+    		      inc(rdlen,len);
+    			end;
+    		  end;
+    		end; // with
+    	  end; // for
+    	  
+    	  if (rslt>=0) then rslt:=rdlen;
+    	  ERR_MGMT_UPD(errhdl,_IOC_READ,rdlen,(rslt>=0));
+      	end 
+      	else 
+      	begin
+      	  LOG_Writeln(LOG_ERROR,'I2C_xfer: invalid I2C handle: '+Num2Str(I2C_buf[busno].hdl,0));
+      	  rslt:=-3; 
+      	end; 
+	  end 
+	  else 
+	  begin
+	  	LOG_Writeln(LOG_ERROR,'I2C_xfer: Length=0');
+	  	rslt:=-2;
+	  end;
+   
+	except
+	  On E_rpi_hal_Exception 		:Exception do 
+	  begin
+	  	LOG_Writeln(LOG_ERROR,	'I2C_xfer[0x'+HexStr(busno,2)+'/0x'+HexStr(msgs[0].addr,2)+']: exception: '+E_rpi_hal_Exception.Message); 
+	  	rslt:=					-9;
+	  end; 
+  	end;	
+  
+  end; // with
+  I2C_xfer:=rslt;
+end;
+
+function  I2C_bus_WrRd(busnum,baseadr:word; const WRbuf:string; WRflgs:word; var RDbuf:I2C_stringbuf_t; RDflgs:word; RDlen:byte; errhdl:integer):integer;
 // https://elixir.bootlin.com/linux/v3.19.8/source/drivers/i2c/i2c-core.c
 // https://gist.github.com/JamesDunne/9b7fbedb74c22ccc833059623f47beb7 
 // http://home.hiwaay.net/~jeffj1/i2c-bcm2708.c
@@ -13903,78 +15425,12 @@ function  I2C_bus_WrRd(busnum,baseadr:word; const WRbuf:string; WRflgs:word; var
 // @400khz bus speed, each spacing time betweeen two transfers: ca. 30us
 // with (I2C_M_RD or I2C_M_NOSTART) 2.5us 
 // without 14us between I2C_M_WR / I2C_M_RD
-var rslt,oklen:integer; msgset:I2C_rdwr_ioctl_data_t; 
-	iomsgs:array[0..1] of I2C_msg_t; _sh:string;
-begin
-  try 
-	with I2C_buf[busnum] do
-	begin
-      with msgset do
-      begin
-    	nmsgs:=					0;
-		if (Length(WRbuf)>0) then
-	  	begin
-	  	  oklen:=				Length(WRbuf);
-		  iomsgs[nmsgs].addr:=	baseadr;
-		  iomsgs[nmsgs].bptr:=	@WRbuf[1];
-		  iomsgs[nmsgs].len:=	oklen;
-		  iomsgs[nmsgs].flags:=	I2C_M_WR or (WRflgs and (not I2C_M_RD));
-		  inc   (nmsgs);
-	  	end;
-	  	if (RDlen>0) then
-	  	begin
-	  	  oklen:=				RDlen;
-		  iomsgs[nmsgs].addr:=	baseadr;
-		  iomsgs[nmsgs].bptr:=	@buf[1];
-		  iomsgs[nmsgs].len:=	oklen;
-		  iomsgs[nmsgs].flags:=	I2C_M_RD or RDflgs;	// I2C_M_NOSTART 2.5us // no I2C_M_NOSTART 13us @400khz
-		  inc	(nmsgs);
-	  	end;
-	  	msgs :=					@iomsgs;
-	  	if (nmsgs>0) then
-	  	begin
-		  {$IFDEF UNIX} 
-		  	rslt:=fpIOCTL(hdl,	I2C_RDWR,@msgset);
-		  {$ELSE}
-		  	rslt:=				-1;
-		  {$ENDIF}
-	  	end else rslt:=			-1;
-	  end; // with
-      	  
-      if (rslt<0) then
-      begin
-	  	SetLength(buf,			0);
-    	ERR_MGMT_UPD(errhdl,	_IOC_READ, RDlen,		 false);
-//		ERR_MGMT_UPD(errhdl,	_IOC_WRITE,Length(WRbuf),false);
-    	if reperr then
-    	begin
-    	  _sh:='I2C_bus_WrRd[0x'+HexStr(busnum,2)+'/0x'+HexStr(baseadr,2)+'/'+Num2Str(rslt,0);
-    	  if (errhdl<>NO_ERRHNDL) 
-    		then _sh:=_sh+' '+
-    				Num2Str(ERR_MGMT_GetInfo(errhdl,0),0)+'/'+
-    	  			Num2Str(ERR_MGMT_GetInfo(errhdl,1),0)+'/'+
-    	  			Num2Str(ERR_MGMT_GetInfo(errhdl,2),0);
-    	  LOG_Writeln(LOG_ERROR,_sh+']: failed to read device: '+LNX_ErrDesc(fpgeterrno));
-    	end;
-      end
-      else
-      begin
-	    SetLength(buf,			RDlen);
-		ERR_MGMT_UPD(errhdl,	_IOC_READ, RDlen,		 true);
-//		ERR_MGMT_UPD(errhdl,	_IOC_WRITE,Length(WRbuf),true);
-		rslt:=					oklen;
-      end;
-      
-	  RDbuf:=					buf;
-	end; // with
-  except
-	On E_rpi_hal_Exception 		:Exception do 
-	begin
-	  LOG_Writeln(LOG_ERROR,	'I2C_bus_WrRd[0x'+HexStr(busnum,2)+'/0x'+HexStr(baseadr,2)+']: exception: '+E_rpi_hal_Exception.Message); 
-	  rslt:=					-1;
-	end; 
-  end;
-  I2C_bus_WrRd:=				rslt;
+var rdwr:I2C_rdwr_ioctl_data_t; multmsgs:I2C_rdwr_mult_msgs_t;
+begin			
+  I2C_init_MULTmsgs		(multmsgs, busnum, errhdl, false);
+  I2C_init_ROOTmsg		(rdwr,@multmsgs.msgs[0],0);
+  I2C_prep_IOmsg		(rdwr,multmsgs, baseadr,WRbuf,WRflgs,RDbuf,RDflgs,RDlen);
+  I2C_bus_WrRd:=		I2C_xfer(rdwr,multmsgs);
 end;
 
 procedure  I2C_SwitchCombined(openmode:boolean);
@@ -13990,129 +15446,51 @@ begin
 	end;
   {$ENDIF}
 end;
-
-function  I2C_bus_SEGMENTS(var zipdata:I2C_rdwr_zip_data_t):integer;
-// http://www.the-cains-group.net/2017_Workshops/Mar17/5_struct_i2c_msg.html
-// work in progress, not ready
-var rslt:integer; 
-begin
-  rslt:=-1;
-  with zipdata do
-  begin 
-//	writeln('#:',Length(iomsgs),' ',datlen,' ',I2C_buf[busno].hdl);
-	if (msgset.nmsgs>0) then
-	begin	
-	  if (I2C_buf[busno].hdl>=0) then
-	  begin
-      {$IFDEF UNIX}
-        rslt:=fpIOCTL(I2C_buf[busno].hdl,I2C_RDWR,@msgset);
-      {$ENDIF}    
-		if rslt<0 then
-    	begin
-          LOG_Writeln(LOG_ERROR,'I2C_bus_SEGMENTS[0x'+HexStr(busno,2)+'/0x'+HexStr(iomsgs[0].addr,2)+']: failed to read device: '+LNX_ErrDesc(fpgeterrno));
-          ERR_MGMT_UPD(hdl,_IOC_READ,datlen,false);
-		  I2C_buf[busno].buf:='';
-    	end
-    	else
-    	begin
-	      SetLength(I2C_buf[busno].buf,datlen); rslt:=datlen;
-		  ERR_MGMT_UPD(hdl,_IOC_READ,datlen,true);
-    	end;
-      end;    
-	end else LOG_Writeln(LOG_ERROR,'I2C_bus_SEGMENTS: Length=0');
-  end; // with	
-  I2C_bus_SEGMENTS:=rslt;
-end;
 		
-procedure I2C_prep_iomsg(var zipdata:I2C_rdwr_zip_data_t; baseadr:word; const WRbuf:string; WRflgs:word; RDflgs:word; RDlen:byte);
-begin
-  with zipdata do
-  begin
-  	with msgset do
-  	begin
-  	
-	  if (Length(WRbuf)>0) and (nmsgs<I2C_RDWR_IOCTL_MAX_MSGS) then
-	  begin
-		with iomsgs[nmsgs] do
-		begin
-		  addr:=    	baseadr;
-		  bptr:=		@WRbuf[1];
-		  len:=     	Length(WRbuf);
-		  flags:=   	I2C_M_WR or (WRflgs and (not I2C_M_RD));	
-		  inc(			nmsgs);
-	  	end; // with
-	  end;
-	  
-	  if (RDlen>0) and (nmsgs<I2C_RDWR_IOCTL_MAX_MSGS) then
-	  begin
-		with iomsgs[nmsgs] do
-		begin
-		  addr:=    	baseadr;
-		  bptr:=	  	@I2C_buf[busno].buf[datlen+1];
-		  len:=     	RDlen;
-		  flags:=   	I2C_M_RD or RDflgs;
-		  inc(datlen,	RDlen);
-		  inc(			nmsgs);
-	  	end; // with
-	  end;	 
-	   
-	end; // with
-  end; // with
-end;
-
-procedure I2C_show_ZIPdata(var zipdata:I2C_rdwr_zip_data_t);
-var i:integer;
-begin
-  with zipdata do
-  begin
-	writeln('datlen:',datlen,' nmsgs:',msgset.nmsgs);
-  	for i:=1 to msgset.nmsgs do
-  	begin
-	  with iomsgs[i-1] do
-  	  begin
-		writeln((i-1):2,' addr:0x',HexStr(addr,2),' ptr:0x',HexStr(bptr),' len:',Num2Str(len,2),' flags:0x',HexStr(flags,4));	
-	  end; // with
-  	end;
-  end; // with
-end;	
-
-procedure I2C_init_ZIPdata(var zipdata:I2C_rdwr_zip_data_t; busnum:word; errhdl:integer);
-begin
-  with zipdata do
-  begin
-    msgset.msgs:=	@iomsgs[0];
-	hdl:=			errhdl;
-	busno:=			busnum;
-	datlen:=		0;
-//	for msgset.nmsgs:=1 to Length(iomsgs) do I2C_prep_iomsg(zipdata,I2C_UseNoReg,I2C_M_RD,0);
-	msgset.nmsgs:=	0;
-  end; // with
-end;
-
 procedure I2C_ZIP_Test;
 // work in progress, not ready
-const adr=$70; lgt=2;
-var rslt:integer; zipdata:I2C_rdwr_zip_data_t; sh:string;
-begin
-//writeln('Funcs: 0x'+HexStr(RPI_I2C_GetFuncs(RPI_I2C_busgen),8)); I2C_ShowFuncs(RPI_I2C_busgen); 
-rslt:=I2C_bus_WrRd(RPI_I2C_busgen,adr,'',0, sh,0, lgt,NO_ERRHNDL);
-writeln(rslt,' ',HexStr(I2C_buf[RPI_I2C_busgen].buf));
-writeln;
-delay_msec(1);
+// also not working: i2ctransfer -y -v 1 r2@0x70 r2@0x70
+// Error: Sending messages failed: Operation not supported
+// https://www.raspberrypi.org/forums/viewtopic.php?f=44&t=315143&p=1891160#p1891160
+// it works with old i2c driver (/boot/config.txt: dtoverlay=i2c-bcm2708)
+const scnt=4; adr1=$70; adr2=$71; adr3=$73; adr4=$74; lgt=2; tcnt=2; // tcnt=10000;
+	  I2CADR:array[1..scnt] of longword=(adr1,adr2,adr3,adr4);
 
-  with zipdata do
-  begin					
-    I2C_init_ZIPdata(zipdata,RPI_I2C_busgen,NO_ERRHNDL);
-    I2C_prep_iomsg	(zipdata,adr,'',0,0,lgt);
-    I2C_prep_iomsg	(zipdata,adr,'',0,0,lgt); // ERR I2C_bus_SEGMENTS[0x01/0x70]: failed to read device: (95) Operation not supported on transport endpoint
-	
-	I2C_show_ZIPdata(zipdata);
-I2C_SwitchCombined(true);		// combined mode only for bcm270x !!!!!
-	rslt:=I2C_bus_SEGMENTS(zipdata);
-I2C_SwitchCombined(false);
-	writeln('buf['+Num2Str(rslt,2)+']: 0x',HexStr(I2C_buf[RPI_I2C_busgen].buf));
+var rslt,i,j:longint; dt1:TDateTime;
+	rdwr:I2C_rdwr_ioctl_data_t; multmsgs:I2C_rdwr_mult_msgs_t; 
+	buf:array[1..scnt] of I2C_stringbuf_t; 
+begin
+  writeln('I2C_ZIP_Test:');
+//writeln('Funcs: 0x'+HexStr(RPI_I2C_GetFuncs(RPI_I2C_busgen),8)); I2C_ShowFuncs(RPI_I2C_busgen); 
+
+  dt1:=now;
+  for j:= 1 to tcnt do
+	for i:= 1 to scnt do // single IO per I2C-Addr
+	  rslt:=I2C_bus_WrRd(RPI_I2C_busgen,I2CADR[i],'',0,buf[i],0,lgt,NO_ERRHNDL);
+  writeln('I2C_bus_WrRd Time:',MilliSecsBetween(dt1),'ms'); 
+
+  for i:= 1 to scnt do
+	writeln('I2C single IO test: 0x',HexStr(buf[i].str));	// show single results
+  writeln('rslt:',rslt);
+
+
+  with multmsgs do
+  begin	// prepare IOs		
+    I2C_init_MULTmsgs(multmsgs,RPI_I2C_busgen,NO_ERRHNDL,true);
+    I2C_init_ROOTmsg (rdwr,@multmsgs.msgs[0],0);
+	for i:= 1 to scnt do
+	  I2C_prep_IOmsg (rdwr,multmsgs,I2CADR[i],'',0,buf[i],0,lgt);  
   end; // with
-end;
+  
+  writeln;
+  dt1:=now;
+  for j:= 1 to tcnt do
+    rslt:=I2C_xfer	 (rdwr,multmsgs);	// do all IOs in one OS call
+  writeln('I2C_xfer Time:',MilliSecsBetween(dt1),'ms'); 
+  
+  I2C_show_MULTmsgs	 (rdwr,multmsgs);
+  writeln('rslt:',rslt);
+end;  
 
 function oldI2C_string_read(busnum,baseadr:word; cmds:string; len:byte; errhdl:integer; var outs:string):integer; 
 var rslt:integer; lgt:byte;
@@ -14123,14 +15501,14 @@ begin
     if len>c_max_Buffer then 
     begin
       LOG_Writeln(LOG_ERROR,'I2C_string_read[0x'+HexStr(busnum,2)+'/0x'+HexStr(baseadr,2)+'/0x'+HexStr(cmds)+']: Length exceed buflgt, got: '+Num2Str(len,0)+' max: '+Num2Str(c_max_Buffer,0));
-      buf:='';
+      buf.str:='';
 	  exit(-1);
 	  lgt:=c_max_Buffer;
     end;
 //  writeln('I2C_string_read1: I2Caddr:0x'+HexStr(baseadr,2)+' reg:0x'+HexStr(cmds)+' busnum:0x'+HexStr(busnum,2)+' lgt:0x'+HexStr(lgt,2));
     rslt:=I2C_bus_read(busnum,baseadr,cmds,lgt,errhdl); 
 //  writeln('I2C_string_read2: I2Caddr:0x'+HexStr(baseadr,2)+' reg:0x'+HexStr(cmds)+' busnum:0x'+HexStr(busnum,2)+' lgt:0x'+HexStr(lgt,2)+' rslt:'+Num2Str(rslt,0));  
-	outs:=buf;
+	outs:=buf.str;
 	oldI2C_string_read:=rslt;
   end; // with
 end;
@@ -14142,24 +15520,38 @@ begin
 end;
 
 function I2C_string_read(busnum,baseadr,basereg:word; RDlen:byte; errhdl:integer; var RDbuf:string):integer;
-var _obuf:string;
+var rslt:integer; _rdbuf:I2C_stringbuf_t; _wrbuf:string;
 begin 
-  if (basereg<>I2C_UseNoReg) then _obuf:=char(byte(basereg)) else _obuf:=''; 
-  I2C_string_read:=I2C_bus_WrRd(busnum,baseadr,_obuf,0,RDbuf,0,RDlen,errhdl); 
+  if (basereg<>I2C_UseNoReg) then _wrbuf:=char(byte(basereg)) else _wrbuf:=''; 
+  rslt:=I2C_bus_WrRd(busnum,baseadr,_wrbuf,0,_rdbuf,0,RDlen,errhdl);
+  if (rslt>0) then RDbuf:=_rdbuf.str;
+  I2C_string_read:=rslt; 
+end; 
+            
+function I2C_string_read(busnum,baseadr:word; const WRbuf:string; RDlen:byte; errhdl:integer; var RDbuf:I2C_stringbuf_t):integer;
+var rslt:integer;
+begin 
+  rslt:=I2C_bus_WrRd(busnum,baseadr,WRbuf,0,RDbuf,0,RDlen,errhdl);
+  I2C_string_read:=rslt; 
 end;
 
 function I2C_string_read(busnum,baseadr:word; const WRbuf:string; RDlen:byte; errhdl:integer; var RDbuf:string):integer;
-begin I2C_string_read:=I2C_bus_WrRd(busnum,baseadr,WRbuf,0,RDbuf,0,RDlen,errhdl); end; 
+var rslt:integer; _rdbuf:I2C_stringbuf_t;
+begin 
+  rslt:=I2C_string_read(busnum,baseadr,WRbuf,RDlen,errhdl,_rdbuf);
+  if (rslt>0) then RDbuf:=_rdbuf.str;
+  I2C_string_read:=rslt; 
+end; 
 
 function  I2C_string_write(busnum,baseadr:word; const WRbuf:string; errhdl:integer):integer; 
-var _obuf:string; 
-begin I2C_string_write:=I2C_bus_WrRd(busnum,baseadr,WRbuf,0,_obuf,0,0,errhdl); end;
+var _rdbuf:I2C_stringbuf_t; 
+begin I2C_string_write:=I2C_bus_WrRd(busnum,baseadr,WRbuf,0,_rdbuf,0,0,errhdl); end;
 
 function  I2C_string_write(busnum,baseadr,basereg:word; WRbuf:string; errhdl:integer):integer; 
-var _obuf:string; 
+var _rdbuf:I2C_stringbuf_t; 
 begin 
   if (basereg<>I2C_UseNoReg) then WRbuf:=char(byte(basereg))+WRbuf; 
-  I2C_string_write:=I2C_bus_WrRd(busnum,baseadr,WRbuf,0,_obuf,0,0,errhdl); 
+  I2C_string_write:=I2C_bus_WrRd(busnum,baseadr,WRbuf,0,_rdbuf,0,0,errhdl); 
 end;
 
 function  I2C_word_read(busnum,baseadr,basereg:word; flip:boolean; errhdl:integer):word; 
@@ -14193,7 +15585,7 @@ begin
   begin
     if (hdl>=0) then
     begin
-      lgt:=Length(buf);	
+      lgt:=Length(buf.str);	
       {$IFDEF UNIX}
 //      writeln('i2cwr: 0x'+HexStr(buf)+' ',hdl); 
         {$warnings off} rslt:=fpIOctl(hdl,I2C_SLAVE,pointer(baseadr)); {$warnings on}
@@ -14203,7 +15595,7 @@ begin
           ERR_MGMT_UPD(errhdl,_IOC_NONE,lgt,false);
 	      exit(rslt);
         end;
-	    rslt:=fpWrite(hdl,buf[1],lgt);
+	    rslt:=fpWrite(hdl,buf.str[1],lgt);
       {$ENDIF}
 //    I2C_Display_struct(busnum,'I2C_bus_write:');
       if rslt<0 then
@@ -14232,7 +15624,7 @@ begin
     LOG_Writeln(LOG_ERROR,'I2C_string_write['+HexStr(busnum,2)+'/'+HexStr(baseadr,2)+'/'+HexStr(datas)+']: data length:'+Num2Str(length(datas),0)+' exceeds buffer size:'+Num2Str(c_max_Buffer,0));
 	exit(-1);
   end;	 
-  I2C_buf[busnum].buf:=datas; 
+  I2C_buf[busnum].buf.str:=datas; 
   oldI2C_string_write:=oldI2C_bus_write(busnum,baseadr,errhdl); 
 end;
 
@@ -14299,71 +15691,92 @@ begin
   BT_RFCOMM:=(FileExists(fil));
 end;
 
-procedure HW_SetInfoStruct(var DeviceStruct:HW_DevicePresent_t; DevTyp:t_IOBusType; BusNr,HWAdr:integer; dsc:string);
-begin with DeviceStruct do begin BusNum:=BusNr; HWAddr:=HWAdr; DevType:=DevTyp; descr:=dsc; end; end;
+procedure HW_SetInfoStruct(var DeviceStruct:HW_DevicePresent_t; DevTyp:t_IOBusType; BusNr,HWAdr:integer; ManufType:t_Manu_flag; dsc:string);
+begin with DeviceStruct do begin BusNum:=BusNr; HWAddr:=HWAdr; DevType:=DevTyp; descr:=dsc; Manuf:=ManufType; end; end;
 
 procedure HW_IniInfoStruct(var DeviceStruct:HW_DevicePresent_t);
 begin
-  HW_SetInfoStruct(DeviceStruct,UnknDev,hdl_unvalid,hdl_unvalid,'');
-  with DeviceStruct do begin present:=false; Hndl:=hdl_unvalid; data:=''; end;
+  HW_SetInfoStruct(DeviceStruct,UnknDev,hdl_unvalid,hdl_unvalid,unknownManufacturer,'');
+  with DeviceStruct do begin Xpresent:=false; Hndl:=hdl_unvalid; end;
 end;
 
-function  SPI_HWT(var DeviceStruct:HW_DevicePresent_t; bus,adr,lgt:word; cmds:string; Handle:integer; rv1,nv1,nv2,dsc:string):boolean;
+function  SPI_HWpresent(var DeviceStruct:HW_DevicePresent_t):boolean;
+begin
+  with DeviceStruct do
+  begin
+	SPI_HWpresent:=Xpresent;
+  end;
+end;
+
+function  SPI_HWT(var DeviceStruct:HW_DevicePresent_t; bus,adr,lgt:word; ManufType:t_Manu_flag; cmds:string; Handle:integer; rv1,nv1,nv2,dsc:string):boolean;
 begin
   with DeviceStruct do
   begin
     HW_IniInfoStruct(DeviceStruct);
-    HW_SetInfoStruct(DeviceStruct,SPIDev,0,hdl_unvalid,dsc);
-    present:=true;		// Dummy, to do !!!!!!!!! read device to determine if it's there
+    HW_SetInfoStruct(DeviceStruct,SPIDev,0,hdl_unvalid,ManufType,dsc);
+    Xpresent:=true;		// Dummy, to do !!!!!!!!! read device to determine if it's there
     
-    if present  then begin BusNum:=bus; HWaddr:=adr; hndl:=Handle; end;
-    SPI_HWT:=present;
+    if Xpresent  then begin BusNum:=bus; HWaddr:=adr; hndl:=Handle; end;
+    SPI_HWT:=Xpresent;
   end;
 end;
 
-function  I2C_HWT(var DeviceStruct:HW_DevicePresent_t; bus,adr,lgt:word; cmds:string; Handle:integer; rv1,nv1,nv2,dsc,dsc2:string):boolean;
-// I2C HardwareTest. used to determine, device available on i2c bus
-// usage e.g. DisplayPresent:=I2C_HWT(RPI_I2C_busnum,LCD_I2C_ADR,#$01,1,'','','LCD');
-var _lvl:t_errorlevel; info:string; 
+function  I2C_HWpresent(var DeviceStruct:HW_DevicePresent_t):boolean;
 begin
   with DeviceStruct do
   begin
-    HW_IniInfoStruct(DeviceStruct); data:=''; present:=false; _lvl:=LOG_WARNING;
-    HW_SetInfoStruct(DeviceStruct,I2CDev,rpi_I2C_busgen,i2c_unvalid_addr,dsc);
-    info:=dsc+'[0x'+HexStr(bus,2)+'/0x'+HexStr(adr,2);
-    if (cmds<>'') then info:=info+'/0x'+HexStr(cmds);
-    if (dsc2<>'') then info:=info+'/'+  dsc2;
-    info:=info+']: ';    
-//  writeln('info:',info);
-    if I2C_ChkBusAdr(bus,adr) then
-    begin
-	  I2C_buf[bus].reperr:=false;    
-      I2C_string_read(bus,adr,cmds,lgt,NO_ERRHNDL,data); 
- 	  I2C_buf[bus].reperr:=true;    
-      present:=(data<>'');     
-      if present 			   then present:=present and (Length(data)= lgt);
-      if present and (rv1<>'') then present:=present and (HexStr(data)= rv1); 
-      if present and (nv1<>'') then present:=present and (HexStr(data)<>nv1); 
-      if present and (nv2<>'') then present:=present and (HexStr(data)<>nv2); 
-      if present then 
-      begin
-    	_lvl:=LOG_NOTICE;
-    	BusNum:=bus; HWaddr:=adr; hndl:=Handle;
+	I2C_HWpresent:=(HWaddr<>i2c_unvalid_addr);
+  end;
+end;
+
+function  I2C_HWT(var DeviceStruct:HW_DevicePresent_t; bus,adr,lgt:word; ManufType:t_Manu_flag; cmds:string; Handle:integer; rv1,nv1,nv2,dsc,dsc2:string):boolean;
+// I2C HardwareTest. used to determine, device available on i2c bus
+// usage e.g. DisplayPresent:=I2C_HWT(RPI_I2C_busnum,LCD_I2C_ADR,#$01,1,'','','LCD');
+var _lvl:t_errorlevel; _oreperr,_present:boolean; info:string; 
+begin
+  with DeviceStruct do
+  begin
+	with I2C_buf[bus] do
+	begin
+      HW_IniInfoStruct(DeviceStruct); _present:=false; _lvl:=LOG_WARNING;
+      HW_SetInfoStruct(DeviceStruct,I2CDev,bus,i2c_unvalid_addr,ManufType,dsc);
+      info:=dsc+'[0x'+HexStr(bus,2)+'/0x'+HexStr(adr,2);
+      if (cmds<>'') then info:=info+'/0x'+HexStr(cmds);
+      if (dsc2<>'') then info:=info+'/'+  dsc2;
+      info:=info+']: ';    
+//    writeln('info:',info);
+      if I2C_ChkBusAdr(bus,adr) then
+      begin  
+      	_oreperr:=reperr;
+      	reperr:=false; 
+      	I2C_string_read(bus,adr,cmds,lgt,NO_ERRHNDL,buf);
+      	reperr:=_oreperr;  
+      	_present:=(buf.str<>'');     
+      	if _present 			  then _present:=_present and (Length(buf.str)= lgt);
+      	if _present and (rv1<>'') then _present:=_present and (HexStr(buf.str)= rv1); 
+      	if _present and (nv1<>'') then _present:=_present and (HexStr(buf.str)<>nv1); 
+      	if _present and (nv2<>'') then _present:=_present and (HexStr(buf.str)<>nv2); 
+      	if _present then 
+      	begin
+    	  _lvl:=LOG_NOTICE;
+    	  BusNum:=bus; HWaddr:=adr; hndl:=Handle;
+      	end;
+      	if (buf.str<>'')	then 
+      	  info:=info+'0x'+HexStr(buf.str) else info:=info+'nodata';
+      	SAY(_lvl,info);
       end;
-      if (data<>'')	then info:=info+'0x'+HexStr(data) else info:=info+'nodata';
-      SAY(_lvl,info);
-    end;
-    I2C_HWT:=present;
+      I2C_HWT:=_present;
+  	end; // with
   end; // with
 end;
-function  I2C_HWT(var DeviceStruct:HW_DevicePresent_t; bus,adr,lgt:word; cmds:string; Handle:integer; rv1,nv1,nv2,dsc:string):boolean;
-begin I2C_HWT:=I2C_HWT(DeviceStruct,bus,adr,lgt,cmds,Handle,rv1,nv1,nv2,dsc,''); end;
+function  I2C_HWT(var DeviceStruct:HW_DevicePresent_t; bus,adr,lgt:word; ManufType:t_Manu_flag; cmds:string; Handle:integer; rv1,nv1,nv2,dsc:string):boolean;
+begin I2C_HWT:=I2C_HWT(DeviceStruct,bus,adr,lgt,ManufType,cmds,Handle,rv1,nv1,nv2,dsc,''); end;
 
 function  I2C_HWSpeedT(BusNum,HWaddr,rdlgt:word; loops:longword; cmds,dsc:string):real;
 // out: kb/sec
 const rdflgs=I2C_M_NOSTART;
 var n,bcnt,rdcnt,wrcnt:longword; hndl:integer; ok:boolean; r,r2:real; 
-  	BusRDtime:TMR_struct_t; data:string;
+  	BusRDtime:TMR_struct_t; data:I2C_stringbuf_t;
 begin
   hndl:=ERR_NEW_HNDL(HWaddr,'I2C_HWSpeedT['+dsc+']:',0,0);
   bcnt:=0; wrcnt:=Length(cmds); ok:=true; 
@@ -14377,7 +15790,7 @@ begin
 	  if (rdcnt>=0) then inc(bcnt,rdcnt+wrcnt) else ok:=false;
 	{$warnings on}  
   end;
-//writeln('data: ',HexStr(data));
+//writeln('data: ',HexStr(data.str));
   with BusRDtime do
   begin
 	r:=tim_ns_min/1000000*cnt;
@@ -14410,8 +15823,9 @@ begin
   r:=0;
   with DeviceStruct do
   begin
-	if present	then r:=I2C_HWSpeedT(BusNum,HWaddr,lgt,loops,cmds,dsc)
-				else LOG_Writeln(LOG_ERROR,'I2C_HWSpeedT[0x'+HexStr(BusNum,2)+'/0x'+HexStr(HWaddr,2)+']: '+dsc+' not present');
+	if (HWaddr<>i2c_unvalid_addr)	
+	  then r:=I2C_HWSpeedT(BusNum,HWaddr,lgt,loops,cmds,dsc)
+	  else LOG_Writeln(LOG_ERROR,'I2C_HWSpeedT[0x'+HexStr(BusNum,2)+'/0x'+HexStr(HWaddr,2)+']: '+dsc+' not present');
   end; // with
   I2C_HWSpeedT:=r;
 end;
@@ -15183,6 +16597,7 @@ begin
 end;
 procedure SPI_Test; begin rfm22B_ShowChipType; end;
 
+function RPI_lsbrel:string;  		begin RPI_lsbrel:=lsb_rel;end;
 function RPI_OSrev:string;  		begin RPI_OSrev:=os_rev;  end;
 function RPI_uname:string;  		begin RPI_uname:=uname;   end;
 function RPI_hw  :string;  			begin RPI_hw  :=cpu_hw;   end;
@@ -15200,6 +16615,19 @@ function RPI_freq :string; 			begin RPI_freq :=cpu_fmin+';'+cpu_fcur+';'+cpu_fma
 function RPI_status_led_GPIO:byte;	begin RPI_status_led_GPIO:=status_led_GPIO; end;
 function RPI_snr :string;  			begin RPI_snr :=cpu_snr;  end;
 function RPI_whoami:string;  		begin RPI_whoami:=whoami; end;
+
+function RPI_GetBuildDateTimeString:string;
+begin
+  RPI_GetBuildDateTimeString:=StringReplace(prog_build_date,'/','-',[rfReplaceAll])+
+  			'T'+prog_build_time;
+end;
+
+function RPI_GetBuildDateTime:TDateTime;
+var dt:TDateTime;
+begin 
+  Str2DateTime(RPI_GetBuildDateTimeString,'YYYY-MM-DD"T"hh:mm:ss',dt);
+  RPI_GetBuildDateTime:=dt; 
+end;
 
 function  RPI_I2C_BRadj(i2c_speed_kHz:longint):longint;	
 // https://periph.io/platform/raspberrypi/ 
@@ -15321,7 +16749,7 @@ function my_isr(GPIO_nr:integer):integer;
 const waittim_ms=1;
 begin
   writeln ('my_isr fired for GPIO',GPIO_nr,' servicetime: ',waittim_ms:0,'ms');
-  sleep(waittim_ms);
+  delay_msec(waittim_ms);
   my_isr:=999;
 end;
 
@@ -15419,10 +16847,10 @@ begin
 	    exit(-1);
       end;		
       {$warnings on}
-      buf:=s;
+      buf.str:=s;
       hdl:=fpopen(dev, Open_RDWR or O_NONBLOCK);
       if hdl<0 then exit(-2); 
-	  rslt:=fpWrite(hdl,buf[1],lgt);
+	  rslt:=fpWrite(hdl,buf.str[1],lgt);
 	  if (rslt<0)	then LOG_Writeln(LOG_ERROR,'WriteStr2UnixDev: '+LNX_ErrDesc(fpgeterrno));
       if (rslt=lgt) then rslt:=0;
 	  fpclose(hdl);
@@ -15529,7 +16957,7 @@ begin
     write  ('doing nothing, waiting for an interrupt on GPIO',GPIO_nr:0,' loopcnt: ',cnt:3,' int_cnt: ',isr.int_cnt:3,' ThreadID: ',PtrUInt(isr.ThreadID),' ThPrio: ',isr.ThreadPrio);
 	if isr.rslt<>0 then begin write(' result: ',isr.rslt,' last service time: ',isr.last_isr_servicetime:0,'ms'); isr.rslt:=0; end;
 	writeln;
-    sleep (1000);
+    delay_msec(1000);
   end; 
   GPIO_int_disable(isr);
   GPIO_int_release(isr);
@@ -15671,9 +17099,9 @@ begin
 end;
 
 function  PID_FileLoad(StrList:TStringList; filnam,SearchCrit:string; var IdxStart,IdxEnd:longint):boolean;
-var _ok:boolean; sh:string;
+var _ok:boolean;
 begin
-  _ok:=TextFile2StringList(filnam,StrList,false,sh);
+  _ok:=TextFile2StringList(filnam,StrList);
   if _ok	then _ok:=GiveStringListIdx2(StrList,SearchCrit,IdxStart,IdxEnd)
   			else LOG_Writeln(Log_ERROR,'PID_FileLoad: input file '+filnam);
   PID_FileLoad:=_ok;
@@ -16045,86 +17473,104 @@ begin
   PID_GetPara:=res;
 end;
 
-procedure CSV_Pos(const strng:string; const delim:char; itemno:longint; var ps,pe:longint);
-var w,len,hkc:longint;
+function  CSV_ESCvalue(const value:string):string;
+var sh:string;
 begin
-  w:=0; hkc:=0; len:=Length(strng); ps:=1; pe:=1;
-  while (pe<=len) and (w<>itemno) do
+  if (value<>'')
+	then sh:=StringReplace(value,'"','""',[rfReplaceAll]) // esc '"' for CSV_ITEM
+  	else sh:='';
+  CSV_ESCvalue:=sh;
+end;
+
+procedure CSV_Pos(const strng:string; const delim:char; itemno:longint; var ps,pe:longint);
+var len,itc,qtc:longint;
+begin
+  itc:=0; qtc:=0; len:=Length(strng); ps:=1; pe:=1;
+  while (pe<=len) and (itc<>itemno) do
   begin
-    if (strng[pe]='"') then inc(hkc);
-	if (not ((strng[pe]<>delim) or odd(hkc))) then
+    if (strng[pe]='"') then inc(qtc);
+	if (not ((strng[pe]<>delim) or odd(qtc))) then
 	begin
-	  inc(w);
-	  hkc:=0;
+	  inc(itc);
+	  qtc:=0;
 	end;
 	inc(pe);
-	if (w<(itemno-1)) then inc(ps);
+	if (itc<(itemno-1)) then inc(ps);
   end; // while
   if (pe<len) then dec(pe); 
 end;
 
 function  CSV_Count(const strng:string; const delim:char):longint;
-var i,w,len,hkc:longint;
+var i,len,itc,qtc:longint;
 begin
-  i:=1; hkc:=0; len:=Length(strng);
-  if (len>0) then w:=1 else w:=0;
+  i:=1; qtc:=0; len:=Length(strng);
+  if (len>0) then itc:=1 else itc:=0;
   while (i<=len) do
   begin
-    if (strng[i]='"') then inc(hkc);
-	if (not ((strng[i]<>delim) or odd(hkc))) then
+    if (strng[i]='"') then inc(qtc);
+	if (not ((strng[i]<>delim) or odd(qtc))) then
 	begin
-	  inc(w);
-	  hkc:=0;
+	  inc(itc);
+	  qtc:=0;
 	end;
 	inc(i);
   end; // while
-  CSV_Count:=w; 
+  CSV_Count:=itc; 
 end;
 function  CSV_Count(const strng:string):longint;
 begin CSV_Count:=CSV_Count(strng,','); end;
 
 function  CSV_Item(const strng:string; const delim:char; const dflt:string; itemno:longint):string;
 // https://www.rfc-editor.org/rfc/rfc4180.txt
-var i,w,len,hkc:longint; sh,sh1:string;
+var i,len,itc,qtc:longint; sh,sh1:string;
 begin
   SetLength(sh,0);
   if (itemno>0) then
   begin
-	w:=0; i:=1; hkc:=0; len:=Length(strng);
- 	while (i<=len) and (w<>itemno) do
+	itc:=0; i:=1; qtc:=0; len:=Length(strng);
+ 	while (i<=len) and (itc<>itemno) do
   	begin
-      if (strng[i]='"') then  inc(hkc);
-	  if (strng[i]<>delim) or odd(hkc) then
+      if (strng[i]='"') then  inc(qtc);
+	  if (strng[i]<>delim) or odd(qtc) then
       begin
-      	if ((itemno-1)=w) then sh:=sh+strng[i]; // extract full field content
+      	if ((itemno-1)=itc) then sh:=sh+strng[i]; // extract full field content
 	  end
 	  else 
 	  begin
-	  	inc(w);
-	  	if (w<>itemno) then hkc:=0;
+	  	inc(itc);
+	  	if (itc<>itemno) then qtc:=0;
 	  end;
 	  inc(i);
   	end; // while	
 
-	sh:=TrimSet(sh,[' ']);						// remove leading & trailing spaces
 	len:=Length(sh);
-	
-	if (hkc>=2) and (len>0) then
+  
+	if (len>0) then
+	begin
+	  if (sh[1]=' ') or (sh[len]=' ') then
+	  begin 
+		sh:=TrimSet(sh,[' ']);					// remove leading & trailing spaces
+	  	len:=Length(sh);
+	  end;
+	end;
+		
+	if (qtc>=2) and (len>0) then
 	begin  
-	  i:=1; hkc:=0; SetLength(sh1,0);
+	  i:=1; qtc:=0; SetLength(sh1,0);
 	  if (sh[1]=  '"') then inc(i);				// remove leading  quote
 	  if (sh[len]='"') then dec(len);	  		// remove trailing quote
 	  while (i<=len) do
 	  begin
-	  	if (sh[i]='"') then inc(hkc);
-		if (odd(hkc) or (sh[i]<>'"')) 
+	  	if (sh[i]='"') then inc(qtc);
+		if (odd(qtc) or (sh[i]<>'"')) 
 		  then sh1:=sh1+sh[i];					// remove escaped quote
 	  	inc(i);
 	  end; // while
 	  sh:=sh1;
 	end;
-	
+		
   end; // else system.Str(CSV_Count(strng,delim):0,sh); // cnt
+  
   if (sh='') then sh:=dflt;  
   CSV_Item:=sh; 
 end;
@@ -16133,6 +17579,14 @@ function  CSV_Item(const strng:string; const delim:char; itemno:longint):string;
 begin CSV_Item:=CSV_Item(strng,delim,'',itemno); end;
 function  CSV_Item(const strng:string; itemno:longint):string;
 begin CSV_Item:=CSV_Item(strng,',','',itemno); end;
+
+procedure CSV_Explode(const strng:string; const delim:char; const dflt:string; var fields:CSV_array_t);
+var i:longint;
+begin 
+  for i:= 1 to Length(fields) do fields[i-1]:=CSV_Item(strng,delim,dflt,i); 
+end;
+procedure CSV_Explode(const strng:string; var fields:CSV_array_t);
+begin CSV_Explode(strng,',','',fields); end;
 
 function  CSV_RightItems(const strng:string; const delim:char; itemno:longint):string; 
 var ps,pe:longint; 
@@ -16148,21 +17602,38 @@ begin
   CSV_LeftItems:=copy(strng,1,pe-1); 
 end;
 
+function  CSV_FileList(const cmd:string):string;
+var i:longint; _tl:TStringList; sh:string;
+begin
+  sh:=''; _tl:=TStringList.create;
+  i:=call_external_prog(LOG_ERROR,cmd,_tl);
+  if (i>=0) then
+  begin
+	for i:= 1 to _tl.count do
+    begin	
+	  if (_tl[i-1]<>'') then sh:=sh+_tl[i-1]+',';
+	end; // for   
+	CSVRemLastSep(sh,',');
+  end;
+  _tl.free;
+  CSV_Filelist:=sh;
+end;
+
 procedure TST_Select_Item;
 const 
-  racecnt=50000;
+  racecnt=50000; fcnt=6;
   tst:array[1..4] of string= (
   'f1,"",f3,"",  , f"" 6 ',
   '"John ""Da Man""",Repici,120 Jefferson St.,Riverside, NJ,08075',
   'Stephen,Tyler,"7452 Terrace ""At the Plaza"" road",SomeTown,SD, 91234',
   ' "Joan ""the bone"", Anne",Jet,"9th, at Terrace plc",Desert City, CO,  " 00123" ');
-var i,j,k,ps,pe:longint; dt1:TdateTime;
+var i,j,k,ps,pe:longint; dt1:TdateTime; fields:CSV_array_t;
 begin
   for k:= 1 to Length(tst) do
   begin
 	writeln(':',tst[k],':'); 
-	for i:= 1 to 6 do writeln(i:0,':',CSV_Item(tst[k],i),':');
-  	writeln('Anz:',CSV_Count(tst[k],','));
+	for i:= 1 to fcnt do writeln(i:0,':',CSV_Item(tst[k],i),':');
+  	writeln('Anz:',CSV_Count(tst[k]));
   	CSV_Pos(tst[k],',',4,ps,pe); writeln('Pos:',ps,':',pe);
   	writeln('Lft:',CSV_LeftItems( tst[k],',',4),':');
   	writeln('Rgt:',CSV_RightItems(tst[k],',',4),':');
@@ -16170,25 +17641,34 @@ begin
   	writeln('Rgt:',Select_RightItems(tst[k],',','"',4),':');
   	writeln;
   end;
+  
+  SetLength(fields,fcnt);
+  for k:=1 to Length(tst) do
+  begin
+    writeln(':',tst[k],':'); 
+	CSV_Explode(tst[k],fields);
+	for i:= 1 to Length(fields) do writeln(i:0,':',fields[i-1],':');
+	writeln;
+  end;
 
 (*k:=0;
-  writeln(tst[k]); for i:= 1 to 6 do writeln(i:0,':',CSV_Item(tst[k],i));
+  writeln(tst[k]); for i:= 1 to fcnt do writeln(i:0,':',CSV_Item(tst[k],i));
   writeln('Anz:',CSV_Count(tst[k],','),':');
   
-  writeln(tst[k]); for i:= 1 to 6 do writeln(i:0,':',Select_Item(tst[k],',','','',i));
+  writeln(tst[k]); for i:= 1 to fcnt do writeln(i:0,':',Select_Item(tst[k],',','','',i));
   writeln('Anz:',Select_Item(tst[k],',','','',0),':');
   writeln; *)
   
   writeln('SpeedTest:');
-  k:=1;
+  k:=4;
   dt1:=now;
   for j:=1 to racecnt do
-    for i:= 1 to 6 do CSV_Item(tst[k],i); // >10x faster
+    for i:= 1 to fcnt do CSV_Item(tst[k],i); // >10x faster
   writeln('CSV_Item Time:   ',MilliSecsBetween(dt1),'ms');
    
   dt1:=now; 
   for j:=1 to racecnt do
-    for i:= 1 to 6 do Select_Item(tst[k],',','','',i);
+    for i:= 1 to fcnt do Select_Item(tst[k],',','','',i);
   writeln('Select_Item Time:',MilliSecsBetween(dt1),'ms');  
 end;
 
@@ -16199,6 +17679,14 @@ begin
   if (Length(strng)>0) and (strng[1]=delim) then 
     sh:=copy(strng,2,Length(strng));
   CSV_RemFirstSep:=sh;
+end;
+
+procedure CSVRemLastSep(var strng:string; const delim:char);
+var lgt:longint;
+begin
+  lgt:=Length(strng);
+  if (lgt>0) then
+	if (strng[lgt]=delim) then SetLength(strng,(lgt-1));
 end;
 
 function  CSV_RemLastSep(const strng:string; const delim:char):string;
@@ -16401,6 +17889,10 @@ begin
 	    3:	begin
 			  outstr:='ControlOut,MinOutput0,MinOutput,MaxOutput: ';
 			  outstr:=outstr+Num2Str(PID_ControlOut,gkc,nkc)+' '+Num2Str(PID_MinOutput0,gkc,nkc)+' '+Num2Str(PID_MinOutput,gkc,nkc)+' '+Num2Str(PID_MaxOutput,gkc,nkc);
+			end;			
+	    4:	begin
+			  outstr:='PID_SampleTime,WindupResetValue,TwiddleEnable,PID_IntImprove,PID_DifImprove: ';
+			  outstr:=outstr+Num2Str(PID_SampleTime_us/1000,0,2)+'ms '+Num2Str(PID_IntegratedWindupResetValue,0,2)+' '+Bool2Str(PID_Twiddle.twiddle_on)+' '+Bool2Str(PID_IntImprove)+' '+Bool2Str(PID_DifImprove);
 			end;
 	    10..15: outstr:=Twiddle_Info(PID_Twiddle,fmt);
 	   else	LOG_Writeln(LOG_ERROR,'PID_Info: unknown fmt: '+Num2Str(fmt,0));
@@ -16583,31 +18075,12 @@ procedure PID_SetDifImprove(var PID_Struct:PID_Struct_t; On_:boolean);
 // To be used after "PID_Init"
 begin PID_Struct.PID_DifImprove:=On_; end;
 
-procedure PID_SetSampleTimeAdjust(var PID_Struct:PID_Struct_t; On_:boolean); 
-begin PID_Struct.PID_STimAdj:=On_; end;
-
 procedure PID_ResetIntegrator(var PID_Struct:PID_Struct_t); 
 // Re-initialises the PID engine of "PID_Struct" without change of settings
 begin PID_Struct.PID_Integrated:=PID_Struct.PID_IntegratedWindupResetValue; end;
 
 procedure PID_IntegratedWindupReset(var PID_Struct:PID_Struct_t; WindupResetValue:PID_float_t); 
 begin PID_Struct.PID_IntegratedWindupResetValue:=WindupResetValue; end;
-
-procedure PID_SetSampleTime(var PID_Struct:PID_Struct_t; New_dT_usec:int64);
-var ratio,NewSampleTime:PID_float_t;
-begin
-  with PID_Struct do
-  begin
-    if (New_dT_usec>0) and (PID_SampleTime>0) then
-    begin
-	  NewSampleTime:=	New_dT_usec*1000;	// micro -> milli secs
-      ratio:=			NewSampleTime/PID_SampleTime;
-      PID_K[iKi]:=		PID_K[iKi]*ratio;
-      PID_K[iKd]:=		PID_K[iKd]/ratio;
-      PID_SampleTime:=	NewSampleTime;
-    end;
-  end; // with 
-end;
 
 procedure PID_SetMinMaxLimit(var PID_Struct:PID_Struct_t; MinOutput0,MinOutput,MaxOutput:PID_float_t);
 begin
@@ -16627,7 +18100,7 @@ begin
 	PID_Error:=0; PID_LastError:=0.0; PID_PrevAbsError:=0.0;	PID_cnt:=0;
   end; // with
 end;
-
+  
 procedure PID_Init(var PID_Struct:PID_Struct_t; nr:longint; itermax:longword; enab_twiddle:boolean; MinOutput0,MinOutput,MaxOutput,SampleTime_ms,WindupResetValue:PID_float_t; K,dK,tol:PID_array_t);
 // Initialises the PID engine of "PID_Struct"
 // Ks = Amplification
@@ -16642,27 +18115,33 @@ begin
   PID_Reset				 	(PID_Struct); 	 
   PID_SetIntImprove		 	(PID_Struct,true); 
   PID_SetDifImprove			(PID_Struct,true);	
-  PID_SetSampleTimeAdjust	(PID_Struct,false);
   PID_SetMinMaxLimit	 	(PID_Struct,MinOutput0,MinOutput,MaxOutput);
 //PID_InitPara			 	(PID_Struct,K);
   PID_InitTwiddle		 	(PID_Struct.PID_Twiddle,nr,enab_twiddle,itermax,K,dK,tol); // tol=0.00001
   
   with PID_Struct do
   begin 
+(*	if (SampleTime_ms<=0) then
+	begin
+	  PID_SampleTime_us:=100000;	// 100ms
+	  LOG_Writeln(LOG_ERROR,'PID_Init: adjusted sample time to default '+Num2Str(PID_SampleTime_us,0));	
+	end else *)
+	PID_SampleTime_us:=round(SampleTime_ms*1000);
+	
     PID_Twiddle.err:=PID_Vector(0,0,0);
     PID_nr:=nr;	PID_ControlOut:=0; 
-    PID_K:=K; 	PID_Ksav:=K;  	
-    
+    PID_K:=K; 	PID_Ksav:=K;
+    PID_KTa:=K;
+    PID_KTa[iKi]:=PID_K[iKi] / PID_SampleTime_us;	// precalc Ki * Ta // Ta = SampleTime in seconds
+    PID_KTa[iKd]:=PID_K[iKd] * PID_SampleTime_us;	// precalc Kd / Ta
+     
 (*  PID_K[iKp]:=PID_K[iKp]/PID_Ks;
     PID_K[iKi]:=PID_K[iKi]/PID_Ks;
     PID_K[iKd]:=PID_K[iKd]/PID_Ks;	*)
 //	writeln('PID_Init['+Num2Str(nr,0)+'] Ks: ',PID_Ks:0:5,' Kp:',PID_K[iKp]:0:5,' Ki:',PID_K[iKi]:0:5,' Kd:',PID_K[iKd]:0:5,' max:',PID_MaxOutput:0:2,' min:',PID_MinOutput:0:2,' min0:',PID_MinOutput0:0:2);
-	
+
 	clock_gettime(CLOCK_REALTIME,@PID_Time);
-	PID_LastTime:=PID_Time;
-	PID_FirstTime:=true;
-	PID_SampleTime:=SampleTime_ms; 		PID_LastSampleTime:=PID_SampleTime;
-	PID_dT:=round(PID_SampleTime*1000);	PID_LastdT:=PID_dT;
+	SetTimeOut_us(@PID_Time, @PID_LastTime, -PID_SampleTime_us);
   end;
 end;
 procedure PID_Init(var PID_Struct:PID_Struct_t; nr:longint; MinOutput0,MinOutput,MaxOutput,SampleTime_ms,tolerance,saveattol:PID_float_t; K:PID_array_t);
@@ -16677,107 +18156,99 @@ function  PID_Calc(var PID_Struct:PID_Struct_t; SetPoint,ProcessValue:PID_float_
 // Functionresult: PID function of (SetPoint-ProcessValue) of "PID_Struct",
 //   a positive value means "ProcessValue" is too low  (< SetPoint), the process should take action to increase it
 //   a negative value means "ProcessValue" is too high (> SetPoint), the process should take action to decrease it
+// y = Kp * e + Ki * Ta * esum + Kd / Ta * (e Ð ealt)
 var _p,_i,_d:PID_float_t;
 begin
   with PID_Struct do
   begin
 	clock_gettime(CLOCK_REALTIME, @PID_Time);
-	PID_dT	:= MicroSecondsBetween(PID_Time,PID_LastTime);
-	if PID_STimAdj and (not PID_FirstTime) and (PID_dT<>PID_LastdT) then PID_SetSampleTime(PID_Struct,PID_dT);
-	inc(PID_cnt); 
-	PID_Error:=	SetPoint - ProcessValue;
+	if (MicroSecondsBetween(PID_Time,PID_LastTime)>=PID_SampleTime_us) then
+	begin
+	  inc(PID_cnt); 
+	  PID_Error:=		SetPoint - ProcessValue;
 
-//	calc p term
-	_p:=		PID_K[iKp] * PID_Error;
+//	  calc p term
+	  _p:=				PID_K[iKp] * PID_Error;
 	
-//	calc i term and limit integral windup
-	if PID_IntImprove and (Sign(PID_Error)<>Sign(PID_Integrated)) 
-	  then PID_Integrated := PID_IntegratedWindupResetValue;
-	if Stoersprung
-	  then PID_Integrated := PID_IntegratedWindupResetValue;
+//	  calc i term and limit integral windup
+	  if (Stoersprung or
+	  	 (PID_IntImprove and (Sign(PID_Error)<>Sign(PID_Integrated)))) 
+	  	then PID_Integrated:= PID_IntegratedWindupResetValue;
 	
-	PID_Integrated := PID_Integrated + PID_Error;
-	_i		:= PID_K[iKi] * PID_Integrated;
-	PID_Limit(_i, PID_MinOutput0, PID_MinOutput, PID_MaxOutput);
+	  PID_Integrated:=	PID_Integrated + PID_Error;
+//	  _i:=				PID_KTa[iKi] * PID_Integrated;
+	  _i:=				PID_K[iKi] * PID_Integrated;
+//	  PID_Limit(_i, PID_MinOutput0, PID_MinOutput, PID_MaxOutput);
 	
-//	calc d term
-	_d		:= PID_K[iKd] * (PID_Error - PID_LastError);
-	if PID_DifImprove and (abs(PID_Error)<abs(PID_LastError)) then _d := 0.0; 
+//	  calc d term
+	  _d:=				PID_K[iKd] * (PID_Error - PID_LastError);
+//	  _d:=				PID_KTa[iKd] * (PID_Error - PID_LastError);
+	  if PID_DifImprove and (abs(PID_Error)<abs(PID_LastError)) 
+	  	then _d:= 0.0; 
 
-	PID_LastError		:= PID_Error;
-	PID_ControlOut		:= (_p + _i + _d);
-//	writeln(pid_cnt:2,' err: ',PID_Error:0:4,' res: ',PID_ControlOut:0:4,' p:',:_p:0:4,' i:',_i:0:4,' d:',_d:0:4);
+	  PID_LastError:= 	PID_Error;
+	  PID_ControlOut:=	(_p + _i + _d);
+//	  writeln(pid_cnt:2,' err: ',PID_Error:0:4,' res: ',PID_ControlOut:0:4,' p:',_p:0:4,' i:',_i:0:4,' d:',_d:0:4);
 
-	PID_Limit(PID_ControlOut, PID_MinOutput0, PID_MinOutput, PID_MaxOutput);
-	PID_ExecTwiddle(PID_Twiddle,PID_K,PID_ControlOut,Stoersprung);	
+	  PID_Limit(PID_ControlOut, PID_MinOutput0, PID_MinOutput, PID_MaxOutput);
+	  PID_ExecTwiddle(PID_Twiddle,PID_K,PID_ControlOut,Stoersprung);	
 	
-	PID_SetPoint		:= SetPoint;
-	PID_ProcessValue	:= ProcessValue;
-	PID_LastTime		:= PID_Time;
-	PID_LastdT			:= PID_dT;
-	PID_FirstTime		:= false;
-	PID_Calc			:= PID_ControlOut;
+	  PID_SetPoint:=	SetPoint;
+	  PID_ProcessValue:=ProcessValue;
+	  PID_LastTime:=	PID_Time;
+	end;
+	
+	PID_Calc:=			PID_ControlOut;
   end; // with
 end;
  
 function  PID_Calc(var PID_Struct:PID_Struct_t; SetPoint,ProcessValue:PID_float_t):PID_float_t;
 begin PID_Calc:=PID_Calc(PID_Struct,SetPoint,ProcessValue,false); end;
 
-procedure PID_TestXX;
-//just for demo purposes
-//simulate PID. How the to be adjusted Value approaches a SetPoint value
-const
-  Kp=0.15; Ki=0.1; Kd=0.1;		// PID parameter
-  PID_Min=-25; PID_Max=+25;		// MinOutput=-25; MaxOutput=+25
-  STim_msec=1000;
-  dm_c=13; scale_c=100; ntimes_c=10; errinduct=false;
-  PID_SetPoints_c:array[0..(dm_c-1)] of 
-    PID_float_t = ( 0, 0.1, 0.2, 0.3, 0.5, 0.7, 0.8, 0.9, 1.1, 1.05, 1.01, 0.9, 0.95);
-var loop,n:integer; pid1:PID_Struct_t; NewVal,SetPoint,delta:PID_float_t;
-begin
-  RPI_HW_Start([InstSignalHandler]);
-  PID_Init(pid1,1,1,PID_Min,PID_Max,STim_msec,PID_twiddle_tolerance,PID_twiddle_saveattol,PID_Vector(Kp,Ki,Kd));
-  PID_SetIntImprove (pid1,true); PID_SetDifImprove(pid1,true);	// enable improvements
-  NewVal:=0; loop:=0; n:=0;
-  writeln('PID_Test2 Kp:',Kp:0:2,' Ki:',Ki:0:2,' Kd:',Kd:0:2);
-  repeat
-    SetPoint:=PID_SetPoints_c[loop]*scale_c;
-	delta:=PID_Calc(pid1,SetPoint,NewVal,false);
-	{$warnings off} if errinduct then delta:=delta*random; {$warnings on} 
-	writeln('PID_Test: SetPoint:',SetPoint:7:2,'  NewVal:',NewVal:7:2,'   delta:',delta:12:8);
-	NewVal:=NewVal+delta;
-	// action according to NewVal
-	sleep(STim_msec); 
-	inc(n); if n>=ntimes_c then begin n:=0;	inc(loop); if loop>=dm_c then loop:=0; end;
-  until terminateProg;
-end;
-
 procedure PID_Test;
 //just for demo purposes
 //simulate PID. How the to be adjusted Value approaches a SetPoint value
 const
-  Kp=1.1;  Ki=0.2;  Kd=0.1;		// PID parameter
-  PID_Min=-25; PID_Max=+25;		// MinOutput=-25; MaxOutput=+25
-  STim_msec=1000;
-  dm_c=8; scale_c=47; ntimes_c=16; errinduct=false;
+  scale_c=48;
+  PID_Max=scale_c div 8; PID_Min=-PID_Max; 	// MaxOutput MinOutput
+  Kp=1.1;  Ki=0.2;  Kd=0.1;					// PID parameter
+  STim_msec=1000;							// sample time 1sec
+  dm_c=8; ntimes_c=16; errind_c=true;
   PID_SetPoints_c:array[0..(dm_c-1)] of PID_float_t = ( 1, 0, -1, 0, 2, 3, -1, 0 );
-var loop,n:integer; pid1:PID_Struct_t; NewVal,SetPoint,delta:PID_float_t;
+var loop,n,errinject,hwval:integer; pid1:PID_Struct_t; NewVal,SetPoint,delta,erri:PID_float_t;
 begin
   RPI_HW_Start([InstSignalHandler]);
-  PID_Init(pid1,1,1,PID_Min,PID_Max,STim_msec,PID_twiddle_tolerance,PID_twiddle_saveattol,PID_Vector(Kp,Ki,Kd));
+  PID_Init(pid1,1,PID_Min,PID_Min,PID_Max,STim_msec,PID_twiddle_tolerance,PID_twiddle_saveattol,PID_Vector(Kp,Ki,Kd));
   PID_SetIntImprove (pid1,true); PID_SetDifImprove(pid1,true);	// enable improvements
-  NewVal:=0; loop:=0; n:=0;
-  writeln('PID_Test2 Kp:',Kp:0:2,' Ki:',Ki:0:2,' Kd:',Kd:0:2);
+  writeln('PID_INFO: '+PID_Info(pid1,1));
+  writeln('PID_INFO: '+PID_Info(pid1,3));
+  writeln('PID_INFO: '+PID_Info(pid1,4));
+  NewVal:=0; loop:=0; n:=0; errinject:=0;
+//writeln('PID_Test2 Kp:',Kp:0:2,' Ki:',Ki:0:2,' Kd:',Kd:0:2);
   repeat
     SetPoint:=PID_SetPoints_c[loop]*scale_c;
 	delta:=PID_Calc(pid1,SetPoint,NewVal,false);
-	{$warnings off} if errinduct then delta:=delta*random; {$warnings on} 
-	writeln('PID_Test: SetPoint:',SetPoint:7:2,'  NewVal:',NewVal:7:2,'   delta:',delta:12:8);
-	NewVal:=NewVal+delta;
-	// action according to NewVal
-	sleep(STim_msec); 
+	{$warnings off} 
+	  if errind_c then 
+	  begin
+	    inc(errinject);
+	  	if (errinject>7) then 
+	  	begin
+	  	  erri:=random;
+		  if (random<0.5) then erri:=-erri;
+	  	  writeln('PID_Test: Error inject ',erri:7:2);
+	  	  delta:=delta*erri;
+	  	  errinject:=0;
+	  	end; 
+	  end;
+	{$warnings on} 
+	hwval:=round(scale(delta,PID_Min,PID_Max,0,255));
+	writeln('PID_Test: SetPoint:',SetPoint:7:2,'  PV:',NewVal:7:2,'   adjVal:',delta:7:2,' e.g. HWval:',hwval:4);
+//  action according to NewVal, do something in HW to cope with delta
+	NewVal:=NewVal+delta; 
+	delay_msec(STim_msec); 
 	inc(n); if n>=ntimes_c then begin n:=0;	inc(loop); if loop>=dm_c then loop:=0; end;
-  until terminateProg;
+  until terminateProg or keypressed;
 end;
 
 function  CL_Compose(cmdLine:string):string;	
@@ -17022,6 +18493,12 @@ begin
   ok:=true; _flgtodo:=initpart; RPI_HW_initpart:=initpart;
 //for j IN initpart do SAY(LOG_WARNING,GetEnumName(TypeInfo(t_initpart),Ord(j)));
 
+  if (OSGetIPinfos IN RPI_HW_initpart) then 
+  begin
+    _flgtodo:=_flgtodo-[OSGetIPinfos];
+    IPInfo_GetOS;
+  end;
+  
   if (InitOnExitShowRuntime 	IN RPI_HW_initpart) then 
   begin
     _flgtodo:=_flgtodo-[InitOnExitShowRuntime];
@@ -17221,7 +18698,7 @@ function  RPI_HW_Start(initpart:s_initpart):boolean; begin RPI_HW_Start:=RPI_HW_
 
 function  RPI_HW_Start:boolean; 
 begin 
-  RPI_HW_Start:=RPI_HW_Start([InitHaltOnError,InitRPIfw,InitGPIO,InitI2C,InitSPI,UPDAuthDBDateTime]);  // start all HW
+  RPI_HW_Start:=RPI_HW_Start([InitHaltOnError,InitRPIfw,InitGPIO,InitI2C,InitSPI,UPDAuthDBDateTime]);
 end;
 
 procedure inivar;
@@ -17260,15 +18737,9 @@ begin
   if (CL_OptGiven(CLOptions,'vvvv')>=0)	then LOG_SAY_Level($44);	// -vvvv
   
   SD_speedRD:=noData_c;
+  MD5Hash4emptyString:=HashTag('');
   
-  with IP_Infos do
-  begin
-  	idx:=0; init:=false; samesubnet:=false; hostname:=''; 
-  	devlst:=''; 		 hostapd_extdev:=ifeth_c;
-	IPInfo_Init(ifwlan_c,	IP_Info[0]);	IP_Info[0].alias:=ifwlan_c;
-	IPInfo_Init(ifeth_c,	IP_Info[1]);	IP_Info[1].alias:=ifeth_c;
-	IPInfo_Init(ifuap_c,	IP_Info[2]);	IP_Info[2].alias:=ifuap_c;
-  end; // with
+  IPInfos_Init(IP_Infos);
   
   with IniFileDesc do begin inifilename:=''; ok:=false; end;
  
@@ -17285,7 +18756,8 @@ begin
   RPI_MaintSetVersions(0,0);	// disable VersionCheck@RPI_Maint PKGInstall
   TEMP_Create(RPI_Temps,'','CPUtemp','''C',2);
   RTC3231_LastTemp:=NaN; RTC3231_NextRead:=now;
-  SetUTCOffset;  // set _TZlocal 
+  SetUTCOffset;  		// set _TZlocal 
+  TimeZoneString(''); 	// set _TZstring e.g. Etc/UTC
   mem_fd:=-1; mmap_arr:=nil; cpu_rev_num:=0; GPIO_map_idx:=2; 
   
   eeprom_SetAddr(eeprom_devadr_c);
@@ -17303,6 +18775,8 @@ begin
   {$IFDEF WINDOWS} SDcard_root_hdl:=3; {$ELSE} SDcard_root_hdl:=AddDisk('/'); {$ENDIF} 
   
   for i:=0 to max_EndLoop_c do SIG_EndLoop(i,false);
+  
+  USR_BreakSetFunc(@USRBreakFunc);
 end;
 
 begin
