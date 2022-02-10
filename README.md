@@ -1,8 +1,9 @@
 # rpi_hal
 Free Pascal Hardware abstraction library for the Raspberry Pi</br>
-This Unit, with more than 18700 Lines of Code,</br>
+This Unit, with more than 19800 Lines of Code,</br>
 delivers procedures and functions to access the rpi HW</br>
 
+- support 32/64Bit OS
 - I2C
 - SPI
 - GPIO (input, output, SW-PWM, HW-PWM, timer, frequency output)
@@ -31,7 +32,7 @@ delivers procedures and functions to access the rpi HW</br>
   Download new SW from FTP-Server</br>
   Install new SW on rpi
 - many examples, how to use the rpi_hal 
-  
+
 !! Since V4.5 new startup strategy, rpi_hal will not bring up HW automatically.</br>
 !! pls. start rpi_hal with e.g. RPI_HW_Start for all components in your main program,</br>
 !! or use explicit flags: RPI_HW_Start([InitHaltOnError,InitGPIO,InitI2C,InitSPI])</br>

@@ -1,7 +1,7 @@
-unit rpi_hal; // V5.5 // 2021-10-12
+unit rpi_hal; // V6.0 // 2022-02-10
 { RPI_hal:
 * Free Pascal Hardware abstraction library for the Raspberry Pi
-* Copyright (c) 2012-2021 Stefan Fischer
+* Copyright (c) 2012-2022 Stefan Fischer
 ***********************************************************************
 *
 * RPI_hal is free software: you can redistribute it and/or modify
@@ -19,9 +19,11 @@ unit rpi_hal; // V5.5 // 2021-10-12
 *
 *********************************************************************** 
 
-  requires minimum FPC Version: 2.4.6
+  minimum FPC Version: 
+  	2.4.6 for 32Bit for armhf
+	3.2.0+dfsg-12 [2021/01/25] for aarch64 64Bit
   support for the following RPI-Models: A,B,A+,B+,Pi2B,Zero,Pi3B,4B...
-  !!!!! In your program, pls. use following uses sequence: !!!!!
+  !!!!! pls. use following uses sequence in your program: !!!!!
   uses cthreads,rpi_hal,<yourunits>...
   required sw tools (apt install curl whois):
   - curl		(PKG: curl)  is used by function RPI_MAINT.
@@ -50,12 +52,15 @@ const
   fmt_rfc3339='yyyy-mm-dd"T"hh:nn:ss';
   tfmt0 = 'hh:mm:ss.zz';
   
-  MaxLongword=	$ffffffff;
+//MaxLongINT=	high(longint);			// $7fffffff // already defined
+  MaxLongWORD=	high(longword);			// $ffffffff
+  MaxINT64= 	high(int64);			// $7fffffffffffffff
+  MinINT64= 	low (int64);			// $8000000000000000
+  MaxQWORD=		high(qword);			// $ffffffffffffffff
 //MinSingle=	Single	(1.5E-45);		MaxSingle=	Single	(3.4E38); // already defined in math.pp
 //MinDouble=	Double	(5.0E-324);		MaxDouble=	Double	(1.7E308);
 //MinExtended=	Extended(1.9E-4932);	MaxExtended=Extended(1.1E4932);
-//MinReal=		MinDouble;				MaxReal=	MaxDouble;
-    
+ 
   eeprom_devadr_c=$50;	// EEPROM @ I2C-Adr 0x50 
   
   DBGRecordCnt_c= 60000;
@@ -767,9 +772,11 @@ options fbtft_device name=adafruit13m debug=3 speed=16000000 gpios=dc:9
   PID_AVGminNum_c=2; PID_AVGmaxNum_c=50; PID_epsilon_c=0.000001; 
   PID_nk8=8;		 PID_timadj_c=0.000001; // usec sensor data
   PID_loctusec=4; 	 PID_locsollval=5; 	 PID_locistval=6; 	// csv field locations
-  PID_twiddle_tolerance=0.00001;		 PID_twiddle_saveattol=PID_twiddle_tolerance*100;
-  PID_twiddle_tolNOTsav=0;	 
+  PID_twiddle_tolerance=	0.001;		 
+  PID_twiddleSavAtTolScal_c=100;	 
   PID_nk15=15;
+  
+  DIST_wid_c=6;
        
 type
   E_rpi_hal_Exception= class(Exception);
@@ -781,7 +788,7 @@ type
   t_port_flags  = (	INPUT,OUTPUT,ALT5,ALT4,ALT0,ALT1,ALT2,ALT3,PWMHW,PWMSW,control,
 					FRQHW,Simulation,PullUP,PullDOWN,RisingEDGE,FallingEDGE,NOpull,
 					DS2mA,DS4mA,DS6mA,DS8mA,DS10mA,DS12mA,DS14mA,DS16mA,noPADhyst,noPADslew,
-					ReversePOLARITY,InitialHIGH,WRthrough,IOCheck,UseUsage,
+					ReversePOLARITY,InitialHIGH,noWRthrough,IOCheck,UseUsage,
 					UseCSec,UseCSecWR,UseCSecRD,I2C,
 					Baud300,Baud1k2,Baud2k4,Baud4k8,Baud9k6,Baud19k2,Baud38k4,Baud57k6,
 					SIOinvertLogic,Bit5,Bit6,Bit7,Bit8,StopBit1,StopBit1H,StopBit2,HShw,HSsw,
@@ -806,7 +813,8 @@ type
   					APTallowRelChg,APTnoProxy,APTpkgPin,APTdwnOnly,APTautoInst,APTsimulate,APTallowUnAuth,APTfixBroken,APTignoreHold,
   					APTupdate,APTupgrade,APTdistUpgrade,APTinstall,APTreInstall,APTremove,APTpurge,APTcheck,APTdownload,APTclean,
   					WDOG_Close,WDOG_Retrig,WDOG_GTO,WDOG_STO,WDOG_BSTAT,WDOG_GSup,WDOG_Pause,WDOG_Resume,  
-  					ActWeb,ActCTRLDev,ActSCPI,ActButton,ActInTestMode,ActDelFile,ActIsCmd);		
+  					ActWeb,ActCTRLDev,ActSCPI,ActButton,ActInTestMode,ActDelFile,ActIsCmd,
+  					USR1flg,USR2flg,USR3flg,USR4flg,USR5flg);		
   s_rpimaintflags=set of t_rpimaintflags;
   
   t_RPI_config	= (	GET_CAN_EXPAND,EXPAND_FS,GET_HOSTNAME,SET_HOSTNAME,GET_BOOT_CLI,GET_AUTOLOGIN,
@@ -826,7 +834,7 @@ type
   					 BIOS_bool,BIOS_int,BIOS_uint,BIOS_float,BIOS_NonZero,BIOS_tstmp,BIOS_PrefDflt,
   					 BIOS_1byte,BIOS_2byte,BIOS_4byte,BIOS_lon,BIOS_lat,
   					 BIOS_tryARRidx,BIOS_RemOnDflt,
-  					 BIOS_trim1,BIOS_trim2,BIOS_trim3,BIOS_trim4,BIOS_Printable);
+  					 BIOS_trim1,BIOS_trim2,BIOS_trim3,BIOS_trim4,BIOS_Printable,BIOS_UnEscUrl);
   s_BIOS_Flags=		set of t_BIOS_Flags;
   
   t_Strobe_flag=  ( STB_Off,STB_On,STB_Reset,STB_OneShot,STB_Interval,STB_IntvalSet,STB_DtyCycl,STB_GetState,STB_Async,STB_unk);
@@ -859,13 +867,22 @@ type
 
   RPIreg64_t = record
 	case typus:byte of
-		$00: (qw:qword);
-		$01: (lwLO,lwHI:longword);
+		$00: (Reg64:qword);
+		$01: (RegLO32,RegHI32:longword);
+  end;
+
+  RING_BufferData_t = real;
+  RING_Buffer_t = record
+  	dcnt,bufsiz,			// data count
+  	RDidx,WRidx:longint;	// read/write indx
+  	buf: array of RING_BufferData_t;
   end;
 
   STAT_struct_t = record
+    filled_up,
     statready:		boolean;
-    idx:			longint;
+    useSampleDev,
+    idxLast,idx:	longint;
   	SUMval,MINval,MAXval,MEANval,StdDev,
 	old_avg,trend:	float;
 	val_arr:		array of float;
@@ -1012,7 +1029,6 @@ type
   RPI_MBX_msg_t = packed record
 	msg_size:	longword;
 	request_code:longword;
-//	tag:		RPI_MBX_tag_t;
 	tag_id:		longword;
 	buffer_size:longword;
 	data_size:	longword;
@@ -1147,18 +1163,21 @@ type
   
   StrobeStruct_t = record
 	state:							t_Strobe_flag;
-	modetog:						boolean;
-	strobeONtimer,strobeINTtimer:	qword;
+	modetog,OUTtrigger:				boolean;
+	OUTstat,OUTstatold:				integer;
+	strobeONtimer,strobetimer,
+	strobeINTstartTimer,
+	strobeOLDtimer,strobeINTtimer:	qword;
 	seq,strobeON_us,strobeONmin_us,
-	strobeONsave_us,strobeINTmax_us,
-	strobeINT_us,strobeINTsave_us:	int64;
+	strobeINTmax_us,strobeINT_us:	int64;
+	strobeDTYcycle:					real;
   end;
   
   ENC_ptr = ^ENC_struct_t;
   ENC_CNT_ptr=^ENC_CNT_struct_t;
   ENC_CNT_struct_t = record	  
     Handle:integer;
-    ENC_activity:boolean;
+    ENC_activity,ENC_WasActive:boolean;
     switchcounter,switchcounterold,switchcountermax,
     switchlastpresstime,
     counter,counterold,countermark,countermax,cycles,cyclesold:longint;
@@ -1287,53 +1306,72 @@ type
 					PID_SAMAL_GFA,PID_SAMAL_GF20,PID_SAMAL_GSA,PID_SAMAL_GS20);
 					
   PID_Twiddle_t = record
+    twiddle_LogColor,
+    twiddle_LogLevel:	T_ErrorLevel;
 	twiddle_on,
-	twiddle_saved:		boolean;
+	twiddle_saved,
+	twiddle_save:		boolean;
 	twiddle_ID,
 	twiddle_state,
 	twiddle_idx,
 	twiddle_intermax,
+	twiddle_tolnoreachcnt,
 	twiddle_iterations:	longint;
 	twiddle_sum_dp,
+	twiddle_sum_dps,
 	twiddle_best_error:	PID_float_t;
 	twiddle_tol,
 	err,p,p0,dp,ps,dps:	PID_array_t;
+	twiddle_repdt:		TDateTime;		
 	twiddle_INI_sect,
 	twiddle_INI_key:	string;
   end;
   
   PID_Det_t = record
 	PIDMethod:PID_Method_t;
+	SampleTimeAvg:PID_float_t;
 	SampleTimeAdjFactor,
  	Ti,Td,
-  	Ks,Te,Tb,Tsum,SampleTimeAvg:PID_float_t; 
+  	Ks,Te,Tb,Tsum:PID_float_t; 
   end;
   
   PID_Struct_t = record
 	PID_nr:				longint;
 	PID_cnt: 			longword;
 	PID_SampleTime_us:	int64;			// micro seconds
+	PID_ovr,
 	PID_IntImprove,	
 	PID_DifImprove,
 	PID_LimImprove,
 	PID_FirstTime,
 	PID_UseSelfTuning:	boolean;
 	PID_Time,
+	PID_StartTime,
 	PID_LastTime: 		timespec;
     PID_Integrated, 
     PID_IntegratedWindupResetValue,
+    PID_SetPointLast,
     PID_SetPoint,		// r(t): SP:SetPoint:Führungsgröße
     PID_ProcessValue,	// y(t): PV:ProcessValue:Regelgröße
     PID_ControlOut,		// u(t): ControlOut:Stellgröße
-    PID_MinOutput0,		// ControlOut at 0
     PID_MinOutput,  	// ControlOut minimum, if ON
     PID_MaxOutput,		// ControlOut maximum, if ON
     PID_Error,
     PID_LastError,
     PID_PrevAbsError:	PID_float_t;
+    PID_pid,
 	PID_K,PID_KTa,
+	PID_csv_Lims,
+	PID_Lims,
 	PID_Ksav:			PID_array_t;
     PID_Twiddle:		PID_Twiddle_t;
+    PID_csv_TL:			TStringList;
+    PID_csv_enable:		boolean;
+    PID_csv_RECtime_ms:	word;
+    PID_csv_SetPointMaximum:PID_float_t;	
+    PID_csc_RECstop:	TDateTime;	
+    PID_csv_fown,PID_csv_fgrp,
+    PID_csv_fn:			string;
   end;
 
   TREND_Struct_t = record
@@ -1525,6 +1563,8 @@ procedure TST_Select_Item;
 procedure TST_Trimme;
 procedure DIST_Test;
 procedure IPInfo_Test;
+procedure RING_BufferTest;
+procedure RFC822DateTimeTest;
 
 function  _IOC (dir:byte; typ:char; nr,size:word):longword;
 function  _IO  (typ:char; nr:word):longword; 
@@ -1591,7 +1631,7 @@ function  ERR_MGMT_STAT(errhdl:integer):boolean;
 function  ERR_MGMT_GetInfo(errhdl,modus:integer):longword;
 function  ERR_MGMT_GetErrCnt(errhdl:integer):longword;
 function  ERR_MGMT_GetMaxErrCnt(errhdl:integer):longword;
-procedure ERR_MGMT_UPD(errhdl:integer; cmdcode,datalgt:byte; modus:boolean);
+procedure ERR_MGMT_UPD(errhdl:integer; cmdcode,datalgt:integer; modus:boolean);
 procedure Toggle_STATUSLED_very_fast;
  
 procedure LED_Status    (ein:boolean);		// Switch Status-LED on or off
@@ -1696,6 +1736,7 @@ function  ENC_GetSwitch		(hdl:integer):real;
 function  ENC_GetCycles     (hdl:integer):real; 
 function  ENC_GetMark		(hdl:integer):real;
 function  ENC_SetMark		(hdl:integer):real;
+function  ENC_WasActive	    (hdl:integer):boolean;
 
 function  ENC_GetCounter	(var ENCInfo:ENC_CNT_struct_t):boolean;
 procedure ENC_IncEncCnt		(var ENCInfo:ENC_CNT_struct_t; cnt:integer);
@@ -1733,7 +1774,7 @@ function  BIOS_GetIniString(section,name,default:string; flgs:s_BIOS_Flags):stri
 function  BIOS_SetIniString(name,value:string):boolean;	
 function  BIOS_SetIniString(section,name,value:string):boolean;	
 function  BIOS_SetIniString(section,name,value:string; flgs:s_BIOS_Flags):boolean;
-function  BIOS_SetDelIniString(section,name,value:string):boolean;
+function  BIOS_SetDelIniString(section,name,value:string; flgs:s_BIOS_Flags):boolean;
 
 function  BIOS_DeleteKey(section,name:string):boolean;
 procedure BIOS_EraseSection(section:string);
@@ -1767,10 +1808,11 @@ function  RPI_BCM2835:boolean;
 function  RPI_BCM2835_GetNodeValue(node:string; var nodereturn:string):longint;
 function  RPI_status_led_GPIO:byte;	// give GPIO_NUM of Status LED
 function  RPI_GetPrecisionCounter_us:qword;
-procedure RPI_SetTimeOut_us(var qTimer:qword; Retrig_us:longword);
+procedure RPI_SetTimeOut_us(var qTimer:qword; Retrig_us:longword); // depricated
 function  RPI_SetTimeOut_us(Retrig_us:longword):qword;
+function  RPI_SetTimer_us(var qTimerIN:qword; Retrig_us:longword):qword;
 function  RPI_TimeElapsed_us(var qTimer:qword):boolean;
-function  RPI_TimeElapsed_us(var qTimer:qword; Retrig_us:longword):boolean;
+function  RPI_TimeElapsed_us(var actualqTimer,qTimer:qword; Retrig_us:longword):boolean;
 function  RPI_MicroSecondsBetween(qTimer1,qTimer2:qword):int64;
 procedure RPI_TMR_Init(var RPI_TMR_struct:RPI_TMR_struct_t);
 procedure RPI_TMR_GetStartTime(var RPI_TMR_struct:RPI_TMR_struct_t);
@@ -1908,12 +1950,14 @@ procedure SetTimeOut_us (ptspec:Ptimespec; Retrig_us:int64);
 procedure SetTimeSpec	(ptspec:Ptimespec; sec,nsec:int64);
 function  TimeElapsed_us(ptspec:Ptimespec):boolean;
 function  TimeElapsed_us(ptspec:Ptimespec; Retrig_us:int64):boolean;
-procedure TimeStrobeInit(var StrobeStruct:StrobeStruct_t; const ID,strobINT_us,strobONmin_us,strobINTmax_us:int64);
-procedure TimeStrobeDuty(var StrobeStruct:StrobeStruct_t; const dutycycle:real);
+procedure TimeStrobeInit(var StrobeStruct:StrobeStruct_t; const ID,strobINT_us:int64);
+procedure TimeStrobeDuty(var StrobeStruct:StrobeStruct_t; dutycycle:real);
+procedure TimeStrobeDutyAsyn(var StrobeStruct:StrobeStruct_t; dutycycle:real);
 procedure TimeStrobeMode(var StrobeStruct:StrobeStruct_t; const modi:s_Strobe_flag);
 procedure TimeStrobeMode(var StrobeStruct:StrobeStruct_t; const modi:s_Strobe_flag; const strob_us:int64);
 procedure TimeStrobeAsyn(var StrobeStruct:StrobeStruct_t; const modus:t_Strobe_flag);
-function  TimeStrobe	(var StrobeStruct:StrobeStruct_t):boolean;
+function  TimeStrobe	(var StrobeStruct:StrobeStruct_t):integer;
+function  TimeStrobeShowStr(var StrobeStruct:StrobeStruct_t; msg:string):string;
 procedure TimeStrobeShow(var StrobeStruct:StrobeStruct_t; lvl:T_ErrorLevel; msg:string);
 
 procedure LOGSAY_tst;
@@ -1931,6 +1975,7 @@ function  LOG_GetVersion(version:real):string;
 function  LOG_Get_LevelStringShort(lvl:T_ErrorLevel):string;
 procedure LOG_SAY_Level(mask:byte);	
 procedure SAY   (typ:T_ErrorLevel; msg:string); // writes to STDOUT
+procedure SAY	(typ,col:T_ErrorLevel;msg:string);
 procedure SAY   (typ:T_ErrorLevel; const msg:string; const params:array of const);overload;
 procedure SAY_TL(typ:T_ErrorLevel; tl:TStringList); 
 procedure SAY_Level(level:t_ErrorLevel); 
@@ -2035,13 +2080,16 @@ function  LNX_WDOG(wdog_action:t_rpimaintflags; p1:longint):longint;
 function  LNX_WDOG(wdog_action:t_rpimaintflags):longint; 
 function  LNX_SSHFSmount(site,pwd,mnt:string; var err:string):integer;
 
-function  BTLE_StartBeaconURL(url1,url2:string):longint;
+function  BTLE_StartBeaconURL(url:string):boolean;
+function  BTLE_StartBeaconURL(url:string; TXPower:integer):boolean;
 function  BTLE_StopBeacon:boolean;
+procedure BT_PrettyHostName(hnam:string);
 
 procedure MinMaxAdj(var value:real; valmin,valmax:real);
 function  Limits(var value:int64; minvalue,maxvalue:int64):int64;
 function  Limits(var value:longint; minvalue,maxvalue:longint):longint;
 function  Limits(var value:longword; minvalue,maxvalue:longword):longword;
+function  Limits(var value:single; minvalue,maxvalue:single):single;
 function  Limits(var value:real; minvalue,maxvalue:real):real;
 function  InLimits(value,minvalue,maxvalue:real):boolean;
 function  MinMax(value:int64; var minvalue,maxvalue:int64):integer;
@@ -2052,9 +2100,13 @@ procedure STAT_Open(var stats:STAT_struct_t; arrsize:word);
 procedure STAT_Close(var stats:STAT_struct_t);
 procedure STAT_Reset(var stats:STAT_struct_t);
 function  STAT_Inject(var stats:STAT_struct_t; newval:float):boolean;
-procedure STAT_Calc(var stats:STAT_struct_t);
+function  STAT_Str(var stats:STAT_struct_t; vk,nk:byte):string;
 procedure HeapStatINI(var struct:HeapStat_t; HSname:string; indentcnt:byte; replvl:T_ErrorLevel);
 procedure HeapStat(var struct:HeapStat_t; idx:longint);
+procedure RB_Open (var struct:RING_Buffer_t; siz:word; inipat:RING_BufferData_t);
+procedure RB_Close(var struct:RING_Buffer_t);
+function  RB_RD(var struct:RING_Buffer_t; var dataOUT:RING_BufferData_t):boolean;
+function  RB_WR(var struct:RING_Buffer_t; dataIN:RING_BufferData_t):boolean;
 
 function  CL_Compose(cmdLine:string):string; 	
 function  CL_Parse  (cmdLine:string):t_CLOptions; 
@@ -2085,6 +2137,7 @@ function  Str2Bool(s:string):boolean;
 function  Str2Bool(s:string; var ein:boolean):boolean;
 function  Num2Limit(var Value:real; MinOut,MaxOut:real):boolean;
 function  Num2Bool(num:int64):boolean;
+function  Num2Bool(num:real):boolean;
 function  Num2Str(num:int64):string; 
 function  Num2Str(num:longint):string; 
 function  Num2Str(num:longword):string;	
@@ -2093,7 +2146,9 @@ function  Num2Str(num:int64;lgt:byte):string;
 function  Num2Str(num:longint; lgt:byte):string;
 function  Num2Str(num:longword;lgt:byte):string;
 function  Num2Str(num:qword;lgt:byte):string;
-function  Num2Str(num:real;lgt,nk:byte):string;  
+function  Num2Str(num:real;lgt,nk:integer):string; 
+function  Num2DtyStr(dty:real):string; 
+function  Trend2Ch(num:longint):char; 
 function  Str2Num(s:string; var num:byte):boolean;
 function  Str2Num(s:string; var num:smallint):boolean;
 function  Str2Num(s:string; var num:int64):boolean;
@@ -2109,12 +2164,14 @@ procedure Str2Num(s:string; var num:qword; dflt:qword);
 procedure Str2Num(s:string; var num:longint; dflt:longint);
 procedure Str2Num(s:string; var num:longword; dflt:longword);
 procedure Str2Num(s:string; var num:real; dflt:real);
+procedure Str2Num(s:string; var num:single; dflt:single);
 procedure Str2Num(s:string; var num:extended; dflt:extended);
 function  Str2NumFMT(s:string; nk:byte):string;
 function  Num2StrFMT(num:real; nk:byte):string;
 function  Str2CP437(s:string):string;
 function  Str2TimeSpec(s:string; var ts:timespec):boolean; 
-function  Str2DateTime(tdstring,fmt:string; var dt:TDateTime):boolean;
+function  Str2DateTime(const tdstring,fmt:string; var dt:TDateTime):boolean;
+function  Str2DateTime(const tdstring:string; fmtsel:integer; var dt:TDateTime):boolean;
 function  UnicodeStr2UTF8(unicodestr:string):string;
 function  Str2LogLvl(s:string):T_ErrorLevel;
 function  StrShort2LogLvl(s:string; dfltlvl:T_ErrorLevel):T_ErrorLevel;
@@ -2132,15 +2189,19 @@ function  StrHex(Hex_strng:string):string;
 function  AdjZahlDE(r:real;lgt,nk:byte):string;
 function  AdjZahl(s:string):string;
 function  adjL0(s:string):string;
+function  adjT0(s:string):string;
 function  Adj_LF(strIN:string):string;
 function  FormatFileSize(const Size: Int64):string;
-function  FormatNumSize(const Size:int64):string;
+function  FormatNumSize(const Size:real):string;
 function  scale(x,in_min,in_max,out_min,out_max:real):real;
 function  scale(x,in_min,in_max,out_min,out_max:longint):longint;
 function  scale(x,in_min,in_max,out_min,out_max:int64):int64;
+function  scale(x,dflt,in_min,in_max,out_min,out_max:real):real;
+function  scale(x,dflt,in_min,in_max,out_min,out_max:longint):longint;
+function  scale(x,dflt,in_min,in_max,out_min,out_max:int64):int64;
 function  DIST_Insert(var struct:DISTribution_t; valIN:real):longint;
 function  DIST_Init(var struct:Distribution_t; ArrSize:word; fmin,fmax:real):boolean;
-procedure DIST_Show(var struct:Distribution_t; hdr:string);
+procedure DIST_Show(var struct:Distribution_t; hdr,lbl:string; lvl,lcol:T_ErrorLevel);
 procedure DIST_End(var struct:Distribution_t);
 function  Get_SameCharString(cnt:longint;c:char):string;
 function  Get_FixedStringLen(s:string;cnt:word;leading:boolean):string; 
@@ -2228,7 +2289,7 @@ function  Select_Item(const strng,trenner,trenner2,dflt:string;itemno:longint):s
 function  Select_Item(const strng,trenner,trenner2:string;itemno:longint) : string;
 function  Select_RightItems(const strng,trenner,trenner2:string;startitemno:longint):string; 
 function  Select_LeftItems (const strng,trenner,trenner2:string;enditemno:longint):string; 
-function  Locate_Value(const strng,search,tr1,tr2,tr3,tr4:string; var valoutstrng:string):boolean;
+function  Locate_Value(const strng,search,tr1,tr2,tr3,tr4:string; var valoutstrng:string; flags:s_BIOS_Flags):boolean;
 
 function  CSV_ESCvalue(const value:string):string;
 function  CSV_Count(const strng:string):longint;
@@ -2248,6 +2309,7 @@ procedure CSV_MaintList(var csvlst:string; entry:string; addit:boolean);
 function  CSV_MaintListToogleField(var csvlst:string; entry:string):boolean;
 function  CSV_FileList(const cmd:string):string;
 
+function  ReMAParrFL(var arr,adflt:Array of real; sects,keys,values:string):boolean;
 function  ReMAParrLI(var arr,adflt:Array of longint;  sects,keys,values:string):boolean;
 function  MODarrLI	(var arr:Array of longint; idx,newval:longint; sects,keys:string):boolean;
 function  MODarrLW(var arr:Array of longword; idx:longint; newval:longword; sects,keys:string):boolean;
@@ -2257,6 +2319,8 @@ function  ChgArrLW  (var arr,adflt:Array of longword; var ArrOut:Array of longin
 function  ContentHasChangedTimeStamp(const hashOld,hashNew:string; timeStampOld,timeStampNew:TDateTime):TDateTime;
 function  StringPrintable(s:string):string; 
 function  CharPrintable(c:char):string;
+function  URLencode(s:string):string; 
+function  URLdecode(s:string):string;
 procedure ShowStringList(StrList:TStringList); 
 function  StringListMinMaxValue(StrList:TStringList; fieldnr:word; tr1,tr2:string; flgs:s_BIOS_Flags; var min,max:extended; var nk:longint):boolean;
 procedure StringListSnap(StrListIn,StrListOut:TStringList; const srchstrng:string);
@@ -2277,8 +2341,9 @@ function  MD5_HashCreateFile(filnam,MD5filnam:string; var MD5hash:string):boolea
 function  MD5_HashGETFile(MD5filnam:string; var MD5hash:string):boolean;
 function  MD5_Check(file1,file2:string):boolean;
 function  MOD_Euclid(a,b:longint):longint;
-function  MovAvg(interval:longword; var InpArr,OutArr:array of real):longint; // moving average
-function  SearchValIdx(var InpArr:array of real; srchval,Epsilon:real):longint; 
+function  MovAvg(interval:longword; var InpArr,OutArr:array of single):longint; // moving average
+function  MovAvg(interval:longword; var InpArr,OutArr:array of real):longint; // moving average 
+function  SearchValIdx(var InpArr:array of real; srchval,Epsilon:real; up:boolean):longint; 
 function  TTY_sttySpeed(lvl:t_ErrorLevel; ttyandspeed:string):integer;  // e.g. '/dev/ttyAMA0@9600'
 function  TTY_setterm(lvl:t_ErrorLevel; ttydev,ttyopts:string):integer; // e.g. '/dev/tty1' '--cursor off --clear all' 
 function  TTY_console:string;
@@ -2290,12 +2355,15 @@ function  GetDateTimeLocal:TDateTime;
 function  GetDateTimeLocal(utc:TDateTime):TDateTime; 
 function  CalcUTCOffsetString(offset_Minutes:longint; withcolon:boolean):string; // e.g. '+02:00'
 function  GetUTCOffsetString:string; // e.g. '+02:00' 
-function  GetUTCOffsetMinutes(offset_String:string):longint; // e.g. '-02:00' -> -120
+function  GetUTCOffsetMinutes(ofs:string):longint; // e.g. '-02:00' -> -120
 function  GetDateTimeUTC:TDateTime;
 function  GetDateTimeUTC(dt:TDateTime; tzofs:longint):TDateTime; 
 function  DateTime2FMT(fmt:integer; dt:TDateTime):string;
 function  DateTime00MS(dt:TDateTime):TDateTime;	// get rid of ms
-function  Rfc822DateTimeEncode(dt:TDateTime):string; // Sat, 14 Aug 2021 07:57:03 +0000
+function  RFC822DateTimeEncode(dt:TDateTime; tzofs:longint):string;
+function  RFC822DateTimeEncode(dt:TDateTime):string; // Sat, 14 Aug 2021 07:57:03 +0000
+function  RFC822DateTimeEncode:string;
+function  RFC822DateTimeDecode(const tstmp:string; var dt:TDateTime):boolean;
 function  GetTimeStamp(dt:TDateTime):string; 	// YEAR-MM-DD hh:mm:ss.zzz
 function  GetTZTimeStamp(dt:TDateTime):string;	// YEAR-MM-DD hh:mm:ss.zzz+XX:XX
 function  GetXMLTimeStamp(dt:TDateTime):string; // YEAR-MM-DDThh:mm:ss.zzz+XX:XX
@@ -2322,7 +2390,7 @@ function  CURL(var CurlThCtl:Thread_Ctrl_t):integer;
 procedure CURL_Test;
 procedure TimeElapsed_us_Test;
 procedure Test_TimeOut;
-procedure Test_TimeStrobe;
+procedure TEST_TimeStrobe(filename:string);
 procedure delay_nanos(Nanoseconds:int64);
 procedure delay_us   (Microseconds:longword);	
 procedure delay_msec (Milliseconds:longword); 
@@ -2333,6 +2401,7 @@ function  SigmoidIsA(A,k,epsilon,x0:real):real;
 procedure tst_Sigmoid;
 procedure tst_Sigmoid_normalized;
 
+function sysconf			(i:cint):clong;cdecl;external name 'sysconf';
 function clock_getres		(clock_id:clockid_t; res:Ptimespec):longint;cdecl;external clib name 'clock_getres';
 function clock_gettime		(clock_id:clockid_t; tp: Ptimespec):longint;cdecl;external clib name 'clock_gettime';
 function clock_settime		(clock_id:clockid_t; tp: Ptimespec):longint;cdecl;external clib name 'clock_settime';
@@ -2364,42 +2433,57 @@ function  MicroSecondsBetween(ts1,ts2:int64):int64;
 {$ENDIF}
 function  MilliSecsBetween(td:TDateTime):int64;
 
-procedure PID_Test;
+procedure PID_Test(csvuse:boolean; csvfn,fusr,fgrp:string);
+procedure PID_Test_GetPara;
 procedure Twiddle_Test;
 
+function  PID_WT(fnIN,fnOUT:string; PID_loctTIMusec,PID_locPVval,PID_locSPval:integer; lvl:T_ErrorLevel; var PID_Det:PID_Det_t):boolean;
 function  PID_DetPara(loglvl:t_ErrorLevel; StrList:TStringList; idxStart,idxEnd,smoothdata,smoothtdr,loctim,locist,locSetPoint:longint; StoerSprung,timadjfct:real; var PID_Det:PID_Det_t; tst:boolean; filout:string):integer;
 function  PID_GetPara(loglvl:t_ErrorLevel; var PID_Det:PID_Det_t; var K:PID_array_t; loginfo:string):integer;
-procedure PID_ShowDet(var struct:PID_Det_t; loglvl:T_ErrorLevel; hdr:string);
+procedure PID_DetShow(var struct:PID_Det_t; loglvl,collvl:T_ErrorLevel; hdr,trl:string);
 
-procedure PID_Init(var PID_Struct:PID_Struct_t; nr:longint; itermax:longword; enab_twiddle:boolean; MinOutput0,MinOutput,MaxOutput,SampleTime_ms,WindupResetValue:PID_float_t; K,dK,tol:PID_array_t);
+procedure PID_Init(var PID_Struct:PID_Struct_t; nr:longint; itermax:longword; enab_twiddle:boolean; MinOutput,MaxOutput,WindupResetValue:real; SampleTime_us:int64; K,dK,tol:PID_array_t);
+procedure PID_Init(var PID_Struct:PID_Struct_t; SampleTime_us:int64; K:PID_array_t);
 procedure PID_Reset(var PID_Struct:PID_Struct_t);
-function  PID_Calc(var PID_Struct:PID_Struct_t; SetPoint,ProcessValue:PID_float_t; Stoersprung:boolean):PID_float_t;
-function  PID_Calc(var PID_Struct:PID_Struct_t; SetPoint,ProcessValue:PID_float_t):PID_float_t;
+function  PID_Calc(var PID_Struct:PID_Struct_t; SetPoint,ProcessValue:PID_float_t; Stoersprung:boolean):boolean;
+function  PID_Calc(var PID_Struct:PID_Struct_t; SetPoint,ProcessValue:PID_float_t):boolean;
 procedure PID_SetIntImprove(var PID_Struct:PID_Struct_t; On_:boolean);
 procedure PID_SetDifImprove(var PID_Struct:PID_Struct_t; On_:boolean);
-procedure PID_SetMinMaxLimit(var PID_Struct:PID_Struct_t; MinOutput0,MinOutput,MaxOutput:PID_float_t);
+procedure PID_SetSampleTime(var PID_Struct:PID_Struct_t; SampleTime_us:int64);
+procedure PID_SetMinMaxLimit(var PID_Struct:PID_Struct_t; MinOutput,MaxOutput:PID_float_t);
 procedure PID_SetSelfTuning(var PID_Struct:PID_Struct_t; On_:boolean); 
 
-function  PID_ExecTwiddle(var PID_Twiddle:PID_Twiddle_t; var PID_K:PID_array_t; errorUpdate:PID_float_t; Stoersprung:boolean):boolean;
-procedure PID_InitTwiddle(var PID_Twiddle:PID_Twiddle_t; ID:longint);
-procedure PID_InitTwiddle(var PID_Twiddle:PID_Twiddle_t; ID:longint; enab:boolean; itermax:longword; ap,adp,tol:PID_array_t);
+function  PID_ExecTwiddle(var PID_Twiddle:PID_Twiddle_t; var PID_K:PID_array_t; errorUpdate:PID_float_t):boolean;
+procedure PID_InitTwiddle(var PID_Twiddle:PID_Twiddle_t; ID:longint; enab:boolean; itermax:longword; ap,dK,tol:PID_array_t);
+procedure PID_EnableTwiddle_Save(var PID_Twiddle:PID_Twiddle_t; enable:boolean);
+procedure PID_Twiddle_LogLevel(var PID_Twiddle:PID_Twiddle_t; lvl1,lvl2:T_ErrorLevel);
 procedure PID_SetTwiddle_KeyName(var PID_Twiddle:PID_Twiddle_t; sect,key:string);
-function  PID_ReadTwiddle(sect,key:string; var K,dK,tol:PID_array_t):boolean;
-function  PID_ReadTwiddle(var PID_Twiddle:PID_Twiddle_t; var K,dK,tol:PID_array_t):boolean;
 procedure PID_SaveTwiddle(var PID_Twiddle:PID_Twiddle_t; K,dK:PID_array_t);
+function  PID_ReadTwiddle(sect,key:string; var K,dK,tol:PID_array_t):boolean;
+function  PID_ReadTwiddle(sect,key:string; var K,dK,tol:PID_array_t; replvl1,replvl2:T_ErrorLevel):boolean;
 
 function  PID_VectorStr(var pidarr:PID_array_t; vk,nk:integer; sep:char):string;
+function  PID_VectorStr(var pidarr:PID_array_t; vk,nk:integer):string;
 function  PID_Vector(Kp,Ki,Kd:PID_float_t):PID_array_t;
+function  PID_DetCreate(myKS,myTe,myTb,myTimeBase_sec,mySampleTime:PID_float_t):PID_Det_t;
+function  PID_DetCreate(myPIDmethod:PID_Method_t; myKS,myTe,myTb,myTimeBase_sec,mySampleTime:PID_float_t):PID_Det_t;
 function  PID_TDR(var TickArr,ValArr,OutTickDeltaArr,OutValArr:array of PID_float_t):longint;
-function  PID_DetType(Te,Tb:PID_float_t):integer;
+function  PID_DetType(Te,Tb:PID_float_t):PID_Method_t;
 function  PID_TimAdj(timadjfct:real; var Te,Tb,TSum:PID_float_t):integer;
 function  PID_DetAvgs(IdxStart,IdxEnd:longint; var avgnumIst,avgnumPInc:longint):boolean; 
 function  PID_FileLoad(StrList:TStringList; filnam,SearchCrit:string; var IdxStart,IdxEnd:longint):boolean;
 function  PID_sim(StrList:TStringList; simnr:integer):real;
 procedure PID_SimCSV(tl:TStringList; var PID_Det:PID_Det_t; var pid:PID_Struct_t);
-procedure PID_Limit(var Value:PID_float_t; MinOut0,MinOut,MaxOut:PID_float_t);
+function  PID_Limit(var Value:PID_float_t; MinOut0,MinOut,MaxOut:PID_float_t):PID_float_t;
 procedure PID_TestSim;
+procedure PID_TestSim2(fil,fusr,fgrp:string);
 function  PID_Info(var PID_Struct:PID_Struct_t; fmt:longint):string;
+procedure PID_csv_fname(var PID_Struct:PID_Struct_t; csvfilename:string);
+procedure PID_csv_fname(var PID_Struct:PID_Struct_t; csvfilename,fown,fgrp:string);
+procedure PID_csv_USE(var PID_Struct:PID_Struct_t; use:boolean);
+procedure PID_csv_RECtime(var PID_Struct:PID_Struct_t; rectim_ms:word);
+procedure PID_csv_SetPointMax(var PID_Struct:PID_Struct_t; spmax:PID_float_t);
+procedure PID_close(var PID_Struct:PID_Struct_t);
 
 function  WAVE_InitArray(wavelist:TStringList; var wa:WAVE_Array_t; var valmin,valmax:real):longint;
 function  WAVE_InitArray(var wa:WAVE_Array_t; wavemode:WAVE_RampShape_t; valstart,valend:real; valcnt:longint; dtycycle:real):longint;
@@ -2723,13 +2807,19 @@ procedure TimeStrobeAsyn(var StrobeStruct:StrobeStruct_t; const modus:t_Strobe_f
 begin
   with StrobeStruct do
   begin
+//  strobetimer:=RPI_GetPrecisionCounter_us;
 	case modus of
-	  STB_Reset:	begin 
-	  				  strobeINTtimer:=RPI_GetPrecisionCounter_us;
-					  strobeONtimer:= RPI_GetPrecisionCounter_us;
-					end;
-	  STB_IntvalSet:  strobeINTtimer:=RPI_GetPrecisionCounter_us;
-	  STB_DtyCycl:	  strobeONtimer:= RPI_GetPrecisionCounter_us;
+(*	  STB_Reset:	begin 
+	  				  strobeINTtimer:=strobetimer;
+					  strobeONtimer:= strobeINTtimer;
+					end; *)
+	  STB_Reset,
+	  STB_IntvalSet:begin
+	  				  strobeINTtimer:=strobeINTstartTimer + strobeINT_us;
+	  				  strobeON_us:=	  round(strobeINT_us  * strobeDTYcycle);
+	  				  strobeONtimer:= strobeINTstartTimer + strobeON_us;
+	  				end;
+	  STB_DtyCycl:	  strobeONtimer:= strobeINTstartTimer + strobeON_us;
 	end; // case
   end; // with
 end;
@@ -2740,51 +2830,28 @@ begin
 //  sh:='';
   with StrobeStruct do
   begin	
-    stateold:=state;
+    stateold:=				 state;
+    strobetimer:=			 RPI_GetPrecisionCounter_us;
 	if (STB_IntvalSet IN modi) then
   	begin
+  	  state:=				 STB_Interval;
 //sh:=sh+GetEnumName(TypeInfo(t_Strobe_flag),ord(STB_IntvalSet));
   	  strobeINT_us:=		 strob_us;
-  	  Limits(strobeINT_us,	 strobeONmin_us,strobeINTmax_us);
-  	  strobeINTsave_us:=	 strobeINT_us;
-  	  Limits(strobeON_us,	 0,strobeINTsave_us);
-  	  Limits(strobeONsave_us,0,strobeINTsave_us);
+  	  Limits(strobeON_us,	 0,round(strobeINT_us*strobeDTYcycle));
 	  if (STB_Async IN modi) then TimeStrobeAsyn(StrobeStruct,STB_IntvalSet);
 	end;
 	
-	if (STB_DtyCycl IN modi) then
+	if ((modi*[STB_OneShot,STB_DtyCycl])<>[]) then
+//	if (STB_DtyCycl IN modi) then
   	begin
 //sh:=sh+GetEnumName(TypeInfo(t_Strobe_flag),ord(STB_DtyCycl));
-	  strobeON_us:=  	strob_us; 	
-	  Limits(strobeON_us,strobeONmin_us,strobeINTsave_us);
-	  strobeONsave_us:=	strobeON_us;
-	  if (STB_Async IN modi) then TimeStrobeAsyn(StrobeStruct,STB_DtyCycl);
-	end;  
-	 
-	if ((modi*[STB_OneShot,STB_Interval])<>[]) then
-	begin	// interval strobe on, interval dutycycle (flags: STB_IsOn STB_IsOff): 'strobeON_us' 'strobeOFF_us'
-	  if (STB_Interval IN modi) then state:=STB_Interval;
-	  if (STB_OneShot  IN modi) then state:=STB_OneShot;
-//sh:=sh+GetEnumName(TypeInfo(t_Strobe_flag),ord(state));
-	  strobeON_us:= 	strobeONsave_us;
-	  strobeINT_us:=	strobeINTsave_us;
-	  if (STB_Async IN modi) then TimeStrobeAsyn(StrobeStruct,STB_Reset);
-	end;
-
-	if (STB_On IN modi) then
-  	begin
-  	  state:=STB_On;
-//sh:=sh+GetEnumName(TypeInfo(t_Strobe_flag),ord(state));
-  	  strobeON_us:=	strobeINTsave_us;
-	  if (STB_Async IN modi) then TimeStrobeAsyn(StrobeStruct,STB_Reset);
-	end;
-	  
-	if (STB_Off IN modi) then
-  	begin
-  	  state:=STB_Off;
-//sh:=sh+GetEnumName(TypeInfo(t_Strobe_flag),ord(state));
-  	  strobeON_us:=	0;
-	  if (STB_Async IN modi) then TimeStrobeAsyn(StrobeStruct,STB_Reset);
+	  strobeON_us:=  		 strob_us; 	
+	  Limits(strobeON_us,0,	 strobeINT_us);
+	  if (strobeINT_us<>0)
+	  	then strobeDTYcycle:=strobeON_us/strobeINT_us
+	  	else strobeDTYcycle:=0.0;
+	  if (STB_OneShot IN modi) then state:=STB_OneShot;
+	  if (STB_Async   IN modi) then TimeStrobeAsyn(StrobeStruct,STB_DtyCycl);
 	end;  
 	
 	modetog:=(state<>stateold);
@@ -2794,37 +2861,49 @@ end;
 procedure TimeStrobeMode(var StrobeStruct:StrobeStruct_t; const modi:s_Strobe_flag);
 begin TimeStrobeMode(StrobeStruct,modi,0); end;
 
-procedure TimeStrobeDuty(var StrobeStruct:StrobeStruct_t; const dutycycle:real);
+procedure TimeStrobeDuty(var StrobeStruct:StrobeStruct_t; dutycycle:real);
 begin
-  if ((dutycycle>=0.0) and (dutycycle<=1.0)) then
+  if (dutycycle<>StrobeStruct.strobeDTYcycle) then
+  begin
+	Limits(dutycycle,0.0,1.0);
 	TimeStrobeMode(StrobeStruct,[STB_DtyCycl],round(StrobeStruct.strobeINT_us*dutycycle));
+  end;
 end;
 
-procedure TimeStrobeShow(var StrobeStruct:StrobeStruct_t; lvl:T_ErrorLevel; msg:string);
+procedure TimeStrobeDutyAsyn(var StrobeStruct:StrobeStruct_t; dutycycle:real);
 begin
-  with StrobeStruct do
+  if (dutycycle<>StrobeStruct.strobeDTYcycle) then
   begin
-	LOG_Writeln(lvl,'StrobeStruct['+Num2Str(seq,0)+'/'+msg+GetEnumName(TypeInfo(t_Strobe_flag),ord(state))+']: strobeON:'+Num2Str(strobeON_us,0)+' strobeINT:'+Num2Str(strobeINT_us,0)); 
-  end; // with
+	Limits(dutycycle,0.0,1.0);
+  	TimeStrobeMode(StrobeStruct,[STB_DtyCycl,STB_Async],round(StrobeStruct.strobeINT_us*dutycycle));
+  end;
 end;
 
-procedure TimeStrobeInit(var StrobeStruct:StrobeStruct_t; const ID,strobINT_us,strobONmin_us,strobINTmax_us:int64);
+procedure TimeStrobeOneShotAsyn(var StrobeStruct:StrobeStruct_t; dutycycle:real);
 begin
-  with StrobeStruct do
+  if (dutycycle<>StrobeStruct.strobeDTYcycle) then
   begin
-	state:=				STB_unk;
-	seq:=				ID;
-	modetog:=			true;
+	Limits(dutycycle,0.0,1.0);
+  	TimeStrobeMode(StrobeStruct,[STB_OneShot,STB_Async],round(StrobeStruct.strobeINT_us*dutycycle));
+  end;
+end;
 	
-	if (strobINTmax_us>=0) and (strobINTmax_us<strobINT_us) 
-	  then strobeINTmax_us:=strobINT_us
-	  else strobeINTmax_us:=strobINTmax_us;
+procedure TimeStrobeInit(var StrobeStruct:StrobeStruct_t; const ID,strobINT_us:int64);
+begin
+  with StrobeStruct do
+  begin
+    seq:=					ID;
+	state:=					STB_unk;
+	modetog:=				true;
+	OUTstat:=				0;
+	OUTstatOld:=			OUTstat+1;
+	strobeDTYcycle:=		0;
+	strobeONmin_us:=		0;
 
-	if ((strobONmin_us<0) or (strobONmin_us>strobeINTmax_us))
-	  then strobeONmin_us:=0
-	  else strobeONmin_us:=strobONmin_us;
-
-	TimeStrobeMode(	StrobeStruct,[STB_Off,STB_Async,STB_Interval,STB_IntvalSet,STB_DtyCycl],strobINT_us);
+	TimeStrobeMode(			StrobeStruct,[STB_Async,STB_Interval,STB_IntvalSet,STB_DtyCycl],strobINT_us);
+	TimeStrobeDutyAsyn(		StrobeStruct,0);
+	strobeOLDtimer:=		strobetimer;
+	strobeINTstartTimer:=	strobetimer;
   end; // with
 end;
 
@@ -2834,9 +2913,11 @@ begin
   with StrobeStruct do
   begin
 	case modus of
-	  STB_DtyCycl:	if RPI_TimeElapsed_us(strobeONtimer)  then flg:=STB_Off else flg:=STB_On;
+	  STB_DtyCycl:	if RPI_TimeElapsed_us(strobetimer,	strobeONtimer,0)
+	  				  then flg:=STB_Off else flg:=STB_On;
 	  STB_OneShot,
-	  STB_Interval:	if RPI_TimeElapsed_us(strobeINTtimer) then flg:=STB_Off else flg:=STB_On;
+	  STB_Interval:	if RPI_TimeElapsed_us(strobetimer,	strobeINTtimer,0) 
+	  				  then flg:=STB_Off else flg:=STB_On;
 	  STB_GetState:	flg:=state;
 	  else 			flg:=STB_unk;
 	end; // case 
@@ -2844,83 +2925,132 @@ begin
   TimeStrobePeek:=flg;
 end;
 
-function  TimeStrobe(var StrobeStruct:StrobeStruct_t):boolean;
-var flg:boolean;
+function  TimeStrobe(var StrobeStruct:StrobeStruct_t):integer;
+var qw:qword;
 begin
   with StrobeStruct do
   begin
-	if RPI_TimeElapsed_us(strobeINTtimer) then
+    strobeOLDtimer:=		strobetimer;	
+	if RPI_TimeElapsed_us(	strobetimer,	strobeINTtimer,	strobeINT_us) then
 	begin
-	  if (strobeINT_us>0) then 
-	  begin
-		RPI_SetTimeOut_us(strobeINTtimer,strobeINT_us); 
-	  end;
-		
-	  if (strobeON_us>0) then 
-	  begin
-//writeln('TimeStrobeX: mode:'+GetEnumName(TypeInfo(t_Strobe_flag),Ord(mode))+' state:'+GetEnumName(TypeInfo(t_Strobe_flag),Ord(state)));
-		RPI_SetTimeOut_us(strobeONtimer,strobeON_us);			// pwm ON time
-	  end;
-	end;	  
+	  strobeINTstartTimer:=	strobetimer;	// mark intervall start
+//writeln('TimeStrobeX: mode:'+GetEnumName(TypeInfo(t_Strobe_flag),Ord(mode))+' state:'+GetEnumName(TypeInfo(t_Strobe_flag),Ord(state)));		
+	  strobeONtimer:=		strobetimer +	strobeON_us; // pwm ON time
+	end;  
 
-	flg:=false;
-	if RPI_TimeElapsed_us(strobeONtimer) then 
+   	OUTstatOld:=OUTstat;
+	OUTstat:=0;
+	if (strobetimer >= strobeONtimer) then
+//	if RPI_TimeElapsed_us(	strobetimer,	strobeONtimer,	0) then 
 	begin
-	  if (state=STB_OneShot) then state:=STB_unk;
+	  if (state=STB_OneShot) then state:=STB_Off;
 	end 
 	else 
 	begin
-	  if (state<>STB_unk) then flg:=true;
+	  if (state<>STB_Off) then OUTstat:=1;
 	end;
+	OUTtrigger:=(OUTstat<>OUTstatOld);
+
+	TimeStrobe:=OUTstat;
   end; // with
-  TimeStrobe:=flg;
 end;
 
-procedure TEST_TimeStrobe;
+function  TimeStrobeShowStr(var StrobeStruct:StrobeStruct_t; msg:string):string;
+var sh:string;
+begin
+  with StrobeStruct do
+  begin
+	sh:='StrobeStruct['+Num2Str(seq,0)+'/'+
+		msg+'/'+GetEnumName(TypeInfo(t_Strobe_flag),ord(state))+']:'+
+		' dty:'+Num2Str(strobeDTYcycle,4,2)+
+		' OutTrigger:'+Bool2YNS(OUTtrigger)+
+		' OUTstat:'+Bool2YNS(Num2Bool(OUTstat))+
+		' strobeINT:'+Num2Str(strobeINT_us,0)+
+		' strobeON:'+Num2Str(strobeON_us,0)+
+		' strobeINTstartTimer:'+Num2Str(strobeINTstartTimer,0)+
+		' strobeTimerDelta:'+Num2Str(strobetimer-strobeINTstartTimer,0);
+//		' strobeONtimerDelta:'+Num2Str(strobeONtimer-strobeINTstartTimer,0);
+  end; // with
+  TimeStrobeShowStr:=sh;
+end;
+
+procedure TimeStrobeShow(var StrobeStruct:StrobeStruct_t; lvl:T_ErrorLevel; msg:string);
+begin LOG_Writeln(lvl,TimeStrobeShowStr(StrobeStruct,msg)); end;
+
+procedure TEST_TimeStrobe(filename:string);
 const
-  mult_c=1;  // 10
-  maxcnt=5*mult_c*100000;
-  Polltime_us_c=100*mult_c;
-  dty_c=15000*mult_c; ival_c=100000*mult_c;
+  Polltime_us_c=100;	// 100us takt	
+  ival_c=1000000; 		// Intervall 1sec
 var 
   StrobeStruct:StrobeStruct_t; 
-  trig1,trig2:boolean; cnt:longint; timspec:timespec;
+  trig:boolean; i64:int64;
+  tim0:qword; dt:TDateTime; tl:TStringList;
 begin
-  trig2:=false; trig1:=true; cnt:=0;
-  SetTimeOut_us(@timspec,5000000); // 5sec
-  TimeStrobeInit(StrobeStruct,1,			ival_c,0,0);
-  TimeStrobeMode(StrobeStruct,[STB_DtyCycl],dty_c);
-  repeat
-	with StrobeStruct do
-	begin
+  if not RPI_HW_Start then begin writeln('TEST_TimeStrobe: can not init HW'); halt; end;
+  tl:=TStringList.create;
+  tl.add('tim,out,dty');
+  SetTimeOut(dt,20000); // 20sec
+  
+  TimeStrobeInit(StrobeStruct,0,ival_c);
+TimeStrobeShow(StrobeStruct, LOG_WARNING, 'after  init');
+TimeStrobe(StrobeStruct);
+TimeStrobeShow(StrobeStruct, LOG_WARNING, 'afterStrobe');  
 
-	  if (TimeStrobePeek(StrobeStruct,STB_Interval)=STB_Off) then
-	  begin	// PWM ON strobed	
-	  	inc(cnt);
-	  	if (cnt<=5) then writeln(FormatDateTime('hh:mm:ss.zzz',now),' ',seq:10,' Peek #',cnt:4,' ###################################');
-	  end;
+//  TimeStrobeDutyAsyn(StrobeStruct,0.0); 	// 25% of ival_c
 
-	  if TimeStrobe(StrobeStruct) then 
-	  begin // STB_IsOn
-		if trig1 then writeln(FormatDateTime('hh:mm:ss.zzz',now),' ',seq:10,' PWM ON:  strobeON_us:',FormatNumSize(strobeON_us div mult_c),' strobeINT_us:',FormatNumSize(strobeINT_us div mult_c)); 
-	  	trig1:=false; trig2:=true;
-	  end
-	  else 
-	  begin // STB_IsOff
-		if trig2 then writeln(FormatDateTime('hh:mm:ss.zzz',now),' ',seq:10,' PWM OFF: strobeON_us:',FormatNumSize(strobeON_us div mult_c),' strobeINT_us:',FormatNumSize(strobeINT_us div mult_c)); 
-		trig2:=false; trig1:=true;
-	  end;
-	  
-	  if (seq>=maxcnt) then 
+//TimeStrobeOneShotAsyn(StrobeStruct,0.5);
+//TimeStrobeMode(StrobeStruct,[STB_OneShot],ival_c div 10);
+TimeStrobeShow(StrobeStruct, LOG_WARNING, 'afterMode');
+
+
+  with StrobeStruct do
+  begin
+	tim0:=strobeOLDtimer;
+
+  	repeat  	  
+  	  TimeStrobe(StrobeStruct);
+	  if (seq=0) then tim0:=strobeOLDtimer;
+
+	  if OUTtrigger then
 	  begin
-	    TimeStrobeMode(StrobeStruct,[STB_OFF]);
-		writeln(FormatDateTime('hh:mm:ss.zzz',now),' ',seq:10,' END ',GetEnumName(TypeInfo(t_Strobe_flag),Ord(TimeStrobePeek(StrobeStruct,STB_Interval)))); 
+	  	tl.add(Num2Str(strobeOLDtimer-tim0,0)+','+Num2Str(OUTstatOld,0)+','+Num2Str(StrobeStruct.strobeDTYcycle,0,2));
+	  	tl.add(Num2Str(strobetimer-tim0,0)+','+   Num2Str(OUTstat,0)+','+   Num2Str(StrobeStruct.strobeDTYcycle,0,2));
 	  end;
 	  
-	  delay_us(Polltime_us_c);
+	  trig:=true;
+  	  case seq of
+ 	     17700: TimeStrobeMode(StrobeStruct, [STB_IntvalSet,STB_Async], (ival_c div 2));
+  	   	 35000: TimeStrobeDutyAsyn(StrobeStruct,0.50);
+ 	     50010: TimeStrobeDutyAsyn(StrobeStruct,1.00);
+ 	     85000: TimeStrobeDutyAsyn(StrobeStruct,0.50);
+  	  	125000..
+  	  	154000: TimeStrobeDutyAsyn(StrobeStruct,0.25);
+        155000: TimeStrobeDutyAsyn(StrobeStruct,0.01);
+		else	  trig:=false;
+	  end; // case
+
+	  if trig then
+	  begin
+	  	tl.add(Num2Str(strobetimer-tim0,0)+','+Num2Str(OUTstat,0)+','+Num2Str(StrobeStruct.strobeDTYcycle,0,2));
+	  	trig:=false;
+	  end;
+
 	  inc(seq);
-	end; // with
-  until TimeElapsed_us(@timspec);
+	  
+	  i64:=RPI_GetPrecisionCounter_us-strobetimer;
+	  if (i64<Polltime_us_c) then delay_us(Polltime_us_c-i64);
+  	until terminateProg or keypressed or TimeElapsed(dt);
+
+  end; // with
+  TimeStrobeMode(StrobeStruct,[STB_OFF]);
+
+  writeln('rec#:',tl.count,' ',filename);
+  if (filename<>'') then
+  begin
+  	StringList2TextFile(filename,tl);
+  	LNX_chowngrp(filename,'www-data','www-data');
+  end else ShowStringList(tl);
+  tl.free;
 end;
 
 {$IFDEF WINDOWS}
@@ -2963,36 +3093,54 @@ begin
 end;
  
 {$IFDEF UNIX}
-function  RPI_GetPrecisionCounter_us:qword;
-var qT:qword; //qT:RPIreg64_t;
+(*function  RPI_GetPrecisionCounter_us:qword;
+var qT:qword;
 begin 
   try
-//  qT.lwHI:=mmap_arr^[STIMCHI]; qT.lwLO:=mmap_arr^[STIMCLO];
-    Move(mmap_arr^[STIMCLO],qT,Sizeof(qT)); // 1.5x faster
+    Move(mmap_arr[STIMCLO],qT,Sizeof(qT)); // 1.5x faster
   except
     qT:=0;
-    LOG_Writeln(LOG_ERROR,'RPI_GetPrecisionCounter_us: check usage of RPI_HW_Start');
+    LOG_Writeln(LOG_ERROR,'RPI_GetPrecisionCounter_us');
   end;
   RPI_GetPrecisionCounter_us:=qT;
+end;*)
+
+function  RPI_GetPrecisionCounter_us:qword;
+var qT:RPIreg64_t;
+begin 
+  try
+    qT.RegHI32:=mmap_arr^[STIMCHI]; 
+    qT.RegLO32:=mmap_arr^[STIMCLO];
+  except
+    qT.Reg64:=0;
+    LOG_Writeln(LOG_ERROR,'RPI_GetPrecisionCounter_us');
+  end;
+  RPI_GetPrecisionCounter_us:=qT.Reg64;
 end;
 
 function  RPI_SetTimeOut_us(Retrig_us:longword):qword;
+// e.g usage: qTimer:=RPI_SetTimeOut_us(123);
 begin
   RPI_SetTimeOut_us:= RPI_GetPrecisionCounter_us + Retrig_us;
 end;
 
 procedure RPI_SetTimeOut_us(var qTimer:qword; Retrig_us:longword);
+// depricated, use function above
 // e.g usage: RPI_SetTimeOut_us(qTimer,123);
-begin qTimer:=RPI_SetTimeOut_us(Retrig_us); end;
+begin qTimer:=RPI_GetPrecisionCounter_us + Retrig_us; end;
 
-function  RPI_TimeElapsed_us(var qTimer:qword; Retrig_us:longword):boolean;
-// e.g usage: if RPI_TimeElapsed_us(qTimer,123) then xxx;
-var ok:boolean; qT:qword;
+function  RPI_SetTimer_us(var qTimerIN:qword; Retrig_us:longword):qword;
+// e.g usage: qTimerOUT:=RPI_SetTimeOut_us(qTimerIN,123);
+begin RPI_SetTimer_us:=qTimerIN+Retrig_us; end;
+
+function  RPI_TimeElapsed_us(var actualqTimer,qTimer:qword; Retrig_us:longword):boolean;
+// e.g usage: if RPI_TimeElapsed_us(qT,qTimer,123) then xxx;
+var ok:boolean;
 begin 
   try 
-    qT:=RPI_GetPrecisionCounter_us;
-	ok:=(qT >= qTimer);	
-  	if (ok and (Retrig_us>0)) then qTimer:= qT + Retrig_us;
+    actualqTimer:=RPI_GetPrecisionCounter_us;
+	ok:=(actualqTimer >= qTimer);
+  	if (ok and (Retrig_us>0)) then qTimer:= actualqTimer + Retrig_us;
   except
     LOG_Writeln(LOG_ERROR,'RPI_TimeElapsed_us: '+Num2Str(Retrig_us,0)+' check usage of RPI_HW_Start');
 	ok:=true; // prevent endless loop, in case of error
@@ -3001,7 +3149,8 @@ begin
 end;
 
 function  RPI_TimeElapsed_us(var qTimer:qword):boolean;
-begin RPI_TimeElapsed_us:=RPI_TimeElapsed_us(qTimer,0); end;
+var qT:qword;
+begin RPI_TimeElapsed_us:=RPI_TimeElapsed_us(qt,qTimer,0); end;
 
 procedure RPI_TMR_Init(var RPI_TMR_struct:RPI_TMR_struct_t);
 begin
@@ -3043,7 +3192,7 @@ begin
   try
 	if (Microseconds>0) then
   	begin
-  	  RPI_SetTimeOut_us(qEndTimer,Microseconds);
+  	  qEndTimer:=RPI_SetTimeOut_us(Microseconds);
 	
 	  if (Microseconds>RPI_TightLoop_us_c)	// delay with low CPU usage
 		then delay_nanos((Microseconds-RPI_TightLoop_us_c)*1000); 
@@ -3103,21 +3252,21 @@ begin
 end;
 
 procedure TimeElapsed_us_Test3(retrig_us,loops:longword);
-var qTstart,qTend,qT:qword; us:qword; n:longint;
+var qTstart,qTend,qT,qT0:qword; us:qword; n:longint;
 begin
   n:=0; 
   qT:=RPI_GetPrecisionCounter_us; 		// save starttime
   qTstart:=qT;
   while (n<loops) do
   begin
-    if RPI_TimeElapsed_us(qT,retrig_us) then inc(n);
+    if RPI_TimeElapsed_us(qT0,qT,retrig_us) then inc(n);
   end;
   qTend:=RPI_GetPrecisionCounter_us; 	// save endtime
   us:=RPI_MicroSecondsBetween(qTend,qTstart);
   
   qT:=RPI_GetPrecisionCounter_us; 		// save starttime
   qTstart:=qT;
-  for n:=1 to loops do RPI_TimeElapsed_us(qT,retrig_us); // just test code efficency
+  for n:=1 to loops do RPI_TimeElapsed_us(qT0,qT,retrig_us); // just test code efficency
   qTend:=RPI_GetPrecisionCounter_us; 	// save endtime
   
   writeln('RPI_TimeElapsed_us Test3: ',us:9,'us (',100-(loops*retrig_us/us*100):5:3,'%) perf: ',(RPI_MicroSecondsBetween(qTend,qTstart)/loops):0:3,'us/loop much more accurate and faster for us cycle times ');
@@ -3249,7 +3398,7 @@ begin
   	if withcolon 
 	  then sh:=sh+LeadingZero(abs(offset_Minutes) div 60)+':'+LeadingZero(abs(offset_Minutes) mod 60)
 	  else sh:=sh+LeadingZero(abs(offset_Minutes) div 60)+	  LeadingZero(abs(offset_Minutes) mod 60);
-  end else if withcolon then sh:='-00:00'; //	sh:='Z';
+  end else if withcolon then sh:='-00:00';
   CalcUTCOffsetString:=sh;
 end;
 
@@ -3275,32 +3424,43 @@ end;
 function  GetUTCOffsetString:string; // e.g. '+02:00'
 begin GetUTCOffsetString:=_TZOffsetString; end;
 
-function  GetUTCOffsetMinutes(offset_String:string):longint; // e.g. -02:00 -> -120
-var mins,hours,li:longint; 
+function  GetUTCOffsetMinutes(ofs:string):longint; // e.g. -02:00 -> -120
+var mins,hours,li:longint;
 begin
-  li:=0;
-  if (Upper(offset_String)<>'Z') and (offset_String<>'') then
-  begin
-    if (Pos(':',offset_String)<>0) then
-    begin // e.g. -02:00
-	  if not Str2Num(CSV_Item(offset_String,':',2),mins)  then mins:= 0;
-	  if not Str2Num(CSV_Item(offset_String,':',1),hours) then hours:=0;
-	  li:=hours*60+mins;
-	end
-	else
-	begin // -0200
-	  case Length(offset_String) of
-		5:	begin // -0200
-			  if not Str2Num(copy(offset_String,4,2),mins)  then mins:= 0;
-			  if not Str2Num(copy(offset_String,1,3),hours) then hours:=0;
-			  li:=hours*60+mins;
-			end;
-	   2..4:begin // -120
-			  if not Str2Num(offset_String,li) then li:=0;
-			end;
-	  end; // case
-	end;
-  end;
+  if (Pos(':',ofs)>0)
+	then ofs:=StringReplace(ofs,':','',[rfReplaceAll]); // -0200
+
+  case Length(ofs) of
+	5:	begin // -0200
+		  if not Str2Num(copy(ofs,4,2),mins)  then mins:= 0;
+		  if not Str2Num(copy(ofs,1,3),hours) then hours:=0;
+		  if (hours>=0)
+			then li:=hours*60+mins
+			else li:=hours*60-mins;
+		end;
+   1,3:	begin // -120 // EDT // Military 1ALPHA (RFC1123 carry no information )
+		  if not Str2Num(ofs,li) then 
+		  begin
+			mins:=0; hours:=0;
+			if (ofs='EDT') then hours:=-4
+			  else if (ofs='EST') then hours:=-5
+				else if (ofs='CDT') then hours:=-5
+				  else if (ofs='CST') then hours:=-6
+				    else if (ofs='MDT') then hours:=-6
+				      else if (ofs='MST') then hours:=-7
+				    	else if (ofs='PDT') then hours:=-7
+				    	  else if (ofs='PST') then hours:=-8;
+(*				    		else if (ofs='A') then hours:=-1		// 1ALPHA  
+				    		  else if (ofs='M') then hours:=-12		// 1ALPHA
+				    			else if (ofs='N') then hours:=+1	// 1ALPHA
+				    			  else if (ofs='Y') then hours:=+12;// 1ALPHA *)			    	  
+			if (hours>=0)
+			  then li:=hours*60+mins
+			  else li:=hours*60-mins;
+		  end;
+		end;
+	else	li:=0;
+  end; // case
   GetUTCOffsetMinutes:=li;
 end;
 
@@ -3311,29 +3471,11 @@ function  GetDateTimeLocal(utc:TDateTime):TDateTime; begin GetDateTimeLocal:=Inc
 
 function  GetDateTimefromUTC(tstmp:string; var dt:TDateTime):boolean;
 // IN: 'Fri, 22 Jun 2018 15:05:27 GMT'
-var _ok:boolean;
-begin
-  try
-	dt:=ScanDateTime('ddd, dd mmm yyyy hh:nn:ss',tstmp);
-	_ok:=true;
-  except
-    _ok:=false;
-  end;
-  GetDateTimefromUTC:=_ok;
-end;
+begin GetDateTimefromUTC:=Str2DateTime(tstmp,11,dt); end;
 
 function  GetDateTimefromTimeDateCtlUTC(tstmp:string; var dt:TDateTime):boolean;
 // IN: 'Thu 2021-08-26 07:38:17 UTC'
-var _ok:boolean;
-begin
-  try
-	dt:=ScanDateTime('ddd yyyy-mm-dd hh:nn:ss',tstmp);
-	_ok:=true;
-  except
-    _ok:=false;
-  end;
-  GetDateTimefromTimeDateCtlUTC:=_ok;
-end;
+begin GetDateTimefromTimeDateCtlUTC:=Str2DateTime(tstmp,13,dt); end;
 
 function  DateTime00MS(dt:TDateTime):TDateTime;
 // get rid of ms
@@ -3347,34 +3489,135 @@ function  DateTime2FMT(fmt:integer; dt:TDateTime):string;
 var _dt1,_dt2:TDateTime; YY,MM,DD:word; sh:string;
 begin
   case fmt of
-	   1: sh:=FormatDateTime('YYYY-MM-DD" "hh:mm:ss.zzz',dt);
-	   2: sh:=FormatDateTime('YYYY-MM-DD"T"hh:mm:ss.zzz',dt);
-	   3: sh:=FormatDateTime('YYYY-MM-DD',dt);
-	   4: sh:=FormatDateTime('YYYY-MM-DD" "hh:mm:ss',dt);
+	   1: sh:=FormatDateTime('yyyy-mm-dd" "hh:nn:ss.zzz',dt);
+	   2: sh:=FormatDateTime('yyyy-mm-dd"T"hh:nn:ss.zzz',dt);
+	   3: sh:=FormatDateTime('yyyy-mm-dd',dt);
+	   4: sh:=FormatDateTime('yyyy-mm-dd" "hh:nn:ss',dt);
 	   5: begin 
 			DecodeDate(dt, YY,MM,DD); 	_dt1:=EnCodeDate(YY,MM,DD);
 			DecodeDate(now,YY,MM,DD); 	_dt2:=EnCodeDate(YY,MM,DD);
 			if (_dt1=_dt2) then sh:='Today'
 			  else if (_dt1=IncDay(_dt2,-1)) then sh:='Yesterday'
 				else sh:=DateTime2FMT(3,dt);
-			sh:=sh+' '+FormatDateTime('hh:mm',dt);
+			sh:=sh+' '+FormatDateTime('hh:nn',dt);
 		  end;
 	   6: sh:=DateTime2FMT(4,dt)+_TZOffsetString;
 	   7: sh:=DateTime2FMT(2,dt)+_TZOffsetString;
-	   8: sh:=FormatDateTime('YYYYMMDDhhmmss',dt);
-	   9: sh:=FormatDateTime('YYYY-MM-DD"T"hh:mm:ss',dt);
+	   
+	   8: sh:=FormatDateTime('yyyymmddhhnnss',dt);
+	   9: sh:=FormatDateTime('yyyy-mm-dd"T"hh:nn:ss',dt);
 	else  sh:=DateTime2FMT(1,dt);
   end; // case
   DateTime2FMT:=sh;
 end;
 
-function  Rfc822DateTimeEncode(dt:TDateTime):string; // Sat, 14 Aug 2021 07:57:03 +0000
+function  Str2DateTime(const tdstring,fmt:string; var dt:TDateTime):boolean;
+var _ok:boolean;
+begin 
+  try
+	_ok:=true;
+	dt:=ScanDateTime(fmt,tdstring);
+  except
+	_ok:=false;
+  end;
+  Str2DateTime:=_ok; 
+end; 
+
+function  Str2DateTime(const tdstring:string; fmtsel:integer; var dt:TDateTime):boolean;	 
+var ok:boolean; sh:string;
+begin
+  try
+  	ok:=true;
+    case fmtsel of	
+       1:	dt:=ScanDateTime(	'yyyy-mm-dd hh:nn:ss.zzz',		tdstring);
+       2:	dt:=ScanDateTime(	'yyyy-mm-dd"T"hh:nn:ss.zzz',	tdstring);
+       3:	dt:=ScanDateTime(	'yyyy-mm-dd',					tdstring);
+       4:	dt:=ScanDateTime(	'yyyy-mm-dd hh:nn:ss',			tdstring);
+       5:	begin
+       		  sh:=tdstring;
+    		  sh:=StringReplace(sh,'Today',	   DateTime2FMT(3,now),[rfReplaceAll,rfIgnoreCase]);
+    		  sh:=StringReplace(sh,'Yesterday',DateTime2FMT(3,IncDay(now,-1)),[rfReplaceAll,rfIgnoreCase]);
+       		  dt:=ScanDateTime(	'yyyy-mm-dd hh:nn',				sh);
+       		end;
+       6:	dt:=GetDateTimeUTC(
+			  	  ScanDateTime(	'yyyy-mm-dd hh:nn:ss',			tdstring),
+			  	  GetUTCOffsetMinutes(CSV_Item(tdstring,' ',CSV_Count(tdstring,' ')))
+			  	 );
+       7:	dt:=GetDateTimeUTC(
+			  	  ScanDateTime(	'yyyy-mm-dd"T"hh:nn:ss.zzz',	tdstring),
+			  	  GetUTCOffsetMinutes(CSV_Item(tdstring,' ',CSV_Count(tdstring,' ')))
+			  	 );
+       8:	dt:=ScanDateTime(	'yyyymmddhhnnss',				tdstring);
+       9:	dt:=ScanDateTime(	'yyyy-mm-dd"T"hh:nn:ss',		tdstring);
+	  10:	dt:=ScanDateTime(	'ddd, dd mmm yy hh:nn:ss',		tdstring);
+	  11:	dt:=ScanDateTime(	'ddd, dd mmm yyyy hh:nn:ss',	tdstring);
+      12:	dt:=ScanDateTime(	'dd mmm yy hh:nn:ss',			tdstring);    
+      13:	dt:=ScanDateTime(	'ddd, dd mmm yy hh:nn',			tdstring);
+	  14:	dt:=ScanDateTime(	'ddd, dd mmm yyyy hh:nn',		tdstring);
+	  15:	dt:=ScanDateTime(	'ddd yyyy-mm-dd hh:nn:ss',		tdstring);
+	  else	ok:=false;
+    end;
+  except
+    ok:=false;
+  end;
+  Str2DateTime:=ok;
+end;
+
+function  RFC822DateTimeDecode(const tstmp:string; var dt:TDateTime):boolean;
+(*	https://github.com/log2timeline/dfdatetime/issues/162
+	https://datatracker.ietf.org/doc/html/rfc822#section-5
+	Fri, 22 Jun 2018 15:05:27 +0100	// RFC 822, updated by RFC 1123
+	Sun, 06 Nov 94 08:49:37 GMT
+	06 Nov 94 08:49:37 Z *)
+var ok:boolean; // li:longint; zs:string;
+begin
+  ok:=true;
+  if not Str2DateTime(tstmp,10,dt) then 		// 'ddd, dd mmm yy hh:nn:ss'
+  	if not Str2DateTime(tstmp,11,dt) then 		// 'ddd, dd mmm yyyy hh:nn:ss'
+  	  if not Str2DateTime(tstmp,12,dt) then		// 'dd mmm yy hh:nn:ss'
+  	 	if not Str2DateTime(tstmp,13,dt) then	// 'ddd, dd mmm yy hh:nn'
+  	 	  if not Str2DateTime(tstmp,14,dt) then ok:=false; // 'ddd, dd mmm yyyy hh:nn'
+
+  if ok then
+	dt:=GetDateTimeUTC(dt,GetUTCOffsetMinutes(CSV_Item(tstmp,' ',CSV_Count(tstmp,' '))));
+
+(*if ok then
+  begin // handle zone
+	zs:=CSV_Item(tstmp,' ',CSV_Count(tstmp,' ')); // +0100
+	li:=GetUTCOffsetMinutes(zs);
+	dt:=GetDateTimeUTC(dt,li);
+	writeln(tstmp,':',zs,':',li,':',DateTime2FMT(4,dt));
+  end; *)  
+  RFC822DateTimeDecode:=ok;
+end;
+
+procedure RFC822DateTimeTest;
+  procedure RFC822(s:string);
+  var dt:TDateTime;
+  begin
+  	if RFC822DateTimeDecode(s,dt)
+  	  then writeln(DateTime2FMT(4,dt), ' <-- ',s)
+	  else writeln(s,'   convert not ok');
+  end;
+begin
+  RFC822('Sun, 06 Nov 1994 08:49:37 -0130');// RFC 822, updated by RFC 1123
+  RFC822('Sun, 06 Nov 94 08:49:37 GMT');	// RFC 822
+  RFC822('Sun, 06 Nov 94 08:49 PST');		// RFC 822
+  RFC822('06 Nov 94 08:49:37 N');			// RFC 822, updated by RFC 1123 (carry no info)
+  RFC822(RFC822DateTimeEncode);
+end;
+
+function  RFC822DateTimeEncode(dt:TDateTime; tzofs:longint):string; // Sat, 14 Aug 2021 07:57:03 -0000
 // https://www.freepascal.org/docs-html/rtl/sysutils/formatchars.html
 begin
-  Rfc822DateTimeEncode:=
-	FormatDateTime('ddd, dd mmm YYYY hh:mm:ss',
-	GetDateTimeUTC(dt, _TZLocal))+' -0000';
+  RFC822DateTimeEncode:=
+	FormatDateTime('ddd, dd mmm YYYY hh:mm:ss',dt)+' '+
+	CalcUTCOffsetString(tzofs,false);
 end;
+function  RFC822DateTimeEncode(dt:TDateTime):string;
+begin RFC822DateTimeEncode:=RFC822DateTimeEncode(dt,_TZLocal); end;
+function  RFC822DateTimeEncode:string;
+begin RFC822DateTimeEncode:=RFC822DateTimeEncode(now,_TZLocal); end;
 
 function  GetXMLTimeStamp(dt:TDateTime):string; // YEAR-MM-DDThh:mm:ss.zzz+XX:XX
 begin GetXMLTimeStamp:=DateTime2FMT(7,dt); end; 
@@ -3409,13 +3652,9 @@ begin
   end else tzofs:=0;
 //GetDateTimefromXMLTimeStamp:2021-08-26|09:24:50.242|20|2021-08-26T09:24:50.242Z-120
 //writeln;writeln('GetDateTimefromXMLTimeStamp:',dats,'|',tims,'|',tzofs,'|',tstmp);
-  try
-	_ok:=	Str2DateTime(dats+' '+tims,'YYYY-MM-DD hh:mm:ss.zzz',dt);
-	if not _ok then 
-	  _ok:=	Str2DateTime(dats+' '+tims,'YYYY-MM-DD hh:mm:ss',dt);
-  except
-    _ok:=false;
-  end;
+  _ok:=	 Str2DateTime(dats+' '+tims,1,dt);	// 'yyyy-mm-dd hh:nn:ss.zzz'
+  if not _ok then 
+	_ok:=Str2DateTime(dats+' '+tims,4,dt);	// 'yyyy-mm-dd hh:nn:ss'
   GetDateTimefromXMLTimeStamp:=_ok
 end;
 
@@ -3425,58 +3664,6 @@ begin
   _ok:=GetDateTimefromXMLTimeStamp(tstmp,dt,tzofs);
   if _ok then dt:=GetDateTimeUTC(dt,tzofs);
   GetUTCDateTimefromXMLTimeStamp:=_ok;
-end;
-
-function  xGetDateTimefromXMLTimeStamp(tstmp:string; var dt:TDateTime; var tzofs:longint):longint;
-// if res bit set (part included): Bit2=1:TZofs Bit1=1:DatePart Bit0=1:msecPart Bit3-6:reserved
-// res:  <0	-> invalid XMLDateTimeString (and Bit13 set)
-// res:   0	-> contains TimePart only
-// res: 1-7 -> contains TimePart and further parts according to bit set
-var res,p:longint; dats,tims,msecs,tzofss:string; 
-begin  
-  res:=0; dt:=now; dats:=FormatDateTime('YYYY-MM-DD',now); 
-  tims:=tstmp; msecs:='000'; tzofss:='+00:00';
-  
-  if Pos('T',tstmp)>0 then
-  begin 
-	dats:=CSV_Item(tstmp,'T',1); tims:=CSV_Item(tstmp,'T',2); 
-	res:=(res or $02);	// contains Date part
-  end;
-  				p:=Pos('Z',tims);	// 16:01:12.070Z
-  if (p=0) then p:=Pos('+',tims);	// 16:01:12.070+02:00
-  if (p=0) then p:=Pos('-',tims);	// 16:01:12.070-02:00
-  if (p>0) then
-  begin
-	tzofss:=copy(tims,p,Length(tims));
-    tims:=	copy(tims,1,p-1);
-    res:=	(res or $04);	// contains TZofs part
-    tzofs:= GetUTCOffsetMinutes(tzofss);
-  end else tzofs:=0;
-  
-  if Pos('.',tims)>0 then
-  begin
-    msecs:=CSV_Item(tims,'.',2); tims:=CSV_Item(tims,'.',1);
-    res:=(res or $01);	// contains msec part
-  end;
-  
-//det field contains '*'
-  if 			    msecs='*' then res:=(res or $0010);	// msec  contains * 
-  if CSV_Item(tims,':',3)='*' then res:=(res or $0020);	// sec   contains * 
-  if CSV_Item(tims,':',2)='*' then res:=(res or $0040);	// min   contains * 
-  if CSV_Item(tims,':',1)='*' then res:=(res or $0080);	// hour  contains * 
-  if CSV_Item(dats,'-',3)='*' then res:=(res or $0100);	// day   contains *
-  if CSV_Item(dats,'-',2)='*' then res:=(res or $0200);	// month contains * 
-  if CSV_Item(dats,'-',1)='*' then res:=(res or $0400);	// year  contains * 
-  
-  if ((res and $0010)>0) then msecs:='000';	// msec
-  if ((res and $00e0)>0) then tims:= StringReplace(tims, '*','00', [rfReplaceAll,rfIgnoreCase]); 	// hh:mm:ss 
-  if ((res and $0700)>0) then dats:= StringReplace(dats, '*','01', [rfReplaceAll,rfIgnoreCase]);	// YYYY-MM-DD
-  
-//writeln(dats,'|',tims,'|',msecs,'|',tzofss,'|');
-  if not Str2DateTime(dats+'T'+tims+'.'+msecs,'YYYY-MM-DD"T"hh:mm:ss.zzz',dt)
-	then res:=-(res or $2000);	// dt is not valid, but Bit0-2 show Parts
-  
-  xGetDateTimefromXMLTimeStamp:=res;
 end;
 
 procedure TST_GetDateTimefromXMLTimeStamp(tstmp:string);
@@ -3665,13 +3852,17 @@ begin
 end;
 
 procedure SetTextCol(typ:T_ErrorLevel);
+// https://wiki.freepascal.org/Colors
 begin
   if _LOG_LevelColor then 
   begin
 	case typ of
 		LOG_URGENT:		TextColor(LightRed);
+		LOG_RED,
         LOG_ERROR:		TextColor(red);
+        LOG_YELLOW,
       	LOG_WARNING:	TextColor(yellow);
+      	LOG_GREEN,
       	LOG_NOTICE:		TextColor(green);
       	LOG_MAGENTA:	TextColor(magenta);
       	LOG_WHITE:		TextColor(white);
@@ -3679,6 +3870,7 @@ begin
       	LOG_BLUE:		TextColor(blue); 
       	LOG_CYAN:		TextColor(cyan); 
       	LOG_BROWN:		TextColor(brown);
+//     	LOG_ORANGE:		TextColor(orange);
       	LOG_LGRAY:		TextColor(LightGray);
       	LOG_DGRAY:		TextColor(DarkGray); 
       	LOG_LBLUE:		TextColor(LightBlue);  
@@ -3711,15 +3903,17 @@ procedure SAY_LevelRestore; 			 begin SAY_Level(_SAY_OLD_Level); end;
 procedure SAY_TL(typ:T_ErrorLevel; tl:TStringList); var i:longint; begin for i:=1 to tl.count do SAY(typ,tl[i-1]); end;
 procedure SAY   (typ:T_ErrorLevel; const msg:string; const params:array of const);overload; begin SAY(typ,Format(msg,params)); end;
 
-procedure SAY   (typ:T_ErrorLevel; msg:string); 
+procedure SAY   (typ,col:T_ErrorLevel; msg:string); 
 begin 
   if (typ>=_SAY_Level) then 
   begin 
-	SetTextCol(typ); 
+	SetTextCol(col); 
 	writeln(Get_LogString('','','',typ)+msg+#$0d); 
 	UnSetTextCol; 
   end; 
 end;
+procedure SAY(typ:T_ErrorLevel; msg:string); 
+begin SAY(typ,typ,msg); end;
 
 procedure LOG_Writeln(typ,col:T_ErrorLevel; msg:string); 
 begin
@@ -5417,6 +5611,8 @@ function  Limits(var value:longint; minvalue,maxvalue:longint):longint;
 begin if value>maxvalue then value:=maxvalue; if value<minvalue then value:=minvalue; Limits:=value; end;
 function  Limits(var value:longword; minvalue,maxvalue:longword):longword;
 begin if value>maxvalue then value:=maxvalue; if value<minvalue then value:=minvalue; Limits:=value; end;
+function  Limits(var value:single; minvalue,maxvalue:single):single;
+begin if value>maxvalue then value:=maxvalue; if value<minvalue then value:=minvalue; Limits:=value; end;
 function  Limits(var value:real; minvalue,maxvalue:real):real;
 begin if value>maxvalue then value:=maxvalue; if value<minvalue then value:=minvalue; Limits:=value; end;
 
@@ -5461,14 +5657,115 @@ begin
   MinMax:=res;
 end;
 
+procedure RB_Open(var struct:RING_Buffer_t; siz:word; inipat:RING_BufferData_t);
+var idx:longint;
+begin
+  with struct do
+  begin
+    bufsiz:=siz;
+    if (bufsiz<0) then bufsiz:=0;
+    SetLength(buf,bufsiz);
+    for idx:=0 to (bufsiz-1) do buf[idx]:=inipat;
+    WRidx:=0; RDidx:=0; dcnt:=0;
+  end; // with
+end;
+
+procedure RB_Close(var struct:RING_Buffer_t);
+begin RB_Open(struct,0,0); end;
+
+function  RB_RD(var struct:RING_Buffer_t; var dataOUT:RING_BufferData_t):boolean;
+var _ok:boolean;
+begin
+  with struct do
+  begin
+    if (bufsiz>0) then
+  	begin
+  	  _ok:=(dcnt>0);
+	  if _ok then
+      begin
+      	dataOUT:=buf[RDidx];
+      	inc(RDidx); dec(dcnt);
+      	if (RDidx>=bufsiz) then RDidx:=0;
+      end; (*else LOG_Writeln(LOG_ERROR,'RB_RD['+
+	  		 Num2Str(RDidx,0)+'/'+Num2Str(WRidx,0)+'/'+Num2Str(dcnt,0)+']: underrun'); *)
+    end else LOG_Writeln(LOG_ERROR,'RB_RD: no buffer size');
+    RB_RD:=(_ok and (dcnt>=0) and (bufsiz>0));
+  end; // with
+end;
+
+function  RB_WR(var struct:RING_Buffer_t; dataIN:RING_BufferData_t):boolean;
+begin
+  with struct do
+  begin
+    if (bufsiz>0) then
+  	begin
+      buf[WRidx]:=dataIN;
+      inc(WRidx); inc(dcnt);
+      if (WRidx>=bufsiz) then WRidx:=0;
+(*	  if (dcnt>bufsiz)  then
+	  	LOG_Writeln(LOG_ERROR,'RB_WR['+
+	  		Num2Str(RDidx,0)+'/'+Num2Str(WRidx,0)+'/'+Num2Str(dcnt,0)+
+	  		']: overrun data: '+Num2Str(dataIN,0,2)); *)
+	end else LOG_Writeln(LOG_ERROR,'RB_WR: no buffer size');
+	RB_WR:=((dcnt>0) and (dcnt<bufsiz));
+  end; // with
+end;
+
+function  RB_RDidx(var struct:RING_Buffer_t; dist:longint):longint;
+begin RB_RDidx:=MOD_Euclid(struct.RDidx+dist,struct.bufsiz); end;
+
+function  RB_WRidx(var struct:RING_Buffer_t; dist:longint):longint;
+begin RB_WRidx:=MOD_Euclid(struct.WRidx+dist,struct.bufsiz); end;
+
+procedure RING_BufferTest;
+const siz=5;
+var i:integer; r:real; ok:boolean; rb:RING_Buffer_t;
+begin
+  RB_Open(rb,siz,0);
+  for i:= 1 to siz do RB_WR(rb,i);
+  
+  for i:= -siz to siz do writeln('RDi',i:2,':',RB_RDidx(rb,i));
+
+  for i:= 1 to 2 do 
+  begin 
+    ok:=RB_RD(rb,r);
+    writeln(r:0:1,' ',ok);
+  end;
+  for i:= 1 to 1 do RB_WR(rb,i+siz);
+  for i:= 1 to siz do 
+  begin 
+    ok:=RB_RD(rb,r);
+    writeln(r:0:1,' ',ok);
+  end;
+  for i:= 2 to 2 do RB_WR(rb,i+siz);
+  for i:= 1 to siz do 
+  begin 
+    ok:=RB_RD(rb,r);
+    writeln(r:0:1,' ',ok);
+  end;  
+  RB_Close(rb);
+end;
+
+function  STAT_Str(var stats:STAT_struct_t; vk,nk:byte):string;
+begin
+  with stats do
+  begin
+	STAT_Str:=	Num2Str(MINval,vk,nk)+	' '+Num2Str(MAXval,vk,nk)+' '+
+				Num2Str(SUMval,vk,nk)+	' '+
+				Num2Str(StdDev,vk,nk)+	' '+Num2Str(MEANval,vk,nk)+' '+
+				Num2Str(trend,vk,nk)+	' '+Trend2Ch(Sign(trend));
+  end; // with
+end;
+
 procedure STAT_Reset(var stats:STAT_struct_t);
 var i:longint;
 begin
   with stats do
   begin
     statready:=false;
+    filled_up:=false;
 //	idx:=Length(val_arr)-1;
-	idx:=0;
+	idx:=0;			idxLast:=0;
 	trend:=0;
 	SUMval:=0;		MINval:=0;		MAXval:=0;
 	MEANval:=0;		StdDev:=0;
@@ -5480,7 +5777,8 @@ end;
 procedure STAT_Open(var stats:STAT_struct_t; arrsize:word);
 begin
   with stats do
-  begin
+  begin // 0:population standard deviation 1:sample standard deviation
+    useSampleDev:=1;
 	SetLength(val_arr,arrsize);
   end; // with
   STAT_Reset(stats);
@@ -5496,19 +5794,18 @@ begin
 end;
 
 function  STAT_RingBuffer(
-	const data:array of float; 
-	const StartIdx,Count:longint; 
+	const data:array of float;
+	const StartIdx,Count,useSampleDev:longint; 
 	var   SUMval,MINval,MAXval,MEANval,StdDev:float):boolean;
 // implements statistics on a ring buffer
 var _i,_idx:longint;
 begin
   try
-  	SUMval:=data[StartIdx]; 
+  	SUMval:=data[StartIdx];
   	StdDev:=Sqr(SUMval);
   	MAXval:=SUMval; 	
   	MINval:=SUMval;
-  	
-  	for _i:=(StartIdx+1) to (StartIdx+Count-1) do 
+  	for _i:=(StartIdx+1) to (StartIdx+Count-1) do
   	begin
   	  _idx:= _i mod Length(data);
   	  SUMval:=SUMval+data[_idx];
@@ -5519,8 +5816,10 @@ begin
   	
   	MEANval:=SUMval/Count;
 	StdDev:=StdDev-Count*Sqr(MEANval);
-  	if (Count>1) 
-  	  then StdDev:=Sqrt(StdDev/(Count-1))
+	
+//	0:population standard deviation 1:sample standard deviation
+  	if (Count>useSampleDev) 
+	  then StdDev:=Sqrt(StdDev/(Count-useSampleDev))
   	  else StdDev:=0;  	
 
 	STAT_RingBuffer:=true;	
@@ -5534,64 +5833,57 @@ begin
   end;
 end;
 
-function  STAT_Inject(var stats:STAT_struct_t; newval:float):boolean;
-var filled_up:boolean;
+function  STAT_Inject(var STATS:STAT_struct_t; newval:float):boolean;
+var _stat:boolean; _idx,_cnt:longint; _avg:float;
 begin
-  filled_up:=false;
   try
 	with STATS do
   	begin
-  	  if statready then
+  	  _stat:=statready;
+  	  if _stat then
   	  begin
-(* 	 	inc(idx);
-  	 	filled_up:=(idx>=Length(val_arr));
-  	 	if filled_up then idx:=0;
-	  	val_arr[idx]:=newval; *)
-
-		val_arr[idx]:=newval;
+		val_arr[idx]:=newval; 
+		idxLast:=idx;
   	 	inc(idx);
-  	 	filled_up:=(idx>=Length(val_arr));
-  	 	if filled_up then idx:=0;
+  	 	if (idx>=Length(val_arr)) then
+  	 	begin
+  	 	  filled_up:=true;
+  	 	  idx:=0;
+  	 	end;
+	  	_avg:=MEANval;	
+	  	
+	  	if filled_up 
+	  	  then begin _idx:=idx; _cnt:=Length(val_arr);	end
+	  	  else begin _idx:=0; 	_cnt:=idx; 				end;
+	  	
+	  	_stat:=STAT_RingBuffer(	
+	  			val_arr,_idx,_cnt,
+	  			useSampleDev,SUMval,MINval,MAXval,
+	  			MEANval,StdDev);
+
+	  	if _stat then trend:=MEANval - _avg;
 	  end;
   	end; // with
   except
+	_stat:=false;
   end;
-  STAT_Inject:=filled_up;
-end;
-
-procedure STAT_Calc(var stats:STAT_struct_t);
-var _avg:float;
-begin
-  try
-	with STATS do
-  	begin
-  	  if statready then
-  	  begin
-	  	_avg:=MEANval;	
-	  	if STAT_RingBuffer(val_arr,idx,Length(val_arr),SUMval,MINval,MAXval,MEANval,StdDev) 
-	  	  then trend:=MEANval - _avg;
-	  end;  
-  	end; // with
-  except
-  end;
+  STAT_Inject:=_stat;
 end;
 
 procedure STAT_Test;
+const vk=8; nk=2; hist=3;
 var sim:array[0..20] of real=(1,2,3,4,3,2,1,-1,-2,-3,1,2,3,4,3,2,1,1,1,1,1);
-	fup:boolean; i:longint; _stat:STAT_struct_t;
+	i:longint; _stat:STAT_struct_t;
 begin 
-  STAT_Open(_stat,3);
-  writeln('  SimValue   SUM(3)   StdDev     Mean    trend   Up/Down/Stay');
+  STAT_Open(_stat,hist);
+  writeln('statistic based on recent '+Num2Str(hist,0)+' values');
+  writeln('      SimVal      Min      Max      Sum   StdDev     Mean    trend Up/Down/Stay');
   for i:=1 to Length(sim) do 
   begin
 	with _stat do
 	begin
-	  fup:=STAT_Inject(	_stat, sim[i-1]); 
-//	  if fup then
-	  begin
-		STAT_Calc(_stat);
-	  	writeln(Bool2YNS(fup),' ',sim[i-1]:8:2,' ',SUMval:8:2,' ',StdDev:8:2,' ',MEANval:8:2,' ',trend:8:2,' ',Sign(trend):5);
-	  end;
+	  if STAT_Inject(_stat, sim[i-1]) then
+		writeln(Bool2YNS(filled_up)+Num2Str(idxLast,2)+' '+Num2Str(sim[i-1],vk,nk)+' '+STAT_Str(_stat,vk,nk));
 	end; // with
   end;
   STAT_Close(_stat);
@@ -5663,6 +5955,40 @@ begin
 	LOG_Writeln(LOG_ERROR,'MODarrLW['+sects+'/'+keys+'/'+Num2Str(idx,0)+']: '+Num2Str(newval,0));
   end;
   MODarrLW:=chg;
+end;
+
+function  ReMAParrFL(var arr,adflt:Array of real; sects,keys,values:string):boolean;
+var chg:boolean; i,j:integer; sh:string;
+begin
+  chg:=false;
+  try
+	for i:=1 to Length(arr) do arr[i-1]:=adflt[i-1];
+	
+	if (keys<>'') 
+	  then sh:=Trimme(BIOS_GetIniString(sects,keys,values),3)
+	  else sh:='';
+  
+  	if (sh<>'') then
+  	begin
+	  for i:=1 to Length(arr) do 
+	  begin
+	  	if Str2Num(CSV_Item(sh,i),j) then
+	  	begin
+	      if (arr[i-1]<>j) then 
+	      begin
+		  	chg:=true;
+		  	arr[i-1]:=j;
+		  end;
+	  	end;
+	  end;
+  	end;
+  
+// 	if chg then LOG_Writeln(LOG_WARNING,'RemMAP['+keys+']: '+sh);
+
+  except
+	LOG_Writeln(LOG_ERROR,'RemMAP['+keys+']: '+values);
+  end;
+  ReMAParrFL:=chg;
 end;
 
 function  ReMAParrLI(var arr,adflt:Array of longint; sects,keys,values:string):boolean;
@@ -5746,27 +6072,59 @@ function  Str2Bool(s:string):boolean; begin Str2Bool:=(Pos(Upper(s),yes_c)>0); e
 function  Bool2Num(b:boolean) : byte;		 begin if b then Bool2Num:=1		else Bool2Num:=0;		 end;
 function  Bool2Dig(b:boolean) : string; 	 begin if b then Bool2Dig:='1'		else Bool2Dig:='0';      end;
 function  Bool2LVL(b:boolean) : string; 	 begin if b then Bool2LVL:='H'		else Bool2LVL:='L';      end;
-function  Bool2Str(b:boolean) : string; 	 begin if b then Bool2Str:='TRUE'	else Bool2Str:='FALSE';  end;
-function  Bool2Swc(b:boolean) : string; 	 begin if b then Bool2Swc:='ON'		else Bool2Swc:='OFF';    end;
-function  Bool2OC (b:boolean) : string; 	 begin if b then Bool2OC:='OPEN'	else Bool2OC:='CLOSE';   end;
-function  Bool2DIR(b:boolean) : string; 	 begin if b then Bool2DIR:='OUT'	else Bool2DIR:='IN';     end;
-function  Bool2YN (b:boolean) : string; 	 begin if b then Bool2YN:='YES'		else Bool2YN:='NO';      end;
+function  Bool2Str(b:boolean) : string; 	 begin if b then Bool2Str:='TRUE '	else Bool2Str:='FALSE';  end;
+function  Bool2Swc(b:boolean) : string; 	 begin if b then Bool2Swc:='ON '	else Bool2Swc:='OFF';    end;
+function  Bool2OC (b:boolean) : string; 	 begin if b then Bool2OC:='OPEN '	else Bool2OC:='CLOSE';   end;
+function  Bool2DIR(b:boolean) : string; 	 begin if b then Bool2DIR:='OUT'	else Bool2DIR:='IN ';    end;
+function  Bool2YN (b:boolean) : string; 	 begin if b then Bool2YN:='YES'		else Bool2YN:='NO ';     end;
 function  Bool2YNS(b:boolean) : string; 	 begin if b then Bool2YNS:='Y'		else Bool2YNS:='N';      end;
 function  Bool2PF (b:boolean) : string; 	 begin if b then Bool2PF:='PASS'	else Bool2PF:='FAIL';    end;
-function  Bool2EA (b:boolean) : string; 	 begin if b then Bool2EA:='ENABLED'	else Bool2EA:='DISABLED';end;
-function  Bool2eas(b:boolean) : string; 	 begin if b then Bool2eas:='enable' else Bool2eas:='disable';end;
-function  Bool2UpDown(b:boolean):string; 	 begin if b then Bool2UpDown:='up'	else Bool2UpDown:='down';end;
+function  Bool2EA (b:boolean) : string; 	 begin if b then Bool2EA:='ENABLED 'else Bool2EA:='DISABLED';end;
+function  Bool2eas(b:boolean) : string; 	 begin if b then Bool2eas:='enable 'else Bool2eas:='disable';end;
+function  Bool2UpDown(b:boolean):string; 	 begin if b then Bool2UpDown:='up  'else Bool2UpDown:='down';end;
+
+function  Trend2Ch(num:longint):char; 
+var ch:char; 
+begin if (num<0) then ch:='-' else if (num>0) then ch:='+' else ch:=' '; Trend2Ch:=ch; end;
+
+function  Num2Str(num:real;lgt,nk:integer):string;  
+var _lgt:integer; s:string; 
+begin 
+  if not IsNaN(num) then
+  begin
+	if (nk<0) then
+  	begin
+      str(num:lgt:15,s);
+      s:=adjT0(s);	// strip off trailing 0
+  	end else str(num:lgt:nk,s);
+  end 
+  else 
+  begin
+    if (lgt>0) then _lgt:=lgt else _lgt:=abs(nk)+2;
+	s:=Get_FixedStringLen('NaN',_lgt,false);
+  end;
+  Num2Str:=s; 
+end;
 
 function  Num2Str(num:int64;lgt:byte):string;    var s:string; begin str(num:lgt,s); Num2Str:=s; end;
 function  Num2Str(num:longint;lgt:byte):string;  var s:string; begin str(num:lgt,s); Num2Str:=s; end;
 function  Num2Str(num:qword;lgt:byte):string; 	 var s:string; begin str(num:lgt,s); Num2Str:=s; end;
 function  Num2Str(num:longword;lgt:byte):string; var s:string; begin str(num:lgt,s); Num2Str:=s; end;
-function  Num2Str(num:real;lgt,nk:byte):string;  var s:string; begin str(num:lgt:nk,s);Num2Str:=s; end;
 function  Num2Str(num:int64):string;   		begin Num2Str:=Num2Str(num,0); end;
 function  Num2Str(num:longint):string; 		begin Num2Str:=Num2Str(num,0); end;
 function  Num2Str(num:longword):string;		begin Num2Str:=Num2Str(num,0); end;
 function  Num2Str(num:real;nk:byte):string;	begin Num2Str:=Num2Str(num,0,nk); end;
 function  Num2Bool(num:int64):boolean; begin Num2Bool:=(num>=0); end;
+function  Num2Bool(num:real):boolean;  begin Num2Bool:=(num>=0); end;
+
+function  Num2DtyStr(dty:real):string;
+var dcs:string;
+begin
+  if (dty>0) and (dty<1)
+	then dcs:=Num2Str((dty*100),2,0)+'%'
+	else dcs:=Bool2Swc((dty>0));
+  Num2DtyStr:=dcs;
+end;
 
 function  Str2Num(s:string; var num:byte):boolean;     var code:integer; begin val(StringReplace(s,'$','0x',[rfReplaceAll,rfIgnoreCase]),num,code); Str2Num:=(code=0); end;
 function  Str2Num(s:string; var num:smallint):boolean; var code:integer; begin val(StringReplace(s,'$','0x',[rfReplaceAll,rfIgnoreCase]),num,code); Str2Num:=(code=0); end;
@@ -5774,6 +6132,15 @@ function  Str2Num(s:string; var num:int64):boolean;    var code:integer; begin v
 function  Str2Num(s:string; var num:qword):boolean;    var code:integer; begin val(StringReplace(s,'$','0x',[rfReplaceAll,rfIgnoreCase]),num,code); Str2Num:=(code=0); end;
 function  Str2Num(s:string; var num:longint):boolean;  var code:integer; begin val(StringReplace(s,'$','0x',[rfReplaceAll,rfIgnoreCase]),num,code); Str2Num:=(code=0); end;
 function  Str2Num(s:string; var num:longword):boolean; var code:integer; begin val(StringReplace(s,'$','0x',[rfReplaceAll,rfIgnoreCase]),num,code); Str2Num:=(code=0); end;
+
+function  Str2Num(s:string; var num:single):boolean;     
+var code:integer; i64:int64; sh:string;
+begin 
+  sh:=StringReplace(s,'$','0x',[rfReplaceAll,rfIgnoreCase]);
+  val(sh,num,code);
+  if (code<>0) and Str2Num(sh,i64) then begin num:=i64; code:=0; end; 
+  Str2Num:=(code=0); 
+end;
 function  Str2Num(s:string; var num:real):boolean;     
 var code:integer; i64:int64; sh:string;
 begin 
@@ -5796,6 +6163,7 @@ procedure Str2Num(s:string; var num:int64; dflt:int64);			begin if not Str2Num(s
 procedure Str2Num(s:string; var num:qword; dflt:qword);			begin if not Str2Num(s,num) then num:=dflt; end;
 procedure Str2Num(s:string; var num:longint; dflt:longint);		begin if not Str2Num(s,num) then num:=dflt; end;
 procedure Str2Num(s:string; var num:longword; dflt:longword);	begin if not Str2Num(s,num) then num:=dflt; end;
+procedure Str2Num(s:string; var num:single; dflt:single);		begin if not Str2Num(s,num) then num:=dflt; end;
 procedure Str2Num(s:string; var num:real; dflt:real);			begin if not Str2Num(s,num) then num:=dflt; end;
 procedure Str2Num(s:string; var num:extended; dflt:extended);	begin if not Str2Num(s,num) then num:=dflt; end;
 
@@ -5864,8 +6232,56 @@ function  Get_FixedStringLen(s:string;cnt:word;leading:boolean):string; var fmt:
 //function  Lower(const s : string) : String; var sh : String; i:word; begin sh:=''; for i:= 1 to Length(s) do sh:=sh+LowerCase(s[i]);Lower:=sh; end;
 function  Upper(const s:string):string; begin Upper:=UpCase(s); end;
 function  Lower(const s:string):string; begin Lower:=LowerCase(s); end;
+
 function  CharPrintable(c:char):string; begin if ord(c)<$20 then CharPrintable:=#$5e+char(ord(c) xor $40) else CharPrintable:=c; end;
 function  StringPrintable(s:string):string; var sh : string; i : longint; begin sh:=''; for i:=1 to Length(s) do sh:=sh+CharPrintable(s[i]); StringPrintable:=sh; end;
+
+function  URLencode(s:string):string; 
+var sh:string; i:longint; 
+begin 
+  sh:=''; 
+  for i:=1 to Length(s) do 
+  begin
+    case s[i] of
+      #$00..'/',
+      ':'..'@',
+      '['..'`',
+      '{'..#$7f: 	sh:=sh+'%'+HexStr(ord(s[i]),2);
+      else 			sh:=sh+s[i];
+    end; // case 
+  end;
+  URLencode:=sh;
+end;
+
+function  URLdecode(s:string):string; 
+var sh,sh1:string; b:byte; i,j:longint; 
+begin 
+  sh:='';
+  j:=Length(s);
+  i:=1;
+  while (i<=j) do
+  begin
+    if ((s[i]='%') and (i<=(j-2))) then
+    begin
+      sh1:=copy(s,i+1,2);
+      if not Str2Num('0x'+sh1,b) then
+      begin
+    	LOG_Writeln(LOG_ERROR,'URLdecode['+Num2Str(i,0)+']: invalid encode %'+sh1);
+    	sh:=sh+'%'+sh1;
+      end else sh:=sh+char(b);
+      inc(i,2);
+    end 
+    else 
+    begin
+      if (s[i]='+') 
+      	then sh:=sh+' '
+      	else sh:=sh+s[i];
+    end;
+    inc(i);
+  end;
+  URLdecode:=sh;
+end;
+
 procedure ShowStringList(StrList:TStringList); var n:longint; begin for n:= 1 to StrList.Count do writeln(StrList[n-1]); end;
 function  AdjZahlDE(r:real;lgt,nk:byte):string; var s:string; begin s:=StringReplace(Num2Str(r,lgt,nk),'.',',',[]); AdjZahlDE:=s; end;
 function  AdjZahl(s:string):string;
@@ -6731,7 +7147,7 @@ begin
   FormatFileSize:=sh;
 end;
 
-function  FormatNumSize(const Size:int64):string;
+function  FormatNumSize(const Size:real):string;
 var nSize:real; sh,Fmt,Units:string;
 begin
   Fmt:='%.1f%s';
@@ -6760,9 +7176,11 @@ begin
     Units:='k';
   end else 
   begin
-    nSize:=Size;
-    Units:='';
-    Fmt:='%.0f%s';
+	nSize:=Size;
+	Units:='';
+	if (Size>=1.0) or IsZero(Size) 
+	  then Fmt:='%.0f%s'
+	  else Fmt:='%.3f%s';
   end;
   FmtStr(sh,Fmt,[nSize,Units]);
   FormatNumSize:=sh;  
@@ -6841,18 +7259,6 @@ begin
   StrHex:=sh;
 end;
 
-function  Str2DateTime(tdstring,fmt:string; var dt:TDateTime):boolean;
-var _ok:boolean;
-begin 
-  try
-	_ok:=true;
-	dt:=ScanDateTime(fmt,tdstring);
-  except
-	_ok:=false;
-  end;
-  Str2DateTime:=_ok; 
-end; 
-
 function  UnicodeStr2UTF8(unicodestr:string):string;
 // unicodestr: 'H\u2082O' -> H2O (subscript 2)
 var anz,n:longint; lw:longword; _str,sh:string;
@@ -6874,35 +7280,45 @@ begin
   UnicodeStr2UTF8:=sh;
 end;
 
+function  scale(x,dflt,in_min,in_max,out_min,out_max:real):real;
+var y,r:real;
+begin
+  try
+	if (x <> in_max) then
+	begin
+	  r:=(in_max - in_min);
+	  if (r<>0)
+		then y:=(x - in_min) * (out_max - out_min) / r + out_min
+		else y:=dflt;
+	end else y:=out_max;
+  except
+    y:=dflt;
+//	LOG_Writeln(LOG_ERROR,'ScaleR: wrong value pairs');
+  end;
+  scale:=y;
+end;
 function  scale(x,in_min,in_max,out_min,out_max:real):real;
-var y:real;
+begin scale:=scale(x,x,in_min,in_max,out_min,out_max); end;
+
+function  scale(x,dflt,in_min,in_max,out_min,out_max:longint):longint;
+var y:longint;
 begin
   try
-    y:=(x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;   
+	if (x = in_max) 
+	  then y:=out_max
+	  else  if (out_min < out_max)
+			  then y:=(x - in_min) * (out_max - out_min+1) div (in_max - in_min) + out_min
+			  else y:=(x - in_min) * (out_max - out_min-1) div (in_max - in_min) + out_min;
   except
-    y:=x;
-	LOG_Writeln(LOG_ERROR,'ScaleR: wrong value pairs');
+	y:=dflt;
+//	LOG_Writeln(LOG_ERROR,'ScaleI: wrong value pairs');
   end;
   scale:=y;
 end;
-
 function  scale(x,in_min,in_max,out_min,out_max:longint):longint;
-var y:longint;
-begin
-  try
-	if (x = in_max) 
-	  then y:=out_max
-	  else  if (out_min < out_max)
-			  then y:=(x - in_min) * (out_max - out_min+1) div (in_max - in_min) + out_min
-			  else y:=(x - in_min) * (out_max - out_min-1) div (in_max - in_min) + out_min;
-  except
-	y:=x;
-	LOG_Writeln(LOG_ERROR,'ScaleI: wrong value pairs');
-  end;
-  scale:=y;
-end;
+begin scale:=scale(x,x,in_min,in_max,out_min,out_max); end;
 
-function  scale(x,in_min,in_max,out_min,out_max:int64):int64;
+function  scale(x,dflt,in_min,in_max,out_min,out_max:int64):int64;
 var y:longint;
 begin
   try
@@ -6912,11 +7328,13 @@ begin
 			  then y:=(x - in_min) * (out_max - out_min+1) div (in_max - in_min) + out_min
 			  else y:=(x - in_min) * (out_max - out_min-1) div (in_max - in_min) + out_min;
   except
-	y:=x;
-	LOG_Writeln(LOG_ERROR,'ScaleI64: wrong value pairs');
+	y:=dflt;
+//	LOG_Writeln(LOG_ERROR,'ScaleI64: wrong value pairs');
   end;
   scale:=y;
 end;
+function  scale(x,in_min,in_max,out_min,out_max:int64):int64;
+begin scale:=scale(x,x,in_min,in_max,out_min,out_max); end;
   
 function  DIST_Init(var struct:Distribution_t; ArrSize:word; fmin,fmax:real):boolean;
 var _ok:boolean; _li:longint;
@@ -6981,29 +7399,37 @@ begin
   DIST_Insert:=_idx;
 end;
 
-procedure DIST_Show(var struct:Distribution_t; hdr:string);
-var _idx:longint; r:real;
+procedure DIST_Show(var struct:Distribution_t; hdr,lbl:string; lvl,lcol:T_ErrorLevel);
+var _idx:longint; r:real; sh:string;
 begin
   with struct do
   begin  	
-    if (hdr<>'') then writeln(hdr);
+    if (hdr<>'') then SAY(lvl,lcol,hdr); // writeln(hdr);
     if (Length(range)>0) then
     begin
 	  r:=vmin;
-      write('rng: ',vmin:6:1,'<');
+//	  sh:='rng: '+Num2Str(vmin,DIST_wid_c,1)+'<';
+	  sh:='rng: '+Get_FixedStringLen(FormatNumSize(vmin),DIST_wid_c,true)+'<'; 
       for _idx:= 1 to (siz-2) do 
       begin
-	  	r:=r + step; write(r:6:1,' ');
+	  	r:=r + step; 
+//	  	sh:=sh+Num2Str(r,DIST_wid_c,1)+' '; 
+	  	sh:=sh+Get_FixedStringLen(FormatNumSize(r),DIST_wid_c,true)+' '; 
 	  end;
-      write(vmax:6:1,'>'); writeln;
-    
-      write('vals:');
-	  for _idx:= 0 to (siz-1) do write(range[_idx]:6,' ');
-	  writeln;
+      sh:=sh+'  rng> '+lbl;	 
+//    writeln(sh);
+      SAY(lvl,lcol,sh);
+
+      sh:='cnt: ';
+	  for _idx:= 0 to (siz-1) do 
+	  	sh:=sh+Get_FixedStringLen(FormatNumSize(range[_idx]),DIST_wid_c,true)+' '; 
+//	  writeln(sh);
+	  SAY(lvl,lcol,sh);
 	
-  	  write('dist:');
-      for _idx:= 0 to (siz-1) do write((range[_idx]/cnt*100):6:1,' ');
-  	  write('%'); writeln;
+	  sh:='dist:';
+      for _idx:= 0 to (siz-1) do sh:=sh+Num2Str(range[_idx]/cnt*100,DIST_wid_c,1)+' ';
+//    writeln(sh+'%');
+  	  SAY(lvl,lcol,sh+'%');
   	end;
   end; // with 
 end;
@@ -7025,7 +7451,7 @@ begin
 	DIST_Insert	(dist,-1.9999);
 	DIST_Insert	(dist, 0);
 	DIST_Insert	(dist, 1.9999);
-    DIST_Show	(dist,'');
+    DIST_Show	(dist,'value distribution','',LOG_WARNING,LOG_MAGENTA);
     DIST_End	(dist)
   end else writeln('can not init');
 end;
@@ -7213,6 +7639,7 @@ begin
 end;
 
 function  adjL0(s:string):string;
+// 0010.12340000 -> 10.12340000
 var exp:string; num:extended; nk:longint;
 begin
   if Str2Num(s,num) then
@@ -7223,6 +7650,35 @@ begin
     if Str2Num(exp,nk) then s:=Num2Str(num,0,abs(nk));
   end;
   adjL0:=s;
+end;
+
+function  adjT0(s:string):string;
+// 0010.12340000 -> 0010.1234
+var nk0,dp,i:longint; num:extended;
+begin
+  try
+  	if Str2Num(s,num) then
+  	begin
+  	  dp:=Pos('.',s);
+	  if (dp>0) and (Pos('E',Upper(s))=0) then 
+	  begin 
+	  	i:=Length(s);
+	  	nk0:=i;
+	    while (i>dp) do
+		begin
+		  if (s[i]='0') then 
+		  begin
+		    nk0:=i;
+		  	if (i>(dp+1)) then dec(nk0);
+		  end else i:=0;
+		  dec(i);
+	  	end; // while
+	  	s:=copy(s,1,nk0);
+ 	  end;
+  	end;
+  except
+  end;
+  adjT0:=s;
 end;
 
 function FilterChar(s,filter:string):string;
@@ -7582,7 +8038,7 @@ begin
   Select_LeftItems := sh;
 end;
 
-function  Locate_Value(const strng,search,tr1,tr2,tr3,tr4:string; var valoutstrng:string):boolean;
+function  Locate_Value(const strng,search,tr1,tr2,tr3,tr4:string; var valoutstrng:string; flags:s_BIOS_Flags):boolean;
 // e.g. strng: SMTP_Server=xxx.yyy.com&SMTP_FromAdr=postmaster@yyy.com&SMTP_ToAdr=admin@yyy.com
 // tr1='&' tr2='' tr3='=' tr4='' 
 // search='SMTP_FromAdr'
@@ -7597,6 +8053,7 @@ begin
 	if (Pos(Upper(search),Upper(sh))=1) then 
 	begin
 	  valoutstrng:=Trimme(Select_RightItems(sh,tr3,tr4,2),3);
+	  if (BIOS_UnEscUrl IN flags) then valoutstrng:=URLdecode(valoutstrng);
 	  _found:=true;
 	end;
 	inc(n);
@@ -8390,11 +8847,11 @@ begin BIOS_SetIniString:=BIOS_SetIniString(section,name,value,IniFileDesc.dfltfl
 function  BIOS_SetIniString(name,value:string):boolean;	
 begin BIOS_SetIniString:=BIOS_SetIniString(IniFileDesc.dfltsection,name,value,IniFileDesc.dfltflags); end;
 
-function  BIOS_SetDelIniString(section,name,value:string):boolean;	
+function  BIOS_SetDelIniString(section,name,value:string; flgs:s_BIOS_Flags):boolean;	
 var ok:boolean;
 begin
   if (value<>'')
-	then ok:=BIOS_SetIniString(	section,name,value,[])
+	then ok:=BIOS_SetIniString(	section,name,value,flgs)
 	else ok:=BIOS_DeleteKey(	section,name);
   BIOS_SetDelIniString:=ok;
 end;
@@ -8547,21 +9004,42 @@ begin
   HexStrFrm:=Trimme(sh,4);
 end;
 
-function  BTLE_GetBeaconHexStr(url:string; TXPower:byte):string;
+procedure BT_PrettyHostName(hnam:string);
+const fil_c='/etc/machine-info';
+var cmd:string;
+begin
+  if (hnam<>'') 
+	then cmd:='echo "PRETTY_HOSTNAME='+hnam+'" > '+PrepFilePath(fil_c)
+	else cmd:='rm '+PrepFilePath(fil_c)+' > /dev/null 2>&1';
+	cmd:=cmd+' ; systemctl restart bluetooth';
+  call_external_prog(LOG_NONE,cmd);
+end;
+
+function  BTLE_GetBeaconHexStr(url:string; TXPower:integer):string;
+// IN: TXPower: -12 to 10
+// https://circuitdigest.com/microcontroller-projects/turn-your-raspberry-pi-into-bluetooth-beacon-using-eddystone-ble-beacon
+// https://pimylifeup.com/raspberry-pi-ibeacon/
 // https://developers.google.com/nearby/notifications/get-started
 // https://github.com/google/physical-web
 // https://learn.adafruit.com/google-physical-web-uribeacon-with-the-bluefruit-le-friend/getting-started
 // https://github.com/google/eddystone/tree/master/eddystone-url
 // https://play.google.com/store/apps/details?id=com.uriio
+
+//App that will work on IOS: https://apps.apple.com/ch/app/ble-scanner-4-0/id1221763603
 (*
 hciconfig hci0 up ; hciconfig hci0 noleadv ; hciconfig hci0 noscan
 enable advertize: 	hciconfig hci0 leadv 3
 disable advertize: 	hciconfig hci0 noleadv
 *)
-const ServiceID='D8FE'; 
-var sh:string;
+const ServiceID='aafe'; 			// 16Bit EddyStone UUID
+	  EddyURL='16'+ServiceID+'10';	// URL FrameType & EddyStoneUUID
+var bpwr:byte; pwr:integer; sh:string;
 begin
-  sh:=url; if (TXPower>3) then TXPower:=3;
+  sh:=url; 
+  pwr:=TXPower; 
+  Limits(pwr,-12,10);
+  if (pwr<0) then pwr:=256+pwr;
+  bpwr:=byte(pwr);
 //if (Pos('HTTP:',Upper(sh))>0) then LOG_Writeln(LOG_WARNING,'BTLE_GetBeaconHexStr: Nearby Notifications and Physical Web on Chrome require HTTPS URLs');	
   sh:=StringReplace(sh,'http://www.',	#$00,[rfReplaceAll,rfIgnoreCase]);
   sh:=StringReplace(sh,'https://www.',	#$01,[rfReplaceAll,rfIgnoreCase]);
@@ -8582,11 +9060,11 @@ begin
   sh:=StringReplace(sh,'.biz',	    	#$0c,[rfReplaceAll,rfIgnoreCase]);
   sh:=StringReplace(sh,'.gov',  	  	#$0d,[rfReplaceAll,rfIgnoreCase]);
 //writeln('BTLE_GetBeaconHexStr: 0x'+HexStr(sh)+':'+StringPrintable(sh));
-  sh:=StrHex('16'+ServiceID+'00')+char(TXPower)+sh;  
+  sh:=StrHex(EddyURL)+char(bpwr)+sh;  
   if (Length(sh)>23) then
   begin
     sh:=''; LOG_Writeln(LOG_ERROR,'BTLE_GetBeaconHexStr: url to long: '+url); 
-  end else sh:=StrHex('0303'+ServiceID+HexStr(Length(sh),2))+sh;
+  end else sh:=StrHex('0201060303'+ServiceID+HexStr(Length(sh),2))+sh;
 //writeln('0x',HexStrFrm(sh));
   BTLE_GetBeaconHexStr:=sh;
 end;
@@ -8596,48 +9074,42 @@ begin
   						'hciconfig hci0 down >/dev/null 2>&1'
 end;
 function  BTLE_StopBeacon:boolean; // start async
-begin BTLE_StopBeacon:=(RunProcess(BTLE_StopBeaconStr,'',false)=0); end;
+begin BTLE_StopBeacon:=(RunProcess(BTLE_StopBeaconStr,'','',false)=0); end;
 
-function  BTLE_StartBeacon(hexstrng:string; TXPower:byte):boolean;
-var _ok:boolean;
+function  BTLE_StartBeacon(hexstrng:string):boolean;
+var _ok:boolean; sh:string;
 begin
   _ok:=(hexstrng<>'');
   if _ok then 
   begin
 //	writeln('BTLE_StartBeacon: hcitool -i hci0 cmd 0x08 0x0008 '+HexStr(Length(hexstrng),2)+' '+HexStrFrm(hexstrng));
-    _ok:=(RunProcess(
-    BTLE_StopBeaconStr+' ; '+
+	sh:=BTLE_StopBeaconStr+' ; '+
     'sleep 5 ; '+
   	'hciconfig hci0 up >/dev/null 2>&1 ; '+
   	'hciconfig hci0 noscan >/dev/null 2>&1 ; '+
   	'hciconfig hci0 leadv 3 >/dev/null 2>&1 ; '+
-  	'hcitool -i hci0 cmd 0x08 0x0008 '+HexStr(Length(hexstrng),2)+' '+HexStrFrm(hexstrng)+' >/dev/null 2>&1',
-  	'',false)=0); // start async
+  	'hcitool -i hci0 cmd 0x08 0x0008 '+HexStr(Length(hexstrng),2)+' '+HexStrFrm(hexstrng)+' >/dev/null 2>&1';
+//writeln('BTLE_StartBeacon: '+sh,CR);
+    _ok:=(RunProcess(sh,'','',false)=0); // start async
   end else LOG_Writeln(LOG_ERROR,'BTLE_StartBeacon: no HexSting supplied');
   BTLE_StartBeacon:=_ok;
 end;
-function  BTLE_StartBeaconURL(url1,url2:string):longint;
-// IN url1: https://www.google.com 
-// IN url2: https://192.168.10.200
-const TXPower=0; // 0-3	0:Lowest 3:high
-var li:longint; sh:string;
-begin 
-//writeln('btle:',url1,'*',url2,'*');
-  li:=0;
-  if (li=0) then 
-  begin 
-	sh:=BTLE_GetBeaconHexStr(url1,TXPower); 
-	if (sh<>'')	then li:=1;
-  end;
-  if (li=0) then
-  begin
-	sh:=BTLE_GetBeaconHexStr(url2,TXPower);
-	if (sh<>'')	then li:=2;
-  end;
-  if (li>0) then BTLE_StartBeacon(sh,TXPower)
-  		 	else LOG_Writeln(LOG_ERROR,'BTLE_StartBeaconURL: to long for beacon '+url1+' '+url2);
-  BTLE_StartBeaconURL:=li; 
+
+function  BTLE_StartBeaconURL(url:string; TXPower:integer):boolean;
+// IN url: 		https://www.google.com 
+// IN url: 		http://192.168.10.200
+// IN TXPower:	-12 to 10 -12:Lowest 10:high
+var _ok:boolean; sh:string;
+begin
+  sh:=BTLE_GetBeaconHexStr(url,TXPower);
+  _ok:=(sh<>''); 
+  if _ok
+	then _ok:=BTLE_StartBeacon(sh)
+  	else LOG_Writeln(LOG_ERROR,'BTLE_StartBeaconURL: to long for beacon '+url);
+  BTLE_StartBeaconURL:=_ok; 
 end;
+function  BTLE_StartBeaconURL(url:string):boolean;
+begin BTLE_StartBeaconURL:=BTLE_StartBeaconURL(url,-12); end;
 
 function OS_ShellExitDesc(ErrNum:integer):string;
 // http://www.tldp.org/LDP/abs/html/exitcodes.html
@@ -10023,7 +10495,7 @@ SAY(lvl,sh);
   TTY_sttySpeed:=res;
 end;
 
-procedure ERR_MGMT_UPD(errhdl:integer; cmdcode,datalgt:byte; modus:boolean);
+procedure ERR_MGMT_UPD(errhdl:integer; cmdcode,datalgt:integer; modus:boolean);
 begin
   try
     with ERR_MGMT[errhdl] do
@@ -10829,41 +11301,52 @@ end; { Bin }
 procedure RPI_HDR_SetDesc(HWPin:longint; desc:string);
 begin if (HWPin>=1) and (HWPin<=max_pins_c) then RPIHDR_Desc[HWPin]:=copy(desc,1,mdl); end;
 
-function  RPI_mmap_get_info (modus:longint)  : longword;
+function  RPI_mmap_get_info(modus:longint):longword;
 // https://github.com/raspberrypi/userland/blob/master/host_applications/linux/libs/bcm_host/bcm_host.c
-var valu:longword; li,ofs:longint; sh:string;
+var valu:longword; li,ofs:longint; sh,sh1,sh2,sh3,sh4:string;
 begin 
   valu:=0;
   case modus of
-	 1,2 : valu:=PAGE_SIZE;
-	 30	 : begin // OLD get peri base from device tree
+	 1,2:	valu:=PAGE_SIZE;
+	 30: 	begin // OLD get peri base from device tree
 // e.g. for ZeroW:	7e0000002000000002000000...
 //		3B+:		7e0000003f00000001000000400000004000000000001000
 //		4B:			7e00000000000000fe000000018000007c00000000000000fc000000020000004000000000000000ff80000000800000
-			 call_external_prog(LOG_NONE,'xxd -ps -c250 '+PrepFilePath(LNX_DevTree+'/soc/ranges'),sh);
-			 ofs:=8;
-			 if (Upper(RPI_hw)='BCM2711') then ofs:=16;	// rpi4
-			 if not Str2Num('$'+copy(sh,ofs+1,8),valu) then valu:=0;		// $20000000
-			 if (valu=0) then
-			 begin // old variant
-			   valu:=BCM2709_PBASE; // for BCM2709 and BCM2835
-			   if (Upper(RPI_hw)='BCM2708') then valu:=BCM2708_PBASE;	// for old RPI
-			   if (Upper(RPI_hw)='BCM2711') then valu:=BCM2711_PBASE;	// rpi4
-			 end;		 
-		   end;
-	3	 : begin // NEW get peri base with iomem
+			  call_external_prog(LOG_NONE,'xxd -ps -c250 '+PrepFilePath(LNX_DevTree+'/soc/ranges'),sh);
+			  ofs:=8;
+			  if (Upper(RPI_hw)='BCM2711') then ofs:=16;	// rpi4
+			  if not Str2Num('$'+copy(sh,ofs+1,8),valu) then valu:=0;		// $20000000
+			  if (valu=0) then
+			  begin // old variant
+				valu:=BCM2709_PBASE; // for BCM2709 and BCM2835
+				if (Upper(RPI_hw)='BCM2708') then valu:=BCM2708_PBASE;	// for old RPI
+				if (Upper(RPI_hw)='BCM2711') then valu:=BCM2711_PBASE;	// rpi4
+			  end;		 
+			end;
+	31:		begin // get peri size
+			  valu:=BCM270x_PSIZ_Byte;
+			end;
+	3:		begin // NEW get peri base with iomem
 (*	cat /proc/iomem | grep gpio@
 	rpi4:	 fe200000-fe2000b3 : gpio@7e200000
 	rpi2-3x: 3f200000-3f2000b3 : gpio@7e200000
 	zerow:	 20200000-202000b3 : gpio@7e200000	*)
-			call_external_prog(LOG_NONE,'cat /proc/iomem | grep gpio@',sh); // 3f200000-3f2000b3 : gpio@7e200000
-			sh:=CSV_Item(Trimme(sh,3),'-',1);								// 3f200000
-			if Str2Num('$'+sh,valu) then valu:=valu-GPIO_BASE_OFS			// 3f000000
-									else valu:=RPI_mmap_get_info(30);
-//			writeln('PBase: 0x',HexStr(valu,8));
-		   end;	
+			  call_external_prog(LOG_NONE,'cat /proc/iomem | grep gpio@',sh); // 3f200000-3f2000b3 : gpio@7e200000
+			  sh:=CSV_Item(Trimme(sh,3),'-',1);								// 3f200000
+(*			  if Str2Num('$'+sh,valu) then valu:=valu-GPIO_BASE_OFS			// 3f000000
+									else valu:=RPI_mmap_get_info(30); *)					
+			  if not Str2Num('$'+sh,valu) then 
+			  begin
+			  	valu:=RPI_mmap_get_info(30);
+			  	LOG_Writeln(LOG_WARNING,'RPI_mmap_get_info['+Num2Str(modus,0)+']: get peri base with iomem');
+			  end else valu:=valu-GPIO_BASE_OFS								// 3f000000
+//			  writeln('PBase: 0x',HexStr(valu,8));
+		   	end;		   
 	 4   : begin {$IFDEF UNIX} valu:=1; {$ELSE} valu:=0; {$ENDIF} end;      (* if run_on_unix ->1 else 0 *)
-	 5   : if (Upper({$i %FPCTARGETCPU%})='ARM') then valu:=1 else valu:=0; (* if run_on_ARM  ->1 else 0 *)
+	 5   : begin 
+	 		 sh:={$i %FPCTARGETCPU%};	// arm / aarch64
+	 		 if (Upper(sh)='ARM') or (Upper(sh)='AARCH64') then valu:=1; (* if run_on_ARM  ->1 else 0 *)
+	 	   end;
 	 6	 : begin valu:=1; end;								// if RPI_Piggyback_board_available -> 1 dummy, for future use 
 	 7   : if ((RPI_mmap_get_info(5)=1) and 
 	           ((Upper(RPI_hw)='BCM2708') or
@@ -11318,7 +11801,8 @@ function RPI_I2C_GetSpeed(bus:byte):longword; 				begin RPI_I2C_GetSpeed:=I2C_bu
 function RPI_I2C_GetFuncs(bus:byte):longword; 				begin RPI_I2C_GetFuncs:=I2C_bus[bus].I2C_funcs; end;
 function RPI_I2C_ChkFuncs(bus:byte; funcs:longword):boolean;begin RPI_I2C_ChkFuncs:=((RPI_I2C_GetFuncs(bus) and funcs)=funcs); end;
 function RPI_SPI_GetSpeed(bus:byte):longint; 				begin RPI_SPI_GetSpeed:=spi_bus[bus].spi_maxspeed; end;
-function RPI_get_GPIO_BASE:longword;						begin RPI_get_GPIO_BASE:=RPI_mmap_get_info(3); end;
+function RPI_get_PERI_BASE:longword;						begin RPI_get_PERI_BASE:=RPI_mmap_get_info(3); end;
+function RPI_get_PERI_SIZE:longword;						begin RPI_get_PERI_SIZE:=RPI_mmap_get_info(31); end;
 function RPI_mmap_run_on_unix:boolean; 						begin RPI_mmap_run_on_unix:=(RPI_mmap_get_info(4)=1); end;
 function RPI_run_on_ARM:boolean;       						begin RPI_run_on_ARM :=     (RPI_mmap_get_info(5)=1); end;
 function RPI_Piggyback_board_available  : boolean; 			begin RPI_Piggyback_board_available:=(RPI_mmap_get_info(6)=1); end;
@@ -11358,35 +11842,21 @@ begin
   GPIO_get_mask_and_idxOfs(regidx,gpio,iofs,mask); idxabs:=regidx+iofs; 
 end;
 
-function  valid_regidx(regidx:longword):boolean;
-var ok:boolean;
-begin
- ok:=((mmap_arr<>nil) and (regidx<=BCM270x_RegMaxIdx));
- if not ok then
-   LOG_WRITELN(LOG_ERROR,'valid_regidx: not initialized or regidx not valid: '+num2Str(regidx,0));
- valid_regidx:=ok;
-end;
-
-function  BCM_REGAdr(idx:longword):longword; begin BCM_REGAdr:=RPI_get_GPIO_BASE+(idx*BCM270x_RegSizInByte); end;
+function  BCM_REGAdr(idx:longword):longword; 
+begin BCM_REGAdr:=RPI_get_PERI_BASE+(idx*BCM270x_RegSizInByte); end;
 
 function  BCM_GETREG (regidx:longword):longword; 
-begin 
-//writeln('Boom: 0x',HexStr(regidx,8),' ',regidx);
-  BCM_GETREG:=mmap_arr^[regidx]; 
-end;
+begin BCM_GETREG:=mmap_arr^[regidx]; end;
 
 procedure BCM_SETREG (regidx,newval:longword); begin mmap_arr^[regidx]:=newval; end;
 
 procedure BCM_SETREG (regidx,newval:longword; and_mask,readmodifywrite:boolean);
 begin
-//if valid_regidx(regidx) then
+  if readmodifywrite then
   begin
-    if readmodifywrite then
-    begin
-	  if and_mask then BCM_SETREG(regidx,BCM_GETREG(regidx) and newval) 
-				  else BCM_SETREG(regidx,BCM_GETREG(regidx) or  newval);
-    end else BCM_SETREG(regidx,newval); 
-  end;
+	if and_mask then BCM_SETREG(regidx,BCM_GETREG(regidx) and newval) 
+				else BCM_SETREG(regidx,BCM_GETREG(regidx) or  newval);
+  end else BCM_SETREG(regidx,newval); 
 end;
 
 procedure MEM_SpeedTest; // just for investigations
@@ -11408,57 +11878,96 @@ end;
 
 function  MMAP_start(gpioonly:boolean):integer;
 //Set up a memory mapped region to access peripherals
-var rslt,errno:longint; {$IFDEF LINUX} lw:longword; {$ENDIF}
+var rslt,errno:longint; dev:string; 
+	peri_base:off_t; prot,flags:cint; {$IFDEF LINUX} lw:longword; {$ENDIF}
 begin
-  rslt:=-7; errno:=0; restrict2gpio:=false; GPU_MEM_BASE:=0;
+  rslt:=-7; errno:=0; restrict2gpio:=gpioonly; GPU_MEM_BASE:=0;
   {$IFDEF LINUX}
     if RPI_run_on_ARM then rslt:=-6 else rslt:=-5; 
     if RPI_run_on_ARM and (mmap_arr=nil) then 
     begin
-      if not gpioonly then
-      begin
-        rslt:=-1; restrict2gpio:=false; 
-        mem_fd:=fpOpen('/dev/mem',(O_RDWR or O_SYNC (*or O_CLOEXEC*)));		// open /dev/mem 
-	  end
-	  else
-	  begin 
-        rslt:=-2; restrict2gpio:=true; 
-        mem_fd:=fpOpen('/dev/gpiomem',(O_RDWR or O_SYNC (*or O_CLOEXEC*)));	// open /dev/gpiomem
-      end;
-      if mem_fd>=0 then 
+      rslt:=-1;
+      if restrict2gpio 
+      	then dev:='/dev/gpiomem'
+      	else dev:='/dev/mem';
+      
+      mem_fd:=fpOpen(dev,(O_RDWR or O_SYNC (*or O_CLOEXEC*)));
+
+      if (mem_fd>=0) then 
       begin // mmap GPIO
 	    rslt:=-3;
-//writeln('MMAP_start: PSIZ:0x',HexStr(BCM270x_PSIZ_Byte,8),' Base: 0x',HexStr(RPI_get_GPIO_BASE,8));
-//MMAP_start: PSIZ:0x02000000 Base: 0xFE000000
-		mmap_arr:=fpMMap(pointer(0),BCM270x_PSIZ_Byte,
-		                 (PROT_READ or PROT_WRITE),
-						 (MAP_SHARED {or MAP_FIXED}),
+	    peri_base:=	RPI_get_PERI_BASE;
+	    prot:=		PROT_READ or PROT_WRITE;
+	    flags:=		MAP_SHARED; //or MAP_LOCKED //or MAP_ANONYMOUS or MAP_NORESERVE	
+
+		mmap_arr:=fpMMap(nil,
+						 BCM270x_PSIZ_Byte,
+		                 prot,
+						 flags,
 						 mem_fd,
-						 (RPI_get_GPIO_BASE div PAGE_SIZE)
-						); 
-		if mmap_arr=MAP_FAILED then errno:=fpgeterrno else rslt:=0; 
+						 (peri_base div PAGE_SIZE)	// mmap2 peripheral base -> offset (pages)
+						);  
+						
+		if (mmap_arr=MAP_FAILED) then 
+		begin // 2nd. try
+		  rslt:=-31;
+//		  LOG_Writeln(LOG_WARNING,'MMAP_start: mmap2');	
+(* https://www.mail-archive.com/fpc-pascal@lists.freepascal.org/msg53664.html
+  offset was in earlier days RPI_get_PERI_BASE div 4096, because it uses mmap2 ?
+  now it's in bytes to use mmap. off_t = cint64; 
+rpi4 armhf   32Bit OS mmap2
+rpi4 aarch64 64Bit OS mmap 
+
+./rtl/unix/oscdeclh.inc:157 // mmap / mmap64
+function fpmmap(addr:pointer;len:size_t;prot:cint;flags:cint;fd:cint;ofs:off_t):pointer; cdecl; external clib name 'mmap'+suffix64bit;
+
+void *mmap(void *addr, size_t len, int prot, int flags, int fildes, off_t off);
+void *mmap64(void *addr, size_t len, int prot, int flags, int fildes, off64_t off); 
+*)
+		  mmap_arr:=fpMMap(nil,
+						 BCM270x_PSIZ_Byte,
+		                 prot,
+						 flags,
+						 mem_fd,
+						 peri_base	// mmap: peripheral base -> offset (bytes)
+						);						
+		end;				
+
+		if (mmap_arr=MAP_FAILED) then 
+		begin
+		  errno:=fpgeterrno;
+//		  MMAP_start: PSIZ:0x02000000 Base: 0xFE000000
+		  LOG_Writeln(LOG_ERROR,'RPI_mmap_init, MMAP_start:'+
+		  	' '+dev+
+		  	' PSIZ: 0x'+HexStr(BCM270x_PSIZ_Byte,8)+
+		  	' Base: 0x'+HexStr(peri_base,8)+
+		  	' page: 0x'+HexStr(PAGE_SIZE,4)+
+		  	' mmap_arr: 0x'+HexStr(PtrInt(mmap_arr),8));	  
+		end else rslt:=0; 
+		
 		fpclose(mem_fd);
+		
 		if (rslt=0) and (not restrict2gpio) then
 		begin 
 		  rslt:=-4; // does not work on ZeroW -> 0 ????
 		  lw:=BCM_GETREG(APMIRQCLRACK);
 // When reading this register it returns 0x544D5241 which is the ASCII reversed value for "ARMT".
-		  if (lw=$544D5241) then rslt:=0 // ok
-		  else LOG_Writeln(LOG_ERROR,'MMAP_start: APMIRQCLRACK 0x'+HexStr(lw,8));
-//writeln('MMAP_start: ',rslt);
+		  if (lw=$544D5241) 
+		  	then rslt:=0 // ok
+		  	else LOG_Writeln(LOG_ERROR,'MMAP_start: APMIRQCLRACK 0x'+HexStr(lw,8));
 		end;
       end;
     end;
   {$ENDIF}
   case rslt of
-     0 : Log_writeln(Log_INFO, 'RPI_mmap_init, init successful');
-    -1 : Log_writeln(Log_ERROR,'RPI_mmap_init, can not open /dev/mem on target CPU '+{$i %FPCTARGETCPU%}+', result: '+Num2Str(rslt,0));
-    -2 : Log_writeln(Log_ERROR,'RPI_mmap_init, can not open /dev/gpiomem on target CPU '+{$i %FPCTARGETCPU%}+', result: '+Num2Str(rslt,0));
-    -3 : Log_writeln(Log_ERROR,'RPI_mmap_init, mmap fpgeterrno: '+Num2Str(errno,0)+' result: '+Num2Str(rslt,0));
-	-4 : Log_writeln(Log_ERROR,'RPI_mmap_init, can not read test register APMIRQCLRACK');
-	-5 : Log_writeln(Log_ERROR,'RPI_mmap_init, not supported rpi platform');
-	-6 : Log_writeln(Log_ERROR,'RPI_mmap_init, mmap already initialized');
-	-7 : Log_writeln(Log_ERROR,'RPI_mmap_init, no linux platform');
+     0:	 Log_writeln(Log_INFO, 'RPI_mmap_init, init successful');
+    -1:	 Log_writeln(Log_ERROR,'RPI_mmap_init, can not open '+dev+' on target CPU '+{$i %FPCTARGETCPU%}+', result: '+Num2Str(rslt,0));
+    -3:	 Log_writeln(Log_ERROR,'RPI_mmap_init, mmap2 '+LNX_ErrDesc(errno)+' on target CPU '+{$i %FPCTARGETCPU%}+', result: '+Num2Str(rslt,0));
+    -31: Log_writeln(Log_ERROR,'RPI_mmap_init, mmap '+LNX_ErrDesc(errno)+' on target CPU '+{$i %FPCTARGETCPU%}+', result: '+Num2Str(rslt,0));
+	-4:	 Log_writeln(Log_ERROR,'RPI_mmap_init, can not read test register APMIRQCLRACK');
+	-5:	 Log_writeln(Log_ERROR,'RPI_mmap_init, not supported rpi platform');
+	-6:  Log_writeln(Log_ERROR,'RPI_mmap_init, mmap already initialized');
+	-7:  Log_writeln(Log_ERROR,'RPI_mmap_init, no linux platform');
 	else Log_writeln(Log_ERROR,'RPI_mmap_init, unknown error, result: '+Num2Str(rslt,0));
   end;
   if rslt=0 then 
@@ -11919,7 +12428,7 @@ begin
 	Q4LP_Core0IrqSrc+3:		s:='C'+Num2Str(longword(regidx-Q4LP_Core0IrqSrc),0)+'IRQSRC';
 	Q4LP_Core0FIQSrc..
 	Q4LP_Core0FIQSrc+3:		s:='C'+Num2Str(longword(regidx-Q4LP_Core0FIQSrc),0)+'FIQSRC';
-	else 					s:='['+HexStr(RPI_get_GPIO_BASE+(regidx*BCM270x_RegSizInByte),8)+']'; 
+	else 					s:='['+HexStr(RPI_get_PERI_BASE+(regidx*BCM270x_RegSizInByte),8)+']'; 
 						  //s:='Reg['+Num2Str(longword(regidx),0)+']';
   end; // case
   s:=Get_FixedStringLen(s,wid1,false)+': '+Bin(regcontent,32)+' 0x'+HexStr(regcontent,8);  
@@ -12238,7 +12747,7 @@ procedure show_regs(desc:string; ofs,startidx,endidx,mode:longword; showhdr:bool
 var idx:longword; skip:boolean;
 begin
   skip:=((mode=2) and (RPI_hw='BCM2708'));
-  writeln(Get_FixedStringLen(desc,wid1,false)+': ',HexStr(RPI_get_GPIO_BASE+ofs,8));
+  writeln(Get_FixedStringLen(desc,wid1,false)+': ',HexStr(RPI_get_PERI_BASE+ofs,8));
   if showhdr then
   begin
     write  (Get_FixedStringLen('Adr(1F-00)',wid1,false)+': ');
@@ -14451,6 +14960,7 @@ begin
 			  9: val:=ord(kbdswitch); 
 			 10: val:=countermark;
 			 11: begin countermark:=counter; val:=countermark; end;
+			 12: if ENC_WasActive then val:=1;
 	    	else val:=counter;
 	      end; // case
 	    end; // with
@@ -14467,6 +14977,7 @@ function  ENC_GetSwitch    (hdl:integer):real;		begin ENC_GetSwitch:=    ENC_Get
 function  ENC_GetSwPtime   (hdl:integer):real;		begin ENC_GetSwPtime:=   ENC_GetVal(hdl, 5); end;
 function  ENC_GetMark	   (hdl:integer):real;		begin ENC_GetMark:=		 ENC_GetVal(hdl,10); end;
 function  ENC_SetMark	   (hdl:integer):real;		begin ENC_SetMark:=		 ENC_GetVal(hdl,11); end;
+function  ENC_WasActive	   (hdl:integer):boolean;	begin ENC_WasActive:=	(ENC_GetVal(hdl,12)<>0); end;
 
 procedure ENC_IncSwCnt (var ENCInfo:ENC_CNT_struct_t; cnt:integer);
 begin inc(ENCInfo.switchcounter,cnt); end;
@@ -14500,6 +15011,7 @@ begin
   	  if (enccycles>0) then kbdcode:=char(round(ENC_GetVal(Handle,7))); 
 	  if (enccycles<0) then kbdcode:=char(round(ENC_GetVal(Handle,8))); 
   	  if (swsteps<>0)  then kbdcode:=char(round(ENC_GetVal(Handle,9)));
+  	  ENC_WasActive:=true;
 	end;
 //	writeln('ENC_GetCounter: ',counter,' ',counterold,' ',encsteps,' Switch: ',switchcounter,' ',switchcounterold);
     ENC_GetCounter:=	ENC_activity;
@@ -14666,6 +15178,7 @@ begin
     switchlastpresstime:=0;
     ENC_InfoKBDInit		(CNTInfo,#38,#40,#13);  countermark:=0;
     FREQ_InitStruct		(TurnRateStruct, 250);	
+    ENC_WasActive:=false;
   end; // with
 end;
 
@@ -15338,7 +15851,7 @@ end;
 
 function  I2C_xfer(var rdwr:I2C_rdwr_ioctl_data_t; var multmsgs:I2C_rdwr_mult_msgs_t):integer;
 // https://github.com/raspberrypi/linux/blob/rpi-5.10.y/drivers/i2c/busses/i2c-bcm2835.c#L436
-var rslt,i:integer; rdlen:longword; _bptr:I2C_stringbuf_ptr; _sh:string;
+var rslt,i:integer; fperr:longint; rdlen:longword; _bptr:I2C_stringbuf_ptr; _sh:string;
 begin
   with multmsgs do
   begin
@@ -15356,15 +15869,19 @@ begin
       	  
 		  if (rslt<0) then
     	  begin
+    	    fperr:=fpgeterrno;
     	    if I2C_buf[busno].reperr then
     	    begin
-    	      _sh:='I2C_xfer[0x'+HexStr(busno,2)+'/0x'+HexStr(msgs[0].addr,2)+'/'+Num2Str(rslt,0)+'/'+Num2Str(I2C_buf[busno].hdl,0);
+    	      _sh:='I2C_xfer[0x'+HexStr(busno,2)+'/0x'+HexStr(msgs[0].addr,2)+'/'+Num2Str(rslt,0)+'/'+Num2Str(fperr,0)+'/'+Num2Str(I2C_buf[busno].hdl,0);
     		  if (errhdl<>NO_ERRHNDL) 
     		    then _sh:=_sh+' '+
     				Num2Str(ERR_MGMT_GetInfo(errhdl,0),0)+'/'+
     	  			Num2Str(ERR_MGMT_GetInfo(errhdl,1),0)+'/'+
     	  			Num2Str(ERR_MGMT_GetInfo(errhdl,2),0);
-    	      LOG_Writeln(LOG_ERROR,_sh+']: failed to read device: '+LNX_ErrDesc(fpgeterrno));
+    	  	  _sh:=_sh+']: failed to read device';
+    	  	  if (fperr<>0) then _sh:=_sh+': '+LNX_ErrDesc(fperr);
+    	      LOG_Writeln(LOG_ERROR,_sh);
+//I2C_xfer[0x01/0x73/-1/6 0/5/10]: failed to read device: (0) Success
 //    	      I2C_show_MULTmsgs(rdwr,multmsgs);
     	    end;
     	  end;
@@ -15709,13 +16226,16 @@ begin
 end;
 
 function  SPI_HWT(var DeviceStruct:HW_DevicePresent_t; bus,adr,lgt:word; ManufType:t_Manu_flag; cmds:string; Handle:integer; rv1,nv1,nv2,dsc:string):boolean;
+var _devpath:string;
 begin
   with DeviceStruct do
   begin
     HW_IniInfoStruct(DeviceStruct);
     HW_SetInfoStruct(DeviceStruct,SPIDev,0,hdl_unvalid,ManufType,dsc);
-    Xpresent:=true;		// Dummy, to do !!!!!!!!! read device to determine if it's there
     
+    _devpath:=spi_path_c+Num2Str(bus,0)+'.'+Num2Str(adr,0);
+	Xpresent:=((_devpath<>'') and FileExists(_devpath));
+
     if Xpresent  then begin BusNum:=bus; HWaddr:=adr; hndl:=Handle; end;
     SPI_HWT:=Xpresent;
   end;
@@ -16412,13 +16932,12 @@ begin
 		    if (res=-1) then Log_Writeln(Log_ERROR,'SPI_Dev_Init: can''t get bits per word '+LNX_ErrDesc(fpgeterrno));
 		  {$RANGECHECKS ON}    
 	    {$ENDIF}
-      end;
-	  if (spi_fd<0) then 
-	  begin
-	    Log_Writeln(LOG_WARNING,'SPI_Dev_Init[0x'+HexStr(busnum,2)+'/'+HexStr(devnum,2)+']: '+spi_path);
-	    if LOG_Level<=LOG_DEBUG then SPI_show_dev_info_struct(busnum,devnum);
-	  end
-	  else ok:=true;
+	  	if (spi_fd<0) then 
+	  	begin
+	      Log_Writeln(LOG_WARNING,'SPI_Dev_Init[0x'+HexStr(busnum,2)+'/'+HexStr(devnum,2)+']: '+spi_path);
+	      if LOG_Level<=LOG_DEBUG then SPI_show_dev_info_struct(busnum,devnum);
+	  	end else ok:=true;
+      end; // else LOG_Writeln(LOG_ERROR,'path not exist '+spi_path);
     end; // with
   end else LOG_Writeln(LOG_ERROR,'SPI_Dev_Init[0x'+HexStr(busnum,2)+'/0x'+HexStr(devnum,2)+']: invalid busnum/devnum');
 //SPI_show_dev_info_struct(spi_dev[devnum], devnum);
@@ -16625,7 +17144,7 @@ end;
 function RPI_GetBuildDateTime:TDateTime;
 var dt:TDateTime;
 begin 
-  Str2DateTime(RPI_GetBuildDateTimeString,'YYYY-MM-DD"T"hh:mm:ss',dt);
+  Str2DateTime(RPI_GetBuildDateTimeString,9,dt); // 'yyyy-mm-dd"T"hh:nn:ss'
   RPI_GetBuildDateTime:=dt; 
 end;
 
@@ -16973,505 +17492,34 @@ end;
 
 {$ENDIF}
 
-function  SearchValIdx(var InpArr:array of real; srchval,Epsilon:real):longint;
+function  SearchValIdx(var InpArr:array of real; srchval,Epsilon:real; up:boolean):longint;
 // in: search a value 'srchval' in an array. 
 // return: index of the value. -1 if not found
-var i,idx:longint;
+var i,idx,cnt:longint;
 begin  
-  idx:=-1; i:=1;
-  while i<=Length(InpArr) do
+  idx:=-1; cnt:=Length(InpArr);
+  if up then
   begin
-    if SameValue(InpArr[i-1],srchval,Epsilon) then 
-      begin idx:=i-1; i:=Length(InpArr); end;
-    inc(i);
+	i:=1;
+  	while i<=cnt do
+  	begin
+      if SameValue(InpArr[i-1],srchval,Epsilon) then 
+      	begin idx:=i-1; i:=Length(InpArr); end;
+      inc(i);
+  	end; // while
+  end
+  else
+  begin
+	i:=cnt;
+  	while i>=1 do
+  	begin
+      if SameValue(InpArr[i-1],srchval,Epsilon) then 
+      	begin idx:=i-1; i:=1; end;
+      dec(i);
+  	end; // while
   end;
   SearchValIdx:=idx;
-end;
-
-function  MovAvg(interval:longword; var InpArr,OutArr:array of real):longint; // moving average
-var i,j,l:longint; res:real;
-begin
-  res:=0; 
-  if Length(InpArr)>Length(OutArr) then l:=Length(OutArr) else l:=Length(InpArr); 
-  for i:= 1 to l do
-  begin
-    res:=res+InpArr[i-1];
-    if i>=interval then 
-    begin
-      res:=0;
-      for j:= 1 to interval do 
-      begin
-        res:=res+InpArr[i-interval+j-1];
-      end;
-      if interval<>0 then OutArr[i-1]:=res/interval else OutArr[i-1]:=0;
-    end else OutArr[i-1]:=res/i;
-  end;
-  MovAvg:=l;
-end;
-
-procedure PID_SetTwiddle_KeyName(var PID_Twiddle:PID_Twiddle_t; sect,key:string);
-// set section and key name for .ini-file
-begin
-  with PID_Twiddle do
-  begin
-	twiddle_INI_sect:=sect;
-	twiddle_INI_key:= key;
-  end; // with
-end;
-
-procedure PID_EnableTwiddle_Save(var PID_Twiddle:PID_Twiddle_t; enable:boolean);
-// enable/disable writing optimization data to .ini-file
-begin
-  with PID_Twiddle do
-  begin
-  	if enable then twiddle_tol[2]:=twiddle_tol[0]+1 
-  			  else twiddle_tol[2]:=twiddle_tol[0];
-  end; // with
-end;
-  
-procedure PID_SaveTwiddle(var PID_Twiddle:PID_Twiddle_t; K,dK:PID_array_t);
-(* save twiddle data, to .ini-file (requirements):
-	1. given section and key name
-	2. twiddle_tol[0]<>twiddle_tol[2] (e.g.: on: tol[0]=0.01 tol[2]=1.01 / off: tol[0]=0.01 tol[2]=0.01) *)
-begin
-  with PID_Twiddle do
-  begin
-	if (twiddle_INI_sect<>'') or (twiddle_INI_key<>'') then
-	begin
-//	  if (twiddle_saveattol<>PID_twiddle_tolNOTsav) then
-	  if (twiddle_tol[0]<>twiddle_tol[2]) then
-  	  begin
-		BIOS_SetIniString(twiddle_INI_sect,twiddle_INI_key,
-		  PID_VectorStr(K,			0,PID_nk15,';')+'|'+
-		  PID_VectorStr(dK,			0,PID_nk15,';')+'|'+
-		  PID_VectorStr(twiddle_tol,0,PID_nk15,';')+'|'+
-		GetXMLTimeStamp(now),[]);
-  	  end else LOG_Writeln(LOG_ERROR,'PID_SaveTwiddle['+twiddle_INI_sect+'/'+twiddle_INI_key+']: not saved due to switched off tol param');
-  	end else LOG_Writeln(LOG_ERROR,'PID_SaveTwiddle['+twiddle_INI_sect+'/'+twiddle_INI_key+']: invalid sect/key pair');
-  end; // with
-end;
-	  	  
-function  PID_ReadTwiddle(sect,key:string; var K,dK,tol:PID_array_t):boolean;
-// restore twiddle data, to continue/benefit from previous optimizations
-// <key>=3.1089;0.0089;76.9491|0.000004245797254;0.000000011910849;0.000005511092205|0.0001;0.00001;0.0|2017-12-12..
-var ok:boolean; i:longint; r:PID_float_t; sh:string;
-begin
-  ok:=false;
-	if (sect<>'') or (key<>'') then
-	begin
-	  sh:=Trimme(BIOS_GetIniString(sect,key,''),3);
-	  if sh<>'' then
-	  begin
-	    ok:=true;
-		for i:=0 to 2 do 
-		begin
-		  if ok then ok:=Str2Num(CSV_Item(CSV_Item(sh,'|',1),';',i+1),r); if ok then K  [i]:=r;
-		  if ok then ok:=Str2Num(CSV_Item(CSV_Item(sh,'|',2),';',i+1),r); if ok then dK [i]:=r;
-		  if not 		 Str2Num(CSV_Item(CSV_Item(sh,'|',3),';',i+1),tol[i]) then
-		  begin
-			case i of
-				0: tol[i]:=PID_twiddle_saveattol;	// 0:twiddle_saveattol
-				2: tol[i]:=PID_twiddle_tolNOTsav;	// 2:PID_twiddle_tolNOTsav
-			  else tol[i]:=PID_twiddle_tolerance;	// 1:twiddle_tolerance
-			end; // case
-		  end; // if
-		end;
-	  end;
-	end else LOG_Writeln(LOG_ERROR,'PID_ReadTwiddle['+sect+'/'+key+']: invalid sect/key pair');  
-  PID_ReadTwiddle:=ok;
-end;
-
-function  PID_ReadTwiddle(var PID_Twiddle:PID_Twiddle_t; var K,dK,tol:PID_array_t):boolean;
-begin 
-  with PID_Twiddle do
-  begin
-    PID_ReadTwiddle:=PID_ReadTwiddle(twiddle_INI_sect,twiddle_INI_key,K,dK,tol);
-  end; // with
-end;
-
-function  PID_DetAvgs(IdxStart,IdxEnd:longint; var avgnumIst,avgnumPInc:longint):boolean; 
-begin
-  avgnumIst:=(IdxEnd-IdxStart+1) div 10; // try moving average with lines/10 values
-  if avgnumIst>PID_AVGmaxNum_c then avgnumIst:=PID_AVGmaxNum_c; 
-  if avgnumIst<PID_AVGminNum_c then avgnumIst:=PID_AVGminNum_c;
-  avgnumPInc:=avgnumIst;  
-  PID_DetAvgs:=true;
-end;
-
-function  PID_FileLoad(StrList:TStringList; filnam,SearchCrit:string; var IdxStart,IdxEnd:longint):boolean;
-var _ok:boolean;
-begin
-  _ok:=TextFile2StringList(filnam,StrList);
-  if _ok	then _ok:=GiveStringListIdx2(StrList,SearchCrit,IdxStart,IdxEnd)
-  			else LOG_Writeln(Log_ERROR,'PID_FileLoad: input file '+filnam);
-  PID_FileLoad:=_ok;
-end;
-
-function  PID_TDR(var TickArr,ValArr,OutTickDeltaArr,OutValArr:array of PID_float_t):longint;
-//time derivative response
-var i,l:longint;
-begin 
-  if Length(ValArr)>Length(OutValArr) then l:=Length(OutValArr) else l:=Length(ValArr); 
-  if l>Length(TickArr) then l:=Length(TickArr); 
-  for i:= 1 to l do
-  begin
-    OutValArr[i-1]:=0; OutTickDeltaArr[i-1]:=0;
-    if i>1 then
-    begin
-      OutTickDeltaArr[i-1]:=(TickArr[i-1]-TickArr[i-2]);
-      if OutTickDeltaArr[i-1]<>0 then 
-        OutValArr[i-1]:=	(ValArr [i-1]-ValArr [i-2])/OutTickDeltaArr[i-1];
-    end;
-  end;
-  PID_TDR:=l;
-end;
-
-function  PID_VectorStr(var pidarr:PID_array_t; vk,nk:integer; sep:char):string;
-var sh:string;
-begin 
-  sh:=	Num2Str(pidarr[iKp],vk,nk)+sep+
-  		Num2Str(pidarr[iKi],vk,nk)+sep+
-  		Num2Str(pidarr[iKd],vk,nk);
-  PID_VectorStr:=sh;
-end;
-
-function  PID_Vector(Kp,Ki,Kd:PID_float_t):PID_array_t;
-var i:longint; pa:PID_array_t;
-begin
-  for i:=1 to Length(pa) do pa[i-1]:=0;
-  pa[iKp]:=Kp; pa[iKi]:=Ki; pa[iKd]:=Kd;
-  PID_Vector:=pa;
-end;
-
-function  PID_DetType(Te,Tb:PID_float_t):integer;
-var i:integer; r:PID_float_t;
-begin
-  i:=ord(PID_Default);
-  if not ( (Te=0) or (Tb=0) or IsNaN(Tb) or IsNaN(Te) ) then 
-  begin
-	r:=Tb/Te;			
-					 i:=ord(P_Default);		// gut regelbar 		-> P
-	if (r<=10)	then i:=ord(PI_Default);	// regelbar 			-> PI	
-	if (r<3)	then i:=ord(PID_Default); 	// schlecht regelbar	-> PID
-  end;
-  PID_DetType:=i;
-end;
-
-function  PID_TimAdj(timadjfct:real; var Te,Tb,TSum:PID_float_t):integer;
-var res:integer; 
-begin
-  res:=-1;
-  if (not IsNaN(timadjfct)) and (timadjfct>0) then
-  begin 
-    res:=0;
-    if not IsNaN(Te) 	then begin Te:=Te	 *timadjfct; inc(res); end;
-    if not IsNaN(Tb) 	then begin Tb:=Tb	 *timadjfct; inc(res); end;
-    if not IsNaN(Tsum) 	then begin Tsum:=Tsum*timadjfct; inc(res); end;
-  end;
-  PID_TimAdj:=res;
-end;
-
-function Sigmoid(A,k,x,x0:real):real;
-// create S-Shape curve
-// A: maxHeight, k:steepness, x0:midpoint
-// e.g. Sigmoid(10,1,0, 5) -> 0.0669285
-// e.g. Sigmoid(10,1,5, 5) -> 5
-// e.g. Sigmoid(10,1,10,5) -> 9.9330715
-begin
-  try
-    Sigmoid:=A/(1+exp(-k*(x-x0)));
-  except
-    Sigmoid:=NaN;
-  end;
-end;
-
-function SigmoidIsA(A,k,epsilon,x0:real):real;
-// determine x value, where Sigmoid is nearly A (epsilon is allowed error e.g. 0.001)
-begin
-  try
-	SigmoidIsA:=-(ln(A/(A-epsilon)-1)/k)+x0; // for (epsilon>0)
-  except
-	SigmoidIsA:=NaN;
-  end;
-end;
-
-procedure tst_Sigmoid;
-const A=1.0; x0=0.0; k=1.0; eps=0.00000001; cnt=10;
-var xMinMax:real; n:longint;
-procedure _sig(x:real);    begin writeln('x: ',x:11:7,' y: ',Sigmoid(A,k,x,x0):11:7); end;
-begin 
-  writeln('x0:',x0:11:7,' k: ',k:11:7,' (steepness)');
-  writeln('A: ',A:11:7,' eps: ',eps:0:12); writeln;
-  xMinMax:=SigmoidIsA(A,k,eps,x0); 
-  _Sig(-xMinMax+2*x0); _Sig(0+x0); _Sig(xMinMax);
-  writeln;
-  for n:= 1 to (cnt+1) do _Sig( (n-1) * xMinMax*2/cnt - xMinMax ); 
-end;
-
-procedure tst_Sigmoid_normalized;
-// normalized x- and y-range 0..1 
-const A=1.0; x0=0.0; k=1.0; eps=0.00000001; cnt=10;
-var xMinMax:real; n:longint;
-procedure _sig(x:real);    begin writeln('x: ',x:11:7,' y: ',Sigmoid(A,k,x*xMinMax*2,xMinMax-(x0*xMinMax*2)):11:7); end;
-begin 
-  xMinMax:=SigmoidIsA(A,1,eps,0); 
-  writeln('x0:',x0:11:7,' k: ',k:11:7,' (steepness)');
-  writeln('A: ',A:11:7,' eps: ',eps:0:12); writeln;
-  _Sig(0); _Sig(0.5); _Sig(1);
-  writeln;
-  for n:= 1 to (cnt+1) do _Sig( (n-1) * 1/cnt ); 
-end;
-
-function  PID_sim(StrList:TStringList; simnr:integer):real;
-//PID_loctusec=4; PID_locsollval=5; PID_locistval=6; 
-const hdr1=';;;';
-var timadj:real; i:longint;
-//Prof. Dr. R. Kessler, FH-Karlsruhe, FB-MN, http://www.home.fh-karlsruhe.de/~kero0001, WendeTangReg3.doc
-// returns timebase and a list of values in csv format (for testing)
-// Strecke aus 10 gleichen PT1-Gliedern (WT10PT1.MDL)
-  procedure tlx(hdr,xs,ys,zs:string); begin StrList.add(hdr+xs+';'+zs+';'+ys); end;
-  procedure tl0(x,y:real); begin tlx(hdr1,AdjZahlDE(x/timadj,0,PID_nk8),AdjZahlDE(y,0,PID_nk8),'0'); end;
-  procedure tl1(x,y:real); begin tlx(hdr1,AdjZahlDE(x/timadj,0,PID_nk8),AdjZahlDE(y,0,PID_nk8),'1'); end;
-  procedure tl2(x,y:real); begin tlx('',  AdjZahlDE(x/timadj,0,PID_nk8),'',AdjZahlDE(y,0,PID_nk8)); end;
-begin
-  timadj:=1;
-  case simnr of
-    1:begin
-    	for i:=0 to 400 do 
-    	begin
-    	  if i<10 then tl2((i/10),0) else tl2((i/10),1);
-    	end;
-      end;
-    2:begin
-//    	for i:=0 to 300 do tl1(i/10,Sigmoid(1,0.5,i/10,10));
-    	for i:=0 to 19 do tl1(i/10,Sigmoid(1,0.5,i,10));
-      end;
-    else 
-      begin // WT10PT1.MDL
-  		tl0(0,0); 		tl1(1,0); 		tl1(2,0); 		tl1(3,0); 		tl1(4,0);
-  		tl1(5,0.01); 	tl1(6.25,0.05); tl1(7.5,0.15); 	tl1(8.75,0.25); 	
-  		tl1(10,0.4); 	tl1(11.25,0.6); tl1(12.5,0.75); tl1(13.75,0.85); 
-  		tl1(15,0.9);  	tl1(16.25,0.95);tl1(17.5,0.97); tl1(18.75,0.99);
-  		tl1(20,1);
-  		for i:=21 to 40 do tl1(i,1);
-      end;
-  end; // case
-  PID_sim:=timadj;
-end;
-
-procedure PID_ShowDet(var struct:PID_Det_t; loglvl:T_ErrorLevel; hdr:string);
-begin
-  with struct do
-  begin
-	SAY(loglvl,	hdr+
-		' Ks:'+Num2Str(Ks,0,1)+' Ti:'+Num2Str(Ti,0,PID_nk8)+' Td:'+Num2Str(Td,0,PID_nk8)+
-		' Te:'+Num2Str(Te,0,PID_nk8)+' Tb:'+Num2Str(Tb,0,PID_nk8)+' PIDmeth:'+GetEnumName(TypeInfo(PID_Method_t),ord(PIDMethod))+
-		' SampleTime: Avg='+Num2Str(SampleTimeAvg,0,1)+' AdjFctr='+Num2Str(SampleTimeAdjFactor,0,12));
-  end;
-end;
-
-function  PID_DetPara(loglvl:t_ErrorLevel; StrList:TStringList; idxStart,idxEnd,smoothdata,smoothtdr,loctim,locist,locSetPoint:longint; StoerSprung,timadjfct:real; var PID_Det:PID_Det_t; tst:boolean; filout:string):integer;
-//function  PID_DetPara(loglvl:t_ErrorLevel; StrList:TStringList; idxStart,idxEnd,smoothdata,smoothtdr,loctim,locist,locSetPoint:longint; StoerSprung,timadjfct:real; var Ks,Te,Tb,Tsum,SampleTimeAvg:PID_float_t; tst:boolean; filout:string):integer;
-//determines Ks,Te,Tb out of a given sensor data (.csv)
-//Ks,Te,Tb for feeding PID_GetPara
-//Prof. Dr. R. Kessler, FH-Karlsruhe, FB-MN, http://www.home.fh-karlsruhe.de/~kero0001, WendeTangReg3.doc
-//StepResponseList.csv	-> using values t(usec) and ist. FieldNum 4&6. SetPoint/soll FieldNum 5
-//pwm%;pidnr;cnt;t(usec);soll;ist;avg;preached;t2preach;preachedmax;t2preachmax;pincms;pok;calc;stdev;pon;ppc
-//0,45;6;0;0;132;-0,15259;-0,15259;133,28756;552630;133,44015;557774;0,24146382;1;0;7,92544758;1;0
-//...
-//0,45;6;1081;619469;132;129,85428;129,85428;133,28756;552630;133,44015;557774;0,24146382;1;133,4401502;7,92544758;0;0
-var _ok:boolean; res,i,linecnt,idx,avgnumIst,avgnumTDR:longint; _tl:TStringList;
-	maxZ,minZ,tZ,maxXp,tWP,XWP,t1,t2,_Te,_Tb,wt,scaleXp:PID_float_t; 
-  	A_t,A_td,A_W,A_U,A_X,A_TDR,A_Xp: array of PID_float_t;
-begin
-  _tl:=TStringList.create; 
-  with PID_Det do
-  begin
-//writeln('PID_DetPara filout:',filout,' ',idxStart,' ',idxEnd,' ',tst);
-  	linecnt:=idxEnd-idxStart+1; res:=-1; 
-  	SampleTimeAdjFactor:=timadjfct; Ks:=NaN; Te:=Nan; Tb:=NaN; Tsum:=Nan; 
-  	if (linecnt>0) then
-  	begin
-      Ks:=1; scaleXp:=1; //anno:='';
-      SetLength(A_U,  linecnt); 	SetLength(A_X, linecnt); 	SetLength(A_t,linecnt); 
-      SetLength(A_TDR,linecnt); 	SetLength(A_Xp,linecnt);  	SetLength(A_W,linecnt);
-      SetLength(A_td, linecnt); 
-      for i:=idxStart to idxEnd do
-      begin // ArrFill 
-      	_ok:=true;
-      	if not Str2Num(AdjZahl(CSV_Item(StrList[i],';',loctim)),	 A_t[i-idxStart]) then _ok:=false;	// timeval
-      	if not Str2Num(AdjZahl(CSV_Item(StrList[i],';',locSetPoint)),A_W[i-idxStart]) then _ok:=false;	// SetPoint
-      	if not Str2Num(AdjZahl(CSV_Item(StrList[i],';',locist)),	 A_U[i-idxStart]) then _ok:=false;	// istval
-      	if not _ok then LOG_Writeln(LOG_ERROR,'PID_DetPara['+Num2Str(i,0)+'] value not ok: '+StrList[i]);
-//	  	writeln(i:5,' ',A_t[i-idxStart],' ',A_W[i-idxStart],' ',A_U[i-idxStart]);
-      end;
-        
-      avgnumIST:=smoothdata; if avgnumIST<1 then avgnumIST:=1; // 1=no smoothing
-      avgnumTDR:=smoothtdr;  if avgnumTDR<1 then avgnumTDR:=1;
-    			
-      MovAvg(avgnumIst,A_U,A_X);			// smoothen raw input sensor data
-      PID_TDR(A_t,A_X,A_td,A_TDR);	
-      SampleTimeAvg:= Mean(PDouble(@A_td[1]),(Length(A_td)-1))*SampleTimeAdjFactor;//writeln('SampleTimeAvg: ',SampleTimeAvg:0:4);
-      MovAvg(avgnumTDR,A_TDR,A_Xp);		// smoothen t-derived response
-      minZ:=MinValue(A_W);				
-      maxZ:=MaxValue(A_W);
-      if minZ=maxZ then minZ:=0;
-      idx:=SearchValIdx(A_W,maxZ,PID_epsilon_c);
-      if idx<0 then tZ:=0 else tZ:=A_t[idx];			// Zeit tZ des Z-Sprungs finden 
-      maxXp:=MaxValue(A_Xp);
-      idx:=SearchValIdx(A_Xp,maxXp,PID_epsilon_c); 	// Koordinaten tWP und XWP suchen
-      if (idx>=0) then
-      begin
-      	maxXp:= maxXp;
-      	tWP:=A_t[idx]; XWP:=A_X[idx];	// Wendepunkt
-      	t1:= (XWP-minZ)/maxXp;			// t1= Zeitabschn. unter Wendetangente bis minZ
-      	t2:= (maxZ-XWP)/maxXp;			// t2= Zeitabschn. oberhalb Wendetangente bis maxZ
-      	Te:= tWP-t1-tZ;					// Te= Verzugszeit (Tu)
-      	Tb:= t1+t2;						// Tb= Ausgleichszeit (Tg)
-      	if (StoerSprung<>0) then
-    	  Ks:=maxZ/StoerSprung;			// Ks= Streckenverstärkung = Endwert der Sprungantwort geteilt durch Höhe des Störsprungs. 
-
-      	if tst then
-      	begin
-//	      create .csv output // overwrite Input StringList !!!!!!!!
-	      _tl.clear;
-	  
-	      scaleXp:=maxZ/maxXp;				// normalize TDR
-          _tl.add('time,U,W,U(avg='+Num2Str(avgnumIst,0)+'),Xp(scale='+Num2Str(scaleXp,0,PID_nk8)+'),WT');
-          for i:=1 to linecnt do
-          begin            
-		  	if A_t[i-1]<(tWP-t1) then wt:=minZ else 
-		      if A_t[i-1]>(tWP+t2) then wt:=maxZ 
-			  	else wt:=(A_t[i-1]-(tWP-t1))/Tb*(maxZ-minZ); // calc Wendetangente        
-          	_tl.add(
-        		Num2Str(A_t [i-1],0)+','+
-        		Num2Str(A_U [i-1],0,PID_nk8)+','+
-            	Num2Str(A_W [i-1],0,PID_nk8)+','+
-            	Num2Str(A_X [i-1],0,PID_nk8)+','+
-    	  		Num2Str(A_Xp[i-1]*scaleXp,0,PID_nk8)+','+
-    	  		Num2Str(wt,0,PID_nk8)
-				);
-          end;  
-          if (filout<>'') then 
-          begin
-    	  	SAY(loglvl,'PID_DetPara: writing to ('+Num2Str(_tl.count,0)+') '+filout);
-    	  	if not StringList2TextFile(filout,_tl) then
-			  LOG_Writeln(LOG_ERROR,'PID_DetPara: can not write '+filout);
-          end;
-//    	  ShowStringList(_tl);   
-          scaleXp:=1;
-      	end; // tst
-
-(*      anno:=
-      	'WP='+Num2Str(tWP,0,PID_nk8)+';'+Num2Str(XWP, 0,PID_nk8)+','+
-      	'Te='+Num2Str(Te, 0,PID_nk8)+','+'Tb='+Num2Str(Tb,0,PID_nk8)+','+
-        'Ks='+Num2Str(Ks, 0,PID_nk8)+','+'STAvg='+Num2Str(SampleTimeAvg,0,PID_nk8); *)
-      
-      	_Te:=Te; _Tb:=Tb;					// keep calced Te and Tb
-      	if PID_TimAdj(SampleTimeAvg,Te,Tb,TSum)>0 then
-      	begin
-      	  res:=PID_DetType(Te,Tb);		// Determine P/PI/PID
-          SAY(loglvl,	'tZ/minZ/maxZ/maxXp/SampleTimeAvg/StoerSprung: '+
-          				Num2Str(tZ,0,PID_nk8)+' '+Num2Str(minZ,0,PID_nk8)+' '+
-          				Num2Str(maxZ,0,PID_nk8)+' '+Num2Str(maxXp,0,PID_nk8)+' '+
-          				Num2Str(SampleTimeAvg,0,PID_nk8)+' '+Num2Str(StoerSprung,0,PID_nk8)); 
-          SAY(loglvl,	'avgnumIST/avgnumTDR: '+Num2Str(avgnumIST,0,PID_nk8)+' '+Num2Str(avgnumTDR,0,PID_nk8)); 
-          SAY(loglvl,	'WendePunkt['+Num2Str(idx,0)+']: '+
-          				Num2Str(tWP,0,PID_nk8)+'/'+Num2Str(XWP,0,PID_nk8));
-	      SAY(loglvl,	't1/t2: '+Num2Str(t1,0,PID_nk8)+' '+Num2Str(t2,0,PID_nk8));
-	      SAY(loglvl,	'Ks/Te/Tb: '+
-	      				Num2Str(Ks,0,PID_nk8)+' '+ Num2Str(_Te,0,PID_nk8)+' '+
-	      				Num2Str(_Tb,0,PID_nk8));    
-	      SAY(loglvl,	'TimAdj SampleTimeAvg/Te/Tb/suggestedPIDMethod: '+
-	      				Num2Str(SampleTimeAvg,0,PID_nk8)+' '+Num2Str(Te,0,PID_nk8)+' '+Num2Str(Tb,0,PID_nk8)+' '+GetEnumName(TypeInfo(PID_Method_t),res));
-      	end else LOG_Writeln(LOG_ERROR,'PID_DetPara: timeadj wrong paras');
-      end else LOG_Writeln(LOG_ERROR,'PID_DetPara: Xp not found (wrong epsilon?)');
-      SetLength(A_U,0);	SetLength(A_X,0); 	SetLength(A_t,0);	SetLength(A_td,0);
-      SetLength(A_TDR,0);	SetLength(A_Xp,0);	SetLength(A_W,0);
-  	end else LOG_Writeln(LOG_ERROR,'PID_DetPara: wrong parameter/empty list');
-  end; // with
-  _tl.free;
-  PID_DetPara:=res;
-end;
-
-function  PID_GetPara(loglvl:t_ErrorLevel; var PID_Det:PID_Det_t; var K:PID_array_t; loginfo:string):integer;
-//function  PID_GetPara(loglvl:t_ErrorLevel; Ks,Te,Tb,Tsum:PID_float_t; Method:PID_Method_t; var Ti,Td:PID_float_t; var K:PID_array_t; loginfo:string):integer;
-//calcs Kp,Ki,Kd,Ti,Td for feeding PID_Init
-//Input:  Statische Verstärkung (Ks), Verzugszeit (Te) und Ausgleichszeit (Tb),
-//Input:  Px_SUM (TSum)
-//Input:  Einstellregel (Method)
-//Output: Ti,Td; Karray:Kp,Ki,Kd
-//
-//https://de.wikipedia.org/wiki/Faustformelverfahren_(Automatisierungstechnik)
-//Script: Spezialgebiete der Steuer- und Regelungstechnik WS 2008/09 FH Dortmund Schriftliche Ausarbeitung Thema: PID - Einstellregeln
-//http://www.home.hs-karlsruhe.de/~kero0001/wendtang/wendtang1.html
-//Einstellregeln nach Oppelt, ZieglerNichols oder 
-//Chien/Hrones/Reswick, Samal:  
-//GSA:  gutes Störverhalten, aperiodisch (schwingungsfrei)
-//GFA:  gutes Führungsverhalten, aperiodisch (schwingungsfrei)
-//GS20: gutes Störverhalten, 20% Überschwingen
-//GF20: gutes Führungsverhalten, 20% Überschwingen
-//
-//Tn/Ti: Nachstellzeit	(DIN19226/DIN EN 60027-6)
-//Tv/Td: Vorhaltzeit	(DIN19226/DIN EN 60027-6)
-var res:integer;
-begin 
-  with PID_Det do
-  begin
-	K:=PID_Vector(0,0,0); Ti:=NaN; Td:=NaN; res:=-1;
-  	if PIDMethod IN [P_SUM..PID_SUM_Fast] 
-      then if IsNaN(Ks) or IsNaN(Tsum)				or (Ks=0) 			then exit(res)
-      else if IsNaN(Ks) or IsNaN(Tb) or IsNaN(Te) 	or (Ks=0) or (Te=0) then exit(res);
-  	res:=ord(PIDMethod);
-  	case PIDMethod of
-      P_Oppelt:			begin K[iKp]:=(1.00/Ks)*(Tb/Te); end; 
-      PI_Oppelt:		begin K[iKp]:=(0.80/Ks)*(Tb/Te); Ti:=3.00*Te; end; 
-      PID_Oppelt:		begin K[iKp]:=(1.20/Ks)*(Tb/Te); Ti:=2.00*Te; Td:=0.42*Te; end; 
-      P_ZiegNich:		begin K[iKp]:=(1.00/Ks)*(Tb/Te); end;
-      PI_ZiegNich:		begin K[iKp]:=(0.90/Ks)*(Tb/Te); Ti:=3.33*Te; end; 
-      PID_ZiegNich:		begin K[iKp]:=(1.20/Ks)*(Tb/Te); Ti:=2.00*Te; Td:=0.50*Te; end;       
-      P_SUM:			begin K[iKp]:=(1.00/Ks); Td:=0; end;
-      PD_SUM:			begin K[iKp]:=(1.00/Ks); Td:=0.33*Tsum; end;
-      PI_SUM:			begin K[iKp]:=(0.50/Ks); Ti:=0.50*Tsum; Td:=0; end;
-      PID_SUM:			begin K[iKp]:=(1.00/Ks); Ti:=0.66*Tsum; Td:=0.167*Tsum; end;
-	  PI_SUM_Fast:		begin K[iKp]:=(1.00/Ks); Ti:=0.70*Tsum; Td:=0; end;
-      PID_SUM_Fast:		begin K[iKp]:=(2.00/Ks); Ti:=0.80*Tsum; Td:=0.194*Tsum; end;      
-      P_CHR_GSA,
-      P_CHR_GFA: 		begin K[iKp]:=(0.30/Ks)*(Tb/Te); end;
-	  P_CHR_GS20,
-	  P_CHR_GF20: 		begin K[iKp]:=(0.70/Ks)*(Tb/Te); end; 
-      PI_CHR_GSA:		begin K[iKp]:=(0.60/Ks)*(Tb/Te); Ti:=4.00*Te; end;
-      PI_CHR_GFA:		begin K[iKp]:=(0.35/Ks)*(Tb/Te); Ti:=1.20*Tb; end;
-	  PI_CHR_GS20:		begin K[iKp]:=(0.70/Ks)*(Tb/Te); Ti:=2.30*Te; end;
-      PI_CHR_GF20:		begin K[iKp]:=(0.60/Ks)*(Tb/Te); Ti:=1.00*Tb; end;    
-      PID_CHR_GSA:		begin K[iKp]:=(0.95/Ks)*(Tb/Te); Ti:=2.40*Te; Td:=0.42*Te; end;
-      PID_CHR_GFA:		begin K[iKp]:=(0.60/Ks)*(Tb/Te); Ti:=1.00*Tb; Td:=0.50*Te; end;    
-      PID_CHR_GS20:		begin K[iKp]:=(1.20/Ks)*(Tb/Te); Ti:=2.00*Te; Td:=0.42*Te; end;
-      PID_CHR_GF20:		begin K[iKp]:=(0.95/Ks)*(Tb/Te); Ti:=1.35*Tb; Td:=0.47*Te; end; 
-	  P_Default,
-	  P_SAMAL_GSA,
-      P_SAMAL_GFA: 		begin K[iKp]:=(0.30/Ks)*(Tb/Te); end;
-      P_SAMAL_GS20,
-	  P_SAMAL_GF20:		begin K[iKp]:=(0.71/Ks)*(Tb/Te); end;
-      PI_Default,
-      PI_SAMAL_GFA:		begin K[iKp]:=(0.34/Ks)*(Tb/Te); Ti:=1.20*Tb; end;
-      PI_SAMAL_GF20:	begin K[iKp]:=(0.59/Ks)*(Tb/Te); Ti:=1.00*Tb; end;
-	  PI_SAMAL_GSA:		begin K[iKp]:=(0.59/Ks)*(Tb/Te); Ti:=4.00*Te; end;
-	  PI_SAMAL_GS20:	begin K[iKp]:=(0.71/Ks)*(Tb/Te); Ti:=2.30*Te; end;
-      PID_Default,
-      PID_SAMAL_GFA:	begin K[iKp]:=(0.59/Ks)*(Tb/Te); Ti:=1.00*Tb; Td:=0.50*Te; end; 
-      PID_SAMAL_GF20:	begin K[iKp]:=(0.95/Ks)*(Tb/Te); Ti:=1.35*Tb; Td:=0.47*Te; end;
-      PID_SAMAL_GSA:	begin K[iKp]:=(0.95/Ks)*(Tb/Te); Ti:=2.40*Te; Td:=0.42*Te; end;   
-      PID_SAMAL_GS20:	begin K[iKp]:=(1.20/Ks)*(Tb/Te); Ti:=2.00*Te; Td:=0.42*Te; end;
-      else				begin K[iKp]:=(1.00/Ks); end;
-  	end; // case
-  	if not IsNaN(Ti) then K[iKi]:=K[0]/Ti; 
-  	if not IsNan(Td) then K[iKd]:=K[0]*Td;
-  	SAY(loglvl,'PID_GetParaIn ['+GetEnumName(TypeInfo(PID_Method_t),ord(PIDMethod))+' '+loginfo+']: Ks: '+Num2Str(Ks,0,PID_nk8)+' Te: '+Num2Str(Te,0,PID_nk8)+' Tb: '+Num2Str(Tb,0,PID_nk8));
-  	SAY(loglvl,'PID_GetParaOut['+GetEnumName(TypeInfo(PID_Method_t),ord(PIDMethod))+' '+loginfo+']: Kp: '+Num2Str(K[0],0,PID_nk8)+' Ki: '+Num2Str(K[1],0,PID_nk8)+' Kd: '+Num2Str(K[2],0,PID_nk8)+' Ti: '+Num2Str(Ti,0,PID_nk8)+' Td: '+Num2Str(Td,0,PID_nk8));
-  end; // with
-  PID_GetPara:=res;
-end;
+end; 
 
 function  CSV_ESCvalue(const value:string):string;
 var sh:string;
@@ -17723,6 +17771,549 @@ begin
   CSV_MaintListToogleField:=addit;
 end;
 
+function  MovAvg(interval:longword; var InpArr,OutArr:array of single):longint; // moving average
+var i,j,l:longint; res:real;
+begin
+  res:=0; 
+  if Length(InpArr)>Length(OutArr) then l:=Length(OutArr) else l:=Length(InpArr); 
+  for i:= 1 to l do
+  begin
+    res:=res+InpArr[i-1];
+    if i>=interval then 
+    begin
+      res:=0;
+      for j:= 1 to interval do 
+      begin
+        res:=res+InpArr[i-interval+j-1];
+      end;
+      if interval<>0 then OutArr[i-1]:=res/interval else OutArr[i-1]:=0;
+    end else OutArr[i-1]:=res/i;
+  end;
+  MovAvg:=l;
+end;
+
+function  MovAvg(interval:longword; var InpArr,OutArr:array of real):longint; // moving average
+var i,j,l:longint; res:real;
+begin
+  res:=0; 
+  if Length(InpArr)>Length(OutArr) then l:=Length(OutArr) else l:=Length(InpArr); 
+  for i:= 1 to l do
+  begin
+    res:=res+InpArr[i-1];
+    if i>=interval then 
+    begin
+      res:=0;
+      for j:= 1 to interval do 
+      begin
+        res:=res+InpArr[i-interval+j-1];
+      end;
+      if interval<>0 then OutArr[i-1]:=res/interval else OutArr[i-1]:=0;
+    end else OutArr[i-1]:=res/i;
+  end;
+  MovAvg:=l;
+end;
+
+
+function Sigmoid(A,k,x,x0:real):real;
+// create S-Shape curve
+// A: maxHeight, k:steepness, x0:midpoint
+// e.g. Sigmoid(10,1,0, 5) -> 0.0669285
+// e.g. Sigmoid(10,1,5, 5) -> 5
+// e.g. Sigmoid(10,1,10,5) -> 9.9330715
+begin
+  try
+    Sigmoid:=A/(1+exp(-k*(x-x0)));
+  except
+    Sigmoid:=NaN;
+  end;
+end;
+
+function SigmoidIsA(A,k,epsilon,x0:real):real;
+// determine x value, where Sigmoid is nearly A (epsilon is allowed error e.g. 0.001)
+begin
+  try
+	SigmoidIsA:=-(ln(A/(A-epsilon)-1)/k)+x0; // for (epsilon>0)
+  except
+	SigmoidIsA:=NaN;
+  end;
+end;
+
+procedure tst_Sigmoid;
+const A=1.0; x0=0.0; k=1.0; eps=0.00000001; cnt=10;
+var xMinMax:real; n:longint;
+procedure _sig(x:real);    begin writeln('x: ',x:11:7,' y: ',Sigmoid(A,k,x,x0):11:7); end;
+begin 
+  writeln('x0:',x0:11:7,' k: ',k:11:7,' (steepness)');
+  writeln('A: ',A:11:7,' eps: ',eps:0:12); writeln;
+  xMinMax:=SigmoidIsA(A,k,eps,x0); 
+  _Sig(-xMinMax+2*x0); _Sig(0+x0); _Sig(xMinMax);
+  writeln;
+  for n:= 1 to (cnt+1) do _Sig( (n-1) * xMinMax*2/cnt - xMinMax ); 
+end;
+
+procedure tst_Sigmoid_normalized;
+// normalized x- and y-range 0..1 
+const A=1.0; x0=0.0; k=1.0; eps=0.00000001; cnt=10;
+var xMinMax:real; n:longint;
+procedure _sig(x:real);    begin writeln('x: ',x:11:7,' y: ',Sigmoid(A,k,x*xMinMax*2,xMinMax-(x0*xMinMax*2)):11:7); end;
+begin 
+  xMinMax:=SigmoidIsA(A,1,eps,0); 
+  writeln('x0:',x0:11:7,' k: ',k:11:7,' (steepness)');
+  writeln('A: ',A:11:7,' eps: ',eps:0:12); writeln;
+  _Sig(0); _Sig(0.5); _Sig(1);
+  writeln;
+  for n:= 1 to (cnt+1) do _Sig( (n-1) * 1/cnt ); 
+end;
+
+function  PID_DetAvgs(IdxStart,IdxEnd:longint; var avgnumIst,avgnumPInc:longint):boolean; 
+begin
+  avgnumIst:=(IdxEnd-IdxStart+1) div 10; // try moving average with lines/10 values
+  if avgnumIst>PID_AVGmaxNum_c then avgnumIst:=PID_AVGmaxNum_c; 
+  if avgnumIst<PID_AVGminNum_c then avgnumIst:=PID_AVGminNum_c;
+  avgnumPInc:=avgnumIst;  
+  PID_DetAvgs:=true;
+end;
+
+function  PID_FileLoad(StrList:TStringList; filnam,SearchCrit:string; var IdxStart,IdxEnd:longint):boolean;
+var _ok:boolean;
+begin
+  _ok:=TextFile2StringList(filnam,StrList);
+  if _ok	then _ok:=GiveStringListIdx2(StrList,SearchCrit,IdxStart,IdxEnd)
+  			else LOG_Writeln(Log_ERROR,'PID_FileLoad: input file '+filnam);
+  PID_FileLoad:=_ok;
+end;
+
+function  PID_TDR(var TickArr,ValArr,OutTickDeltaArr,OutValArr:array of PID_float_t):longint;
+//time derivative response
+var i,l:longint;
+begin 
+  if Length(ValArr)>Length(OutValArr) then l:=Length(OutValArr) else l:=Length(ValArr); 
+  if l>Length(TickArr) then l:=Length(TickArr); 
+  for i:= 1 to l do
+  begin
+    OutValArr[i-1]:=0; OutTickDeltaArr[i-1]:=0;
+    if (i>1) then
+    begin
+      OutTickDeltaArr[i-1]:=(TickArr[i-1]-TickArr[i-2]);
+      if OutTickDeltaArr[i-1]<>0 then 
+        OutValArr[i-1]:=	(ValArr [i-1]-ValArr [i-2])/OutTickDeltaArr[i-1];
+    end;
+  end;
+  PID_TDR:=l;
+end;
+
+function  PID_VectorStr(var pidarr:PID_array_t; vk,nk:integer; sep:char):string;
+var sh:string;
+begin 
+  sh:=	Num2Str(pidarr[iKp],vk,nk)+sep+
+  		Num2Str(pidarr[iKi],vk,nk)+sep+
+  		Num2Str(pidarr[iKd],vk,nk);
+  PID_VectorStr:=sh;
+end;
+
+function PID_VectorStr(var pidarr:PID_array_t; vk,nk:integer):string;
+var sh:string;
+begin 
+  sh:=	'Kp:'+Num2Str(pidarr[iKp],vk,nk)+' '+
+  		'Ki:'+Num2Str(pidarr[iKi],vk,nk)+' '+
+  		'Kd:'+Num2Str(pidarr[iKd],vk,nk);
+  PID_VectorStr:=sh;
+end;
+
+function  PID_Vector(Kp,Ki,Kd:PID_float_t):PID_array_t;
+var i:longint; pa:PID_array_t;
+begin
+  for i:=1 to Length(pa) do pa[i-1]:=0;
+  pa[iKp]:=Kp; pa[iKi]:=Ki; pa[iKd]:=Kd;
+  PID_Vector:=pa;
+end;
+
+function  PID_DetType(Te,Tb:PID_float_t):PID_Method_t;
+var meth:PID_Method_t; r:PID_float_t;
+begin
+  meth:=P_Default;
+  if not ( (Te=0) or (Tb=0) or IsNaN(Tb) or IsNaN(Te) ) then 
+  begin
+	r:=Tb/Te;									
+					 meth:=P_Default;	// gut regelbar 		-> P
+	if (r<=10)	then meth:=PI_Default;	// regelbar 			-> PI	
+	if (r<3)	then meth:=PID_Default; // schlecht regelbar	-> PID
+  end;
+  PID_DetType:=meth;
+end;
+
+function  PID_TimAdj(timadjfct:real; var Te,Tb,TSum:PID_float_t):integer;
+var res:integer; 
+begin
+  res:=-1;
+  if (not IsNaN(timadjfct)) and (timadjfct>0) then
+  begin 
+    res:=0;
+    if not IsNaN(Te) 	then begin Te:=Te	 *timadjfct; inc(res); end;
+    if not IsNaN(Tb) 	then begin Tb:=Tb	 *timadjfct; inc(res); end;
+    if not IsNaN(Tsum) 	then begin Tsum:=Tsum*timadjfct; inc(res); end;
+  end;
+  PID_TimAdj:=res;
+end;
+
+function  PID_sim(StrList:TStringList; simnr:integer):real;
+//PID_loctusec=4; PID_locsollval=5; PID_locistval=6; 
+const hdr1=';;;';
+var timadj:real; i:longint;
+//Prof. Dr. R. Kessler, FH-Karlsruhe, FB-MN, http://www.home.fh-karlsruhe.de/~kero0001, WendeTangReg3.doc
+// returns timebase and a list of values in csv format (for testing)
+// Strecke aus 10 gleichen PT1-Gliedern (WT10PT1.MDL)
+  procedure tlx(hdr,xs,ys,zs:string); begin StrList.add(hdr+xs+';'+zs+';'+ys); end;
+  procedure tl0(x,y:real); begin tlx(hdr1,AdjZahlDE(x/timadj,0,PID_nk8),AdjZahlDE(y,0,PID_nk8),'0'); end;
+  procedure tl1(x,y:real); begin tlx(hdr1,AdjZahlDE(x/timadj,0,PID_nk8),AdjZahlDE(y,0,PID_nk8),'1'); end;
+  procedure tl2(x,y:real); begin tlx('',  AdjZahlDE(x/timadj,0,PID_nk8),'',AdjZahlDE(y,0,PID_nk8)); end;
+begin
+  timadj:=1;
+  case simnr of
+    1:begin
+    	for i:=0 to 400 do 
+    	begin
+    	  if i<10 then tl2((i/10),0) else tl2((i/10),1);
+    	end;
+      end;
+    2:begin
+//    	for i:=0 to 300 do tl1(i/10,Sigmoid(1,0.5,i/10,10));
+    	for i:=0 to 19 do tl1(i/10,Sigmoid(1,0.5,i,10));
+      end;
+    else 
+      begin // WT10PT1.MDL
+  		tl0(0,0); 		tl1(1,0); 		tl1(2,0); 		tl1(3,0); 		tl1(4,0);
+  		tl1(5,0.01); 	tl1(6.25,0.05); tl1(7.5,0.15); 	tl1(8.75,0.25); 	
+  		tl1(10,0.4); 	tl1(11.25,0.6); tl1(12.5,0.75); tl1(13.75,0.85); 
+  		tl1(15,0.9);  	tl1(16.25,0.95);tl1(17.5,0.97); tl1(18.75,0.99);
+  		tl1(20,1);
+  		for i:=21 to 40 do tl1(i,1);
+      end;
+  end; // case
+  PID_sim:=timadj;
+end;
+
+procedure PID_DetShow(var struct:PID_Det_t; loglvl,collvl:T_ErrorLevel; hdr,trl:string);
+begin
+  with struct do
+  begin
+	SAY(loglvl,collvl, hdr+
+		' Ks:'+Num2Str(Ks,0,1)+' Ti:'+Num2Str(Ti,0,PID_nk8)+' Td:'+Num2Str(Td,0,PID_nk8)+
+		' Te:'+Num2Str(Te,0,PID_nk8)+' Tb:'+Num2Str(Tb,0,PID_nk8)+' PIDmeth:'+GetEnumName(TypeInfo(PID_Method_t),ord(PIDMethod))+
+		' SmplTim: Avg='+Num2Str(SampleTimeAvg,0,1)+' AdjFctr='+Num2Str(SampleTimeAdjFactor,0,6)+trl);
+  end;
+end;
+
+function  PID_DetPara(loglvl:t_ErrorLevel; StrList:TStringList; idxStart,idxEnd,smoothdata,smoothtdr,loctim,locist,locSetPoint:longint; StoerSprung,timadjfct:real; var PID_Det:PID_Det_t; tst:boolean; filout:string):integer;
+//function  PID_DetPara(loglvl:t_ErrorLevel; StrList:TStringList; idxStart,idxEnd,smoothdata,smoothtdr,loctim,locist,locSetPoint:longint; StoerSprung,timadjfct:real; var Ks,Te,Tb,Tsum,SampleTimeAvg:PID_float_t; tst:boolean; filout:string):integer;
+//determines Ks,Te,Tb out of a given sensor data (.csv)
+//Ks,Te,Tb for feeding PID_GetPara
+//Prof. Dr. R. Kessler, FH-Karlsruhe, FB-MN, http://www.home.fh-karlsruhe.de/~kero0001, WendeTangReg3.doc
+//StepResponseList.csv	-> using values t(usec) and ist. FieldNum 4&6. SetPoint/soll FieldNum 5
+//pwm%;pidnr;cnt;t(usec);soll;ist;avg;preached;t2preach;preachedmax;t2preachmax;pincms;pok;calc;stdev;pon;ppc
+//0,45;6;0;0;132;-0,15259;-0,15259;133,28756;552630;133,44015;557774;0,24146382;1;0;7,92544758;1;0
+//...
+//0,45;6;1081;619469;132;129,85428;129,85428;133,28756;552630;133,44015;557774;0,24146382;1;133,4401502;7,92544758;0;0
+var _ok:boolean; res,i,linecnt,idx,avgnumIst,avgnumTDR:longint; _tl:TStringList;
+	maxZ,minZ,tZ,maxXp,tWP,XWP,t1,t2,_Te,_Tb,wt,scaleXp:PID_float_t; 
+  	A_t,A_td,A_W,A_U,A_X,A_TDR,A_Xp: array of PID_float_t;
+begin
+  _tl:=TStringList.create; 
+  with PID_Det do
+  begin
+//writeln('PID_DetPara filout:',filout,' ',idxStart,' ',idxEnd,' ',tst);
+  	linecnt:=idxEnd-idxStart+1; res:=-1; 
+  	SampleTimeAdjFactor:=timadjfct; // PID_timadj_c=0.000001; // usec sensor data
+  	Ks:=NaN; Te:=Nan; Tb:=NaN; Tsum:=Nan; 
+  	if (linecnt>0) then
+  	begin
+      Ks:=1; scaleXp:=1; //anno:='';
+      SetLength(A_U,  linecnt); 	SetLength(A_X, linecnt); 	SetLength(A_t,linecnt); 
+      SetLength(A_TDR,linecnt); 	SetLength(A_Xp,linecnt);  	SetLength(A_W,linecnt);
+      SetLength(A_td, linecnt);
+      for i:=idxStart to idxEnd do
+      begin // ArrFill 
+      	_ok:=true;
+      	if not Str2Num(AdjZahl(CSV_Item(StrList[i],',',loctim)),	 A_t[i-idxStart]) then _ok:=false;	// timeval
+      	if not Str2Num(AdjZahl(CSV_Item(StrList[i],',',locist)),	 A_U[i-idxStart]) then _ok:=false;	// istval
+      	
+      	if (locSetPoint>0) then 
+      	begin
+      	  if not Str2Num(AdjZahl(CSV_Item(StrList[i],',',locSetPoint)),A_W[i-idxStart]) then _ok:=false;// SetPoint
+      	end	else A_W[i-idxStart]:=0;
+      	
+      	if not _ok then LOG_Writeln(LOG_ERROR,'PID_DetPara['+Num2Str(i,0)+'] value not ok: '+StrList[i]);
+//	  	writeln(i:5,' ',A_t[i-idxStart]:8:5,' SP:',A_W[i-idxStart]:8:5,' PV:',A_U[i-idxStart]:8:5);
+//	  	writeln(i:5,' ',A_t[i-idxStart]:8:5,' PV:',A_U[i-idxStart]:8:5);
+      end;
+              
+      avgnumIST:=smoothdata; if avgnumIST<1 then avgnumIST:=1; // 1=no smoothing
+      avgnumTDR:=smoothtdr;  if avgnumTDR<1 then avgnumTDR:=1;
+      
+//writeln('ok ',_ok,' ',avgnumIST,' ',avgnumTDR);
+    			
+      MovAvg(avgnumIst,A_U,A_X);		// smoothen raw input sensor data
+      if (locSetPoint<=0) then
+      begin				
+      	maxZ:=MaxValue(A_X);
+      	minZ:=maxZ;
+      	for i:= 1 to Length(A_W) do A_W[i-1]:=maxZ;
+      end
+      else
+      begin
+        minZ:=MinValue(A_W);				
+      	maxZ:=MaxValue(A_W);
+      end;
+  
+      PID_TDR(A_t,A_X,A_td,A_TDR);	
+      SampleTimeAvg:=Mean(PDouble(@A_td[1]),(Length(A_td)-1))*SampleTimeAdjFactor;
+//      writeln('SampleTimeAvg: ',SampleTimeAvg:0:4);
+
+      MovAvg(avgnumTDR,A_TDR,A_Xp);		// smoothen t-derived response
+      if minZ=maxZ then minZ:=0;
+      idx:=SearchValIdx(A_W,maxZ,PID_epsilon_c,true);
+      if idx<0 then tZ:=0 else tZ:=A_t[idx];		// Zeit tZ des Z-Sprungs finden 
+      maxXp:=MaxValue(A_Xp);
+      idx:=SearchValIdx(A_Xp,maxXp,PID_epsilon_c,true); 	// Koordinaten tWP und XWP suchen
+      if (idx>=0) then
+      begin
+      	maxXp:= maxXp;
+      	tWP:=A_t[idx]; XWP:=A_X[idx];	// Wendepunkt
+      	t1:= (XWP-minZ)/maxXp;			// t1= Zeitabschn. unter Wendetangente bis minZ
+      	t2:= (maxZ-XWP)/maxXp;			// t2= Zeitabschn. oberhalb Wendetangente bis maxZ
+      	Te:= tWP-t1-tZ;					// Te= Verzugszeit (Tu)
+      	Tb:= t1+t2;						// Tb= Ausgleichszeit (Tg)
+      	if (StoerSprung<>0) then
+    	  Ks:=maxZ/StoerSprung;			// Ks= Streckenverstärkung = Endwert der Sprungantwort geteilt durch Höhe des Störsprungs. 
+
+      	if tst then
+      	begin
+//	      create .csv output // overwrite Input StringList !!!!!!!!
+	      _tl.clear;
+	  
+	      scaleXp:=maxZ/maxXp;				// normalize TDR
+          _tl.add('time,U,W,U(avg='+Num2Str(avgnumIst,0)+'),Xp(scale='+Num2Str(scaleXp,0,PID_nk8)+'),WT');
+          for i:=1 to linecnt do
+          begin            
+		  	if A_t[i-1]<(tWP-t1) then wt:=minZ else 
+		      if A_t[i-1]>(tWP+t2) then wt:=maxZ 
+			  	else wt:=(A_t[i-1]-(tWP-t1))/Tb*(maxZ-minZ); // calc Wendetangente        
+          	_tl.add(
+        		Num2Str(A_t [i-1],0)+','+
+        		Num2Str(A_U [i-1],0,PID_nk8)+','+
+            	Num2Str(A_W [i-1],0,PID_nk8)+','+
+            	Num2Str(A_X [i-1],0,PID_nk8)+','+
+    	  		Num2Str(A_Xp[i-1]*scaleXp,0,PID_nk8)+','+
+    	  		Num2Str(wt,0,PID_nk8)
+				);
+          end;  
+          if (filout<>'') then 
+          begin
+    	  	SAY(loglvl,'PID_DetPara: writing to ('+Num2Str(_tl.count,0)+') '+filout);
+    	  	if not StringList2TextFile(filout,_tl) then
+			  LOG_Writeln(LOG_ERROR,'PID_DetPara: can not write '+filout);
+          end;
+//    	  ShowStringList(_tl);   
+          scaleXp:=1;
+      	end; // tst
+
+(*      anno:=
+      	'WP='+Num2Str(tWP,0,PID_nk8)+';'+Num2Str(XWP, 0,PID_nk8)+','+
+      	'Te='+Num2Str(Te, 0,PID_nk8)+','+'Tb='+Num2Str(Tb,0,PID_nk8)+','+
+        'Ks='+Num2Str(Ks, 0,PID_nk8)+','+'STAvg='+Num2Str(SampleTimeAvg,0,PID_nk8); *)
+      
+      	_Te:=Te; _Tb:=Tb;					// keep calced Te and Tb
+      	if PID_TimAdj(SampleTimeAvg,Te,Tb,TSum)>0 then
+      	begin
+      	  PIDMethod:=PID_DetType(Te,Tb);	// Determine P/PI/PID
+      	  res:=ord(PIDMethod);
+          SAY(loglvl,	'tZ/minZ/maxZ/maxXp/SampleTimeAvg/StoerSprung: '+
+          				Num2Str(tZ,0,PID_nk8)+' '+Num2Str(minZ,0,PID_nk8)+' '+
+          				Num2Str(maxZ,0,PID_nk8)+' '+Num2Str(maxXp,0,PID_nk8)+' '+
+          				Num2Str(SampleTimeAvg,0,PID_nk8)+' '+Num2Str(StoerSprung,0,PID_nk8)); 
+          SAY(loglvl,	'avgnumIST/avgnumTDR: '+Num2Str(avgnumIST,0,PID_nk8)+' '+Num2Str(avgnumTDR,0,PID_nk8)); 
+          SAY(loglvl,	'WendePunkt['+Num2Str(idx,0)+']: '+
+          				Num2Str(tWP,0,PID_nk8)+'/'+Num2Str(XWP,0,PID_nk8));
+	      SAY(loglvl,	't1/t2: '+Num2Str(t1,0,PID_nk8)+' '+Num2Str(t2,0,PID_nk8));
+	      SAY(loglvl,	'Ks/Te/Tb: '+
+	      				Num2Str(Ks,0,PID_nk8)+' '+ Num2Str(_Te,0,PID_nk8)+' '+
+	      				Num2Str(_Tb,0,PID_nk8));    
+	      SAY(loglvl,	'TimAdj SampleTimeAvg/Te/Tb/suggestedPIDMethod: '+
+	      				Num2Str(SampleTimeAvg,0,PID_nk8)+' '+Num2Str(Te,0,PID_nk8)+' '+Num2Str(Tb,0,PID_nk8)+' '+GetEnumName(TypeInfo(PID_Method_t),res));
+      	end else LOG_Writeln(LOG_ERROR,'PID_DetPara: timeadj wrong paras');
+      end else LOG_Writeln(LOG_ERROR,'PID_DetPara: Xp not found (wrong epsilon?)');
+      SetLength(A_U,0);		SetLength(A_X,0); 	SetLength(A_t,0);	SetLength(A_td,0);
+      SetLength(A_TDR,0);	SetLength(A_Xp,0);	SetLength(A_W,0);	
+  	end else LOG_Writeln(LOG_ERROR,'PID_DetPara: wrong parameter/empty list');
+  end; // with
+  _tl.free;
+  PID_DetPara:=res;
+end;
+
+function  PID_WT(fnIN,fnOUT:string; PID_loctTIMusec,PID_locPVval,PID_locSPval:integer; lvl:T_ErrorLevel; var PID_Det:PID_Det_t):boolean;
+// Wendetangentenverfahren
+// e.g. call PID_WT('myfile.csv',4,6,5)
+// out: PID_Det as input for PID_GetPara
+// out: csv-file:
+// time,U,W,U(avg=50),Xp(scale=467374.46494810),WT
+// 0,7.24804000,242.00000000,7.24804000,0.00000000,0.00000000
+// in:  csv-file
+// pwm%,pidnr,cnt,t(usec),soll,ist,avg,preached,t2preach,preachedmax,t2preachmax,pincms,pok,calc,stdev,pon,ppc,pmethod
+// define in PID_loctTIMusec,PID_locPVval,PID_locSPval field nums that should used for timeus,ProcessValue,SetPoint
+const PID_timadj_c=0.0000001; // us adjust
+var _ok:boolean; _idxa,_idxe,avgnumPV,avgnumTDR:longint;
+	_tl:TStringList; 
+begin
+  _tl:=TStringList.create;
+  _ok:=TextFile2StringList(fnIN,_tl); // read csv file
+  if _ok then
+  begin
+    if (_tl.count>0) then
+    begin
+      _idxe:=_tl.count-1;
+      _idxa:=1; // ommit Hdr e.g. time,U,W,U(avg=50),Xp(scale=467374.46494810),WT
+      
+      PID_DetAvgs(_idxa,_idxe,avgnumPV,avgnumTDR);
+      avgnumTDR:=2*avgnumTDR;    
+	  PID_DetPara(lvl,_tl,_idxa,_idxe,avgnumPV,avgnumTDR,PID_loctTIMusec,PID_locPVval,PID_locSPval,1,PID_timadj_c,PID_Det,true,fnOUT); 
+	end;
+  end else LOG_Writeln(LOG_ERROR,'PID_WT: file not exist '+fnIN);
+  _tl.free;
+  PID_WT:=_ok;
+end;
+
+function  PID_DetCreate(myPIDmethod:PID_Method_t; myKS,myTe,myTb,myTimeBase_sec,mySampleTime:PID_float_t):PID_Det_t;
+// mySampleTime: Zeitschritt e.g. 0.01 for 10ms
+// Input Structure for PID_GetPara
+var PID_Det:PID_Det_t;
+begin
+  with PID_Det do 
+  begin 
+    Ti:=NaN; Td:=NaN;
+    PIDMethod:=myPIDmethod;
+	SampleTimeAdjFactor:=myTimeBase_sec;	// time base. for microsec (us) -> 0.000001 
+	SampleTimeAvg:=		 mySampleTime;		// will hold sensor data sample time. e.g. 500us -> 500
+	Ks:=myKs; 
+	Te:=myTe; Tb:=myTb; 
+	Tsum:=0; // currently not implemented
+  end;
+  PID_DetCreate:=PID_Det;
+end;
+function  PID_DetCreate(myKS,myTe,myTb,myTimeBase_sec,mySampleTime:PID_float_t):PID_Det_t;
+begin PID_DetCreate:=PID_DetCreate(PID_DetType(myTe,myTb),myKS,myTe,myTb,myTimeBase_sec,mySampleTime); end;
+
+function  PID_GetPara(loglvl:t_ErrorLevel; var PID_Det:PID_Det_t; var K:PID_array_t; loginfo:string):integer;
+//function  PID_GetPara(loglvl:t_ErrorLevel; Ks,Te,Tb,Tsum:PID_float_t; Method:PID_Method_t; var Ti,Td:PID_float_t; var K:PID_array_t; loginfo:string):integer;
+//calcs Kp,Ki,Kd,Ti,Td for feeding PID_Init
+//Input:  Statische Verstärkung (Ks), 
+//Input:  Verzugszeit (Te) und Ausgleichszeit (Tb) in sec
+//Input:  Px_SUM (TSum)
+//Input:  Einstellregel (Method)
+//Output: Ti,Td; Karray:Kp,Ki,Kd
+//
+//https://de.wikipedia.org/wiki/Faustformelverfahren_(Automatisierungstechnik)
+//Script: Spezialgebiete der Steuer- und Regelungstechnik WS 2008/09 FH Dortmund Schriftliche Ausarbeitung Thema: PID - Einstellregeln
+//http://www.home.hs-karlsruhe.de/~kero0001/wendtang/wendtang1.html
+//Einstellregeln nach Oppelt, ZieglerNichols oder 
+//Chien/Hrones/Reswick, Samal:  
+//GSA:  gutes Störverhalten, aperiodisch (schwingungsfrei)
+//GFA:  gutes Führungsverhalten, aperiodisch (schwingungsfrei)
+//GS20: gutes Störverhalten, 20% Überschwingen
+//GF20: gutes Führungsverhalten, 20% Überschwingen
+//
+//Tn/Ti: Nachstellzeit	(DIN19226/DIN EN 60027-6)
+//Tv/Td: Vorhaltzeit	(DIN19226/DIN EN 60027-6)
+var res:integer;
+begin 
+  with PID_Det do
+  begin
+    K:=PID_Vector(1,0,0); Ti:=NaN; Td:=NaN; res:=-1;
+	try
+  	  if PIDMethod IN [P_SUM..PID_SUM_Fast] 
+      	then if IsNaN(Ks) or IsNaN(Tsum)			or (Ks=0) then exit(res)
+      	else if IsNaN(Ks) or IsNaN(Tb) or IsNaN(Te) or (Ks=0) or (Te<=0) or (Tb<0) then exit(res);
+  	  res:=ord(PIDMethod);
+  	  case PIDMethod of
+      	P_Oppelt:		begin K[iKp]:=(1.00/Ks)*(Tb/Te); end; 
+      	PI_Oppelt:		begin K[iKp]:=(0.80/Ks)*(Tb/Te); Ti:=3.00*Te; end; 
+      	PID_Oppelt:		begin K[iKp]:=(1.20/Ks)*(Tb/Te); Ti:=2.00*Te; Td:=0.42*Te; end; 
+      	P_ZiegNich:		begin K[iKp]:=(1.00/Ks)*(Tb/Te); end;
+      	PI_ZiegNich:	begin K[iKp]:=(0.90/Ks)*(Tb/Te); Ti:=3.33*Te; end; 
+      	PID_ZiegNich:	begin K[iKp]:=(1.20/Ks)*(Tb/Te); Ti:=2.00*Te; Td:=0.50*Te; end;       
+      	P_SUM:			begin K[iKp]:=(1.00/Ks); Td:=0; end;
+      	PD_SUM:			begin K[iKp]:=(1.00/Ks); Td:=0.33*Tsum; end;
+      	PI_SUM:			begin K[iKp]:=(0.50/Ks); Ti:=0.50*Tsum; Td:=0; end;
+      	PID_SUM:		begin K[iKp]:=(1.00/Ks); Ti:=0.66*Tsum; Td:=0.167*Tsum; end;
+	  	PI_SUM_Fast:	begin K[iKp]:=(1.00/Ks); Ti:=0.70*Tsum; Td:=0; end;
+      	PID_SUM_Fast:	begin K[iKp]:=(2.00/Ks); Ti:=0.80*Tsum; Td:=0.194*Tsum; end;      
+      	P_CHR_GSA,
+      	P_CHR_GFA: 		begin K[iKp]:=(0.30/Ks)*(Tb/Te); end;
+	  	P_CHR_GS20,
+	  	P_CHR_GF20: 	begin K[iKp]:=(0.70/Ks)*(Tb/Te); end; 
+      	PI_CHR_GSA:		begin K[iKp]:=(0.60/Ks)*(Tb/Te); Ti:=4.00*Te; end;
+      	PI_CHR_GFA:		begin K[iKp]:=(0.35/Ks)*(Tb/Te); Ti:=1.20*Tb; end;
+	  	PI_CHR_GS20:	begin K[iKp]:=(0.70/Ks)*(Tb/Te); Ti:=2.30*Te; end;
+      	PI_CHR_GF20:	begin K[iKp]:=(0.60/Ks)*(Tb/Te); Ti:=1.00*Tb; end;    
+      	PID_CHR_GSA:	begin K[iKp]:=(0.95/Ks)*(Tb/Te); Ti:=2.40*Te; Td:=0.42*Te; end;
+      	PID_CHR_GFA:	begin K[iKp]:=(0.60/Ks)*(Tb/Te); Ti:=1.00*Tb; Td:=0.50*Te; end;    
+      	PID_CHR_GS20:	begin K[iKp]:=(1.20/Ks)*(Tb/Te); Ti:=2.00*Te; Td:=0.42*Te; end;
+      	PID_CHR_GF20:	begin K[iKp]:=(0.95/Ks)*(Tb/Te); Ti:=1.35*Tb; Td:=0.47*Te; end; 
+	  	P_Default,
+	  	P_SAMAL_GSA,
+      	P_SAMAL_GFA: 	begin K[iKp]:=(0.30/Ks)*(Tb/Te); end;
+      	P_SAMAL_GS20,
+	  	P_SAMAL_GF20:	begin K[iKp]:=(0.71/Ks)*(Tb/Te); end;
+      	PI_SAMAL_GFA:	begin K[iKp]:=(0.34/Ks)*(Tb/Te); Ti:=1.20*Tb; end;
+      	PI_SAMAL_GF20:	begin K[iKp]:=(0.59/Ks)*(Tb/Te); Ti:=1.00*Tb; end;
+      	PI_Default,
+	  	PI_SAMAL_GSA:	begin K[iKp]:=(0.59/Ks)*(Tb/Te); Ti:=4.00*Te; end;
+	  	PI_SAMAL_GS20:	begin K[iKp]:=(0.71/Ks)*(Tb/Te); Ti:=2.30*Te; end;
+      	PID_SAMAL_GFA:	begin K[iKp]:=(0.59/Ks)*(Tb/Te); Ti:=1.00*Tb; Td:=0.50*Te; end; 
+      	PID_SAMAL_GF20:	begin K[iKp]:=(0.95/Ks)*(Tb/Te); Ti:=1.35*Tb; Td:=0.47*Te; end;
+      	PID_Default,
+      	PID_SAMAL_GSA:	begin K[iKp]:=(0.95/Ks)*(Tb/Te); Ti:=2.40*Te; Td:=0.42*Te; end;   
+      	PID_SAMAL_GS20:	begin K[iKp]:=(1.20/Ks)*(Tb/Te); Ti:=2.00*Te; Td:=0.42*Te; end;
+      	else			begin K[iKp]:=(1.00/Ks); end;
+  	  end; // case
+  	  if not IsNaN(Ti) and (Ti<>0) then K[iKi]:=K[iKp]/Ti; 
+  	  if not IsNan(Td) then K[iKd]:=K[iKp]*Td;
+  	  SAY(loglvl,'PID_GetParaIn ['+Trimme(GetEnumName(TypeInfo(PID_Method_t),ord(PIDMethod))+' '+loginfo,3)+']: Ks: '+Num2Str(Ks,0,PID_nk8)+' Te: '+Num2Str(Te,0,PID_nk8)+'s Tb: '+Num2Str(Tb,0,PID_nk8)+'s');
+  	  SAY(loglvl,'PID_GetParaOut['+Trimme(GetEnumName(TypeInfo(PID_Method_t),ord(PIDMethod))+' '+loginfo,3)+']: Kp: '+Num2Str(K[0],0,PID_nk8)+' Ki: '+Num2Str(K[1],0,PID_nk8)+'  Kd: '+Num2Str(K[2],0,PID_nk8)+' Ti: '+Num2Str(Ti,0,PID_nk8)+'s Td: '+Num2Str(Td,0,PID_nk8)+'s');
+  	except
+	  LOG_Writeln(LOG_ERROR,'PID_GetPara['+GetEnumName(TypeInfo(PID_Method_t),ord(PIDMethod))+' '+loginfo+']: Ks: '+Num2Str(Ks,0,PID_nk8)+' Te: '+Num2Str(Te,0,PID_nk8)+'s Tb: '+Num2Str(Tb,0,PID_nk8)+'s');
+  	end;
+  end; // with
+  PID_GetPara:=res;
+end;
+
+procedure PID_Test_GetPara;
+var PID_Det:PID_Det_t; K:PID_array_t;
+begin
+  with PID_Det do begin PIDMethod:=PID_SAMAL_GSA; Ks:=1; Tb:=1; Te:=1; end;
+  PID_GetPara(LOG_INFO,PID_Det,K,'Test GetPara');
+
+  with PID_Det do begin PIDMethod:=PI_CHR_GFA; Ks:=1; Tb:=1; Te:=1; end;
+  PID_GetPara(LOG_INFO,PID_Det,K,'Test GetPara');  
+  
+  with PID_Det do begin PIDMethod:=PI_Default; Ks:=1; Tb:=1; Te:=1; end;
+  PID_GetPara(LOG_INFO,PID_Det,K,'Test GetPara');
+  
+  with PID_Det do begin PIDMethod:=PID_Default; Ks:=1; Tb:=1; Te:=1; end;
+  PID_GetPara(LOG_INFO,PID_Det,K,'Test GetPara');
+  
+  with PID_Det do begin PIDMethod:=PI_SAMAL_GSA; Ks:=1; Tb:=1; Te:=1; end;
+  PID_GetPara(LOG_INFO,PID_Det,K,'Test GetPara');
+  
+  with PID_Det do begin PIDMethod:=PI_Default; Ks:=242; Tb:=468.782315971190660; Te:=30.625848362291332; end;
+  PID_GetPara(LOG_INFO,PID_Det,K,'Test GetPara');  
+  
+  with PID_Det do begin PIDMethod:=PI_Default; Ks:=242; Tb:=0.468782315971190660; Te:=0.030625848362291332; end;
+  PID_GetPara(LOG_INFO,PID_Det,K,'Test GetPara'); 
+  
+  with PID_Det do begin PIDMethod:=PI_Default; Ks:=242; Tb:=0.000468782315971190660; Te:=0.000030625848362291332; end;
+  PID_GetPara(LOG_INFO,PID_Det,K,'Test GetPara'); 
+end;
+
 procedure PID_SimCSV(tl:TStringList; var PID_Det:PID_Det_t; var pid:PID_Struct_t);
 // time;td;U;cnt;W;U(avg);Xp;WT
 var i:longint; r,OldVal,NewVal,Stellgroesse,SetPoint:PID_float_t; sh:string; 
@@ -17738,7 +18329,8 @@ begin
         if Str2Num(AdjZahl(CSV_Item(sh,';',5)),SetPoint)	and
            Str2Num(AdjZahl(CSV_Item(sh,';',6)),NewVal) 		then
         begin
-	      Stellgroesse:=	PID_Calc(pid,SetPoint,NewVal,false);
+	      PID_Calc(pid,SetPoint,NewVal,false);
+	      Stellgroesse:=pid.PID_ControlOut;
 	      r:=				r+(Stellgroesse/(SetPoint/PID_Det.Ks))*(NewVal-OldVal);
 	      tl[i-1]:=tl[i-1]+';'+AdjZahlDE(r,0,PID_nk8)+';'+AdjZahlDE(Stellgroesse*PID_Det.Ks, 0,PID_nk8);
 	      OldVal:=NewVal;
@@ -17747,90 +18339,6 @@ begin
     end;
   end; // with
 end;
-
-procedure PID_TestSim;
-var _tl:TStringList; idxa,idxe,avgnumIst,avgnumPInc:longint;
-	timadj,StoerSprung:PID_float_t; K:PID_array_t;
-	pid1:PID_Struct_t; PID_Det:PID_Det_t;
-begin
-  _tl:=TStringList.create; 
-  timadj:=PID_sim(_tl,0); idxa:=0; idxe:=_tl.count-1; ShowStringList(_tl); 
-  PID_DetAvgs(idxa,idxe,avgnumIst,avgnumPInc);     
-  StoerSprung:=1; avgnumIst:=1; avgnumPInc:=1; // demo, no data smoothing.
-  PID_DetPara(LOG_INFO,_tl,idxa,idxe,avgnumIst,avgnumPInc,PID_loctusec,PID_locistval,PID_locsollval,StoerSprung,timadj,PID_Det,true,''); 
-  PID_Det.PIDMethod:=PID_ZiegNich;
-  PID_GetPara(LOG_INFO,PID_Det,K,'');
-  writeln('PID_TestSim Kp:',K[iKp]:0:2,' Ki:',K[iKi]:0:2,' Kd:',K[iKd]:0:2);
-//  Kp:=1.1;  Ki:=0.2;  Kd:=0.1;	// Kp=1.1,Ki=0.2,Kd=0.1; //   Kp:=1; Ki:=0; Kd:=0.5;
-  PID_Init(pid1,1,500,false,0,-25,25,1000,0,K,PID_Vector(-1.25,1.25,1000),PID_Vector(PID_twiddle_saveattol,PID_twiddle_tolerance,PID_twiddle_tolNOTsav));
-  PID_SimCSV(_tl,PID_Det,pid1);
-  ShowStringList(_tl); 
-  _tl.free;
-end;  
-
-procedure PID_InitTwiddle(var PID_Twiddle:PID_Twiddle_t; ID:longint; enab:boolean; itermax:longword; ap,adp,tol:PID_array_t);
-begin
-  with PID_Twiddle do
-  begin
-    twiddle_ID:=		ID;
-    twiddle_on:=		enab;
-	twiddle_best_error:=MaxFloat;
-	twiddle_sum_dp:=	MaxFloat;
-	twiddle_idx:=		0;
-	twiddle_state:=		0;
-	twiddle_iterations:=0;
-	twiddle_intermax:=	itermax;
-	twiddle_saved:=		false;
-	twiddle_tol:=		tol;
-	p:=ap; p0:=p;	dp:=adp;  
-//	ps:=p; dps:=dp;
-  end; // with
-  PID_SetTwiddle_KeyName(PID_Twiddle,'','');
-end;
-procedure PID_InitTwiddle(var PID_Twiddle:PID_Twiddle_t; ID:longint); // try some init values
-begin 
-  PID_InitTwiddle(PID_Twiddle,ID,false,500,
-  	PID_Vector(0,0,0),
-  	PID_Vector(1,1,1),
-  	PID_Vector(PID_twiddle_saveattol,PID_twiddle_tolerance,PID_twiddle_tolNOTsav)); 
-end;
-
-procedure PID_UpdateError(var PID_Twiddle:PID_Twiddle_t; error:PID_float_t);
-var errold:PID_float_t;
-begin
-  with PID_Twiddle do
-  begin
-	errold:= 	err[iKp];
-	err[iKp]:=	error;
-	err[iKi]:= 	err[iKi] + error;
-	err[iKd]:= 	error - errold;
-//if (twiddle_best_error=MaxFloat) then twiddle_best_error:=error;
-  end; // with
-end;
-
-function  xPID_TotalError(var PID_Twiddle:PID_Twiddle_t; K:PID_array_t):PID_float_t;
-begin
-  with PID_Twiddle do
-  begin
-	xPID_TotalError:= err[iKp];
-  end; // with
-end;
-
-function  PID_TotalError(var PID_Twiddle:PID_Twiddle_t; K:PID_array_t):PID_float_t;
-begin
-  with PID_Twiddle do
-  begin
-	PID_TotalError:= - K[iKp]*err[iKp] - K[iKi]*err[iKi] - K[iKd]*err[iKd];
-  end; // with
-end;
-
-(*procedure PID_InitPara(var PID_Struct:PID_Struct_t; K:PID_array_t);
-begin 
-  with PID_Struct do 
-  begin 
-	PID_K:=K; PID_Twiddle.err:=PID_Vector(0,0,0);
-  end; // with
-end;*)
 
 function  Twiddle_Info(var PID_Twiddle:PID_Twiddle_t; fmt:longint):string;
 const nkc=15; gkc=nkc+5;
@@ -17887,18 +18395,228 @@ begin
 			  for li:=1 to Length(PID_Ksav)	do outstr:=outstr+Num2Str(PID_Ksav[li-1],gkc,nkc)+' ';
 			end;
 	    3:	begin
-			  outstr:='ControlOut,MinOutput0,MinOutput,MaxOutput: ';
-			  outstr:=outstr+Num2Str(PID_ControlOut,gkc,nkc)+' '+Num2Str(PID_MinOutput0,gkc,nkc)+' '+Num2Str(PID_MinOutput,gkc,nkc)+' '+Num2Str(PID_MaxOutput,gkc,nkc);
+			  outstr:='ControlOut,MinOutput,MaxOutput:   ';
+			  outstr:=outstr+Num2Str(PID_ControlOut,gkc,nkc)+' '+Num2Str(PID_MinOutput,gkc,nkc)+' '+Num2Str(PID_MaxOutput,gkc,nkc);
 			end;			
 	    4:	begin
 			  outstr:='PID_SampleTime,WindupResetValue,TwiddleEnable,PID_IntImprove,PID_DifImprove: ';
-			  outstr:=outstr+Num2Str(PID_SampleTime_us/1000,0,2)+'ms '+Num2Str(PID_IntegratedWindupResetValue,0,2)+' '+Bool2Str(PID_Twiddle.twiddle_on)+' '+Bool2Str(PID_IntImprove)+' '+Bool2Str(PID_DifImprove);
+			  outstr:=outstr+Num2Str(PID_SampleTime_us/1000,0,4)+'ms '+Num2Str(PID_IntegratedWindupResetValue,0,2)+' '+Bool2Str(PID_Twiddle.twiddle_on)+' '+Bool2Str(PID_IntImprove)+' '+Bool2Str(PID_DifImprove);
 			end;
+	    5:	begin
+			  outstr:='TAKp,Ki,Kd:  '; 
+			  for li:=1 to Length(PID_KTa)	do outstr:=outstr+Num2Str(PID_KTa[li-1],gkc,nkc)+' ';
+			end;
+	    6:	begin
+			  outstr:='LimsKp,Ki,Kd:'; 
+			  for li:=1 to Length(PID_Lims)	do outstr:=outstr+Num2Str(PID_Lims[li-1],gkc,nkc)+' ';
+			end;
+		7:	outstr:=PID_Info(PID_Struct,1)+LF+PID_Info(PID_Struct,5)+LF+PID_Info(PID_Struct,6)+LF+
+					PID_Info(PID_Struct,3)+LF+PID_Info(PID_Struct,4);
 	    10..15: outstr:=Twiddle_Info(PID_Twiddle,fmt);
 	   else	LOG_Writeln(LOG_ERROR,'PID_Info: unknown fmt: '+Num2Str(fmt,0));
 	  end; // case
   end; // with
   PID_Info:=outstr;
+end;
+
+procedure PID_Twiddle_LogLevel(var PID_Twiddle:PID_Twiddle_t; lvl1,lvl2:T_ErrorLevel);
+begin
+  with PID_Twiddle do
+  begin
+    twiddle_LogLevel:=	lvl1;
+    twiddle_LogColor:=	lvl2;
+  end; // with
+end;
+
+procedure PID_EnableTwiddle_Save(var PID_Twiddle:PID_Twiddle_t; enable:boolean);
+// enable/disable writing optimization data to .ini-file
+begin
+  with PID_Twiddle do
+  begin
+  	if enable then 
+  	begin
+  	  twiddle_save:=((Trimme(twiddle_INI_sect,3)<>'') and (Trimme(twiddle_INI_key,3)<>''));
+  	  if not twiddle_save then
+  	   LOG_Writeln(LOG_ERROR,'PID_EnableTwiddle_Save: no enable, due to missing sect/key name');
+  	end else twiddle_save:=false;
+  end; // with
+end;
+
+procedure PID_SetTwiddle_KeyName(var PID_Twiddle:PID_Twiddle_t; sect,key:string);
+// set section and key name for .ini-file
+begin
+  with PID_Twiddle do
+  begin
+	twiddle_INI_sect:=sect;
+	twiddle_INI_key:= key;
+	if ((Trimme(sect,3)='') or (Trimme(key,3)=''))
+	  then PID_EnableTwiddle_Save(PID_Twiddle,false);
+  end; // with
+end;
+  
+procedure PID_SaveTwiddle(var PID_Twiddle:PID_Twiddle_t; K,dK:PID_array_t);
+// save twiddle data, to .ini-file
+var _sav:boolean; sh:string;
+begin
+  with PID_Twiddle do
+  begin
+    if twiddle_save then
+    begin
+      if twiddle_saved then
+      begin
+    	_sav:=(twiddle_sum_dp<twiddle_sum_dps);
+    	if _sav then twiddle_tolnoreachcnt:=0
+    			else inc(twiddle_tolnoreachcnt);
+      end else _sav:=true;
+
+      if _sav then
+      begin
+    	ps:=K; dps:=dK; twiddle_sum_dps:=twiddle_sum_dp;
+
+  	  	sh:=PID_VectorStr(ps,			0,-1,'|')+';'+
+		  	PID_VectorStr(dps,			0,-1,'|')+';'+
+		  	PID_VectorStr(twiddle_tol,	0,-1,'|')+';'+
+			GetXMLTimeStamp(now);
+	
+	  	BIOS_SetIniString(twiddle_INI_sect,twiddle_INI_key,sh,[]);
+
+	  	sh:='PID_SaveTwiddle['+Num2Str(twiddle_ID,0)+'/'+
+				twiddle_INI_sect+'/'+twiddle_INI_key+']:'+
+				' sumdp:'+Num2Str(twiddle_sum_dp,0,PID_nk15);
+
+	  	if (twiddle_sum_dps<twiddle_tol[1]) then
+	  	begin
+	  	  twiddle_save:=false; // minimum tolerance reached
+	  	  		 sh:=sh+' tol[0]:'+ Num2Str(twiddle_tol[1],0,PID_nk15);
+	  	end else sh:=sh+' tol[0]:'+ Num2Str(twiddle_tol[0],0,PID_nk15);
+	  
+	  	SAY(twiddle_LogLevel,twiddle_LogColor,sh);
+	  	twiddle_saved:=true;
+	  end
+	  else
+	  begin
+	    if (twiddle_tolnoreachcnt>=3) then // can not reach minimum tol[1] 3x above tol[0]
+	    begin
+	      twiddle_save:=false;
+	      SAY(twiddle_LogLevel,twiddle_LogColor,
+		  	'PID_SaveTwiddle['+Num2Str(twiddle_ID,0)+'/OFF]: could not reach tol[1]:'+
+		  	Num2Str(twiddle_tol[1],0,PID_nk15));	      
+	    end;
+	  end;
+	  
+	end;
+  end; // with
+end;
+
+function  PID_ReadTwiddle(sect,key:string; var K,dK,tol:PID_array_t; replvl1,replvl2:T_ErrorLevel):boolean;
+// restore twiddle data, to continue/benefit from previous optimizations
+//            Kp     Ki     Kd     dKp         dKi            dKd         tols tol    na  savedate
+// <sect/key>=3.1089|0.0089|0.7695;0.000004245|0.000000011910|0.000005511;0.01|0.0001|0.0;2017-12-12..
+var ok:boolean; i:longint; r:PID_float_t; sh:string;
+begin
+  ok:=false;
+  if ((sect<>'') and (key<>'')) then
+  begin
+	sh:=Trimme(BIOS_GetIniString(sect,key,''),3);
+	if (sh<>'') then
+	begin
+	  ok:=true;
+	  for i:= 0 to 2 do 
+	  begin
+		if ok then ok:=Str2Num(CSV_Item(CSV_Item(sh,';',1),'|',i+1),r); 
+		if ok then K[i]:=r;
+		
+		if not 		   Str2Num(CSV_Item(CSV_Item(sh,';',2),'|',i+1),dK[i]) then
+		begin // default values, if dK-part is wrong/missing
+		  case i of 
+			  0: dK[i]:=0.10;
+			  1: dK[i]:=0.20;
+			  2: dK[i]:=0.01;
+		  end; // case
+		  LOG_Writeln(LOG_ERROR,'PID_ReadTwiddle['+sect+'/'+key+']: using default  dK['+Num2Str(i,0)+']='+Num2Str(dK[i],0,2));
+		end; // if
+		
+		if not 		   Str2Num(CSV_Item(CSV_Item(sh,';',3),'|',i+1),tol[i]) then
+		begin // default values, if tol-part is wrong/missing
+		  case i of 
+			  0: tol[i]:=PID_twiddle_tolerance*PID_twiddleSavAtTolScal_c; // 0:twiddle_savetol
+			  1: tol[i]:=PID_twiddle_tolerance;							  // 1:twiddle_tol
+			  2: tol[i]:=0;												  // 2:not used
+		  end; // case
+		  LOG_Writeln(LOG_ERROR,'PID_ReadTwiddle['+sect+'/'+key+']: using default tol['+Num2Str(i,0)+']='+Num2Str(tol[i],0,2));
+		end; // if
+		
+	  end;
+	  SAY(replvl1,replvl2,'PID_ReadTwiddle['+sect+'/'+key+']: '+CSV_Item(sh,';',4)+' stat:'+Bool2YNS(ok));
+	  SAY(replvl1,replvl2,'K:  '+PID_VectorStr(K,  0,PID_nk15));
+	  SAY(replvl1,replvl2,'dK: '+PID_VectorStr(dK, 0,PID_nk15));
+	  SAY(replvl1,replvl2,'tol:'+PID_VectorStr(tol,0,PID_nk15));
+	end;
+  end else LOG_Writeln(LOG_ERROR,'PID_ReadTwiddle: no sect/key pair');  
+  PID_ReadTwiddle:=ok;
+end;
+
+function  PID_ReadTwiddle(sect,key:string;  var K,dK,tol:PID_array_t):boolean;
+begin PID_ReadTwiddle:=PID_ReadTwiddle(sect,key,K,dK,tol,LOG_WARNING,LOG_MAGENTA); end;
+
+procedure PID_Init(var PID_Struct:PID_Struct_t; SampleTime_us:int64; K:PID_array_t);
+begin 
+  PID_Init(PID_Struct,0,10000,false,NaN,NaN,0,SampleTime_us,
+  	K,
+  	PID_Vector(0.25,0.2,0.01),
+  	PID_Vector(PID_twiddle_tolerance*PID_twiddleSavAtTolScal_c,PID_twiddle_tolerance,0)); 
+end;
+
+procedure PID_EnableTwiddle(var PID_Twiddle:PID_Twiddle_t; enab:boolean);
+begin PID_Twiddle.twiddle_on:=enab; end;
+
+procedure PID_InitTwiddle(var PID_Twiddle:PID_Twiddle_t; ID:longint; enab:boolean; itermax:longword; ap,dK,tol:PID_array_t);
+begin
+  with PID_Twiddle do
+  begin
+    twiddle_ID:=			ID;
+	twiddle_best_error:=	MaxFloat;
+	twiddle_sum_dp:=		MaxFloat;
+	twiddle_sum_dps:=		twiddle_sum_dp;	
+	twiddle_idx:=			0;
+	twiddle_state:=			0;
+	twiddle_iterations:=	0;
+	twiddle_repdt:=			0;
+	twiddle_tolnoreachcnt:=	0;
+	twiddle_intermax:=		itermax;
+	twiddle_tol:=			tol;
+	twiddle_saved:=			false;
+	p:=ap; p0:=p;
+
+//	calc twiddle delta array
+	dp[iKp]:=dK[iKp]*p[iKp];
+	dp[iKi]:=dK[iKi]*p[iKi];
+	dp[iKd]:=dK[iKd]*p[iKd];
+
+	PID_Twiddle_LogLevel(	PID_Twiddle,LOG_WARNING,LOG_MAGENTA);
+	PID_SetTwiddle_KeyName(	PID_Twiddle,'','');
+  	PID_EnableTwiddle(	 	PID_Twiddle,enab);
+//writeln(ID,' twiddle:',twiddle_on,' ',Twiddle_Info(PID_Twiddle,11)+' '+Twiddle_Info(PID_Twiddle,12)+' ',CR); 
+  end; // with  
+end;
+
+procedure PID_UpdateError(var PID_Twiddle:PID_Twiddle_t; error:PID_float_t);
+begin
+  with PID_Twiddle do
+  begin
+	err[iKd]:= 	error - err[iKp];	// error - OLD_error
+	err[iKi]:= 	err[iKi] + error;
+	err[iKp]:=	error;				// NEWerror
+  end; // with
+end;
+
+function  PID_TotalError(var PID_Twiddle:PID_Twiddle_t; K:PID_array_t):PID_float_t;
+begin
+  with PID_Twiddle do
+  begin
+//	PID_TotalError:= - K[iKp]*err[iKp] - K[iKi]*err[iKi] - K[iKd]*err[iKd];
+	PID_TotalError:= abs(err[iKp]) + abs(err[iKi]) + abs(err[iKd]);
+  end; // with
 end;
 
 function  PID_CalcTwiddle(var PID_Twiddle:PID_Twiddle_t; var Karr:PID_array_t):boolean;
@@ -17907,28 +18625,24 @@ function  PID_CalcTwiddle(var PID_Twiddle:PID_Twiddle_t; var Karr:PID_array_t):b
 // https://www.youtube.com/watch?v=2uQ2BSzDvXs
 // http://www.htw-mechlab.de/index.php/numerische-optimierung-in-matlab-mit-twiddle-algorithmus/
 // https://junshengfu.github.io/PID-controller/
-var _res:boolean; _err:PID_float_t; _cnt:longint; // _idx:longint;
+const tw_dlta=0.1; tw_finc=1.0+tw_dlta; tw_fdec=1.0-tw_dlta;
+var _res:boolean; _err:PID_float_t; _cnt:longint;
 begin
 	_res:=false;
 	with PID_Twiddle do
   	begin
       twiddle_sum_dp:=sum(dp);
-//_idx:=twiddle_idx;writeln('  PID_CalcTwiddle[',twiddle_idx:0,'/',twiddle_state:0,']: sumdp:',twiddle_sum_dp:0:5,' tol:',twiddle_tol[1]:0:5,' dp:',dp[twiddle_idx]:0:5,' wr2ini:',(twiddle_tol[0]<>twiddle_tol[2]));
+//writeln('  PID_CalcTwiddle[',twiddle_idx:0,'/',twiddle_state:0,']: sumdp:',twiddle_sum_dp:0:5,' tol:',twiddle_tol[1]:0:5,' dp:',dp[twiddle_idx]:0:5,' wr2ini:',(twiddle_tol[0]<>twiddle_tol[2]));
 
-	  if 	(not twiddle_saved) and (twiddle_tol[0]<>twiddle_tol[2]) and
-			(twiddle_sum_dp<=twiddle_tol[0]) then 
-	  begin 
-	  	ps:=p; dps:=dp; twiddle_saved:=true;
-	  	SAY(LOG_INFO,'PID_SaveTwiddle['+Num2Str(twiddle_ID,0)+'/'+
-	  									twiddle_INI_sect+'/'+twiddle_INI_key+']:'+
-	  									' sumdp:'+Num2Str(twiddle_sum_dp,0,PID_nk8)+
-	  									' tol:('+PID_VectorStr(twiddle_tol,0,PID_nk8,' ')+')' );
-	  	PID_SaveTwiddle(PID_Twiddle,ps,dps);
+	  if twiddle_save then
+	  begin	  	
+	  	if (twiddle_sum_dp<=twiddle_tol[0]) 
+	  	  then PID_SaveTwiddle(PID_Twiddle,p,dp);
 	  end; // keep results
-	
+	  
 	  if (twiddle_sum_dp>twiddle_tol[1]) then
 	  begin	
-//if (_idx=0) then writeln('    twiddle_sum_dp: ',twiddle_sum_dp:0:5,' twiddle_tol[1]: ',twiddle_tol[1]:0:5,' err:',twiddle_best_error:0:2);
+//if (twiddle_idx=0) then writeln('    twiddle_sum_dp: ',twiddle_sum_dp:0:5,' twiddle_tol[1]: ',twiddle_tol[1]:0:5,' err:',twiddle_best_error:0:2);
 	  	case twiddle_state of
 		  0:begin // twNEW:		use new delta 
 			  p[twiddle_idx]:=p[twiddle_idx] + dp[twiddle_idx];
@@ -17939,13 +18653,13 @@ begin
     		  if (_err < twiddle_best_error) then
     		  begin	// better
         		twiddle_best_error:=_err;
-				dp[twiddle_idx]:=	dp[twiddle_idx] * 1.1;	// try next UPdelta
+				dp[twiddle_idx]:=	dp[twiddle_idx] * tw_finc; // * 1.1	try next UPdelta
 				twiddle_state:=3;	// better -> ok, keep it
           	  end
           	  else
           	  begin // worsen
 				p[twiddle_idx]:=p[twiddle_idx] - 2 * dp[twiddle_idx];
-				if (p[twiddle_idx]<0) then p[twiddle_idx]:=0;
+				if (p[twiddle_idx]<0) then p[twiddle_idx]:=0; 			//**
 				twiddle_state:=2;	// go to modification track
           	  end;
 			end;
@@ -17954,12 +18668,12 @@ begin
 			  if (_err < twiddle_best_error) then
 			  begin
 				twiddle_best_error:= _err;
-				dp[twiddle_idx]:=	 dp[twiddle_idx] * 1.1;
+				dp[twiddle_idx]:=	 dp[twiddle_idx] * tw_finc; // 1.1
           	  end
           	  else
           	  begin	// correct value and delta to old levels
 				 p[twiddle_idx]:=	 p[twiddle_idx] + dp[twiddle_idx];
-				dp[twiddle_idx]:=	dp[twiddle_idx] / 1.1;
+				dp[twiddle_idx]:=	dp[twiddle_idx] * tw_fdec; // 0.9
           	  end;
 			  twiddle_state:=3;
 			end;
@@ -17974,27 +18688,27 @@ begin
 		  else twiddle_state:=0;
 	  	end; // case
 	
-(*if (_idx=0) then begin  	
+//if TimeElapsed(twiddle_repdt,2500) then writeln(twiddle_ID,' ',Twiddle_Info(PID_Twiddle,11)+' '+Twiddle_Info(PID_Twiddle,12)+' '+Twiddle_Info(PID_Twiddle,10),CR);
+(*if (twiddle_idx=0) then begin  	
 writeln(Twiddle_Info(PID_Twiddle,11));
 writeln(Twiddle_Info(PID_Twiddle,12));
 writeln(Twiddle_Info(PID_Twiddle,15));
-writeln;end;  *)
+writeln;end; *)
 	  	
-	  end else _res:=true;	// required error tolerance reached
-//	  PID_InitPara(PID_Struct,p);	
+	  end else _res:=true;	// required error tolerance reached	
 	  Karr:=p; err:=PID_Vector(0,0,0);	
-//	  SAY(LOG_INFO,'Twiddle['+Num2Str(twiddle_ID,0)+']: '+Num2Str(p[0],9,6)+' '+Num2Str(p[1],9,6)+' '+Num2Str(p[2],9,6));
+//	  SAY(LOG_WARNING,'Twiddle['+Num2Str(twiddle_ID,0)+']: '+Num2Str(p[0],9,6)+' '+Num2Str(p[1],9,6)+' '+Num2Str(p[2],9,6));
 	end; // with
   PID_CalcTwiddle:=_res;
 end;
 
-function  PID_ExecTwiddle(var PID_Twiddle:PID_Twiddle_t; var PID_K:PID_array_t; errorUpdate:PID_float_t; Stoersprung:boolean):boolean;
+function  PID_ExecTwiddle(var PID_Twiddle:PID_Twiddle_t; var PID_K:PID_array_t; errorUpdate:PID_float_t):boolean;
 var _res:boolean;
 begin 
   _res:=false;
   with PID_Twiddle do
   begin
-	if twiddle_on and (not Stoersprung) then
+	if twiddle_on then
 	begin // PID self tuning
 	  inc(twiddle_iterations);
 	  PID_UpdateError(PID_Twiddle,errorUpdate);
@@ -18002,6 +18716,14 @@ begin
 	  begin
 		_res:=PID_CalcTwiddle(PID_Twiddle,PID_K);
 		twiddle_iterations:=0;
+		if _res then 
+		begin
+		  twiddle_on:=false;
+		  PID_SaveTwiddle(PID_Twiddle,p,dp);	// prevent overwrite
+		  SAY(twiddle_LogLevel,twiddle_LogColor,
+		  	'PID_ExecTwiddle['+Num2Str(twiddle_ID,0)+'/OFF]: '+
+		  	Twiddle_Info(PID_Twiddle,11));//+' '+Twiddle_Info(PID_Twiddle,15));
+		end;
 	  end;
 	end;
   end; // with
@@ -18010,7 +18732,7 @@ end;
 
 procedure Twiddle_Test;
 const
-  scale_c=1000; 	Stoersprung=false;
+  scale_c=1000;
   Kp=1;  Ki=2;   Kd=3;			// PID parameter
   ID=0;	 dm_c=8; tol_c=(1/scale_c);
 
@@ -18033,7 +18755,7 @@ begin
   repeat
     if (n<5) then Err:=ERR_Feed_c[0]/(n+1) else Err:=0;	// Error feedback
 //  Err:=ERR_Feed_c[loop];	// Error feedback
-	tolreach:=PID_ExecTwiddle(PID_Twiddle,Karr,-Err,Stoersprung);
+	tolreach:=PID_ExecTwiddle(PID_Twiddle,Karr,-Err);
 	inc(n); 
 	inc(loop); if (loop>=dm_c) then loop:=0; // idx update for ERR_Feed
   until tolreach or (n>15000) or terminateProg;
@@ -18044,10 +18766,9 @@ begin
   writeln('END Twiddle_Test: ',n);
 end;
 
-
-procedure PID_Limit(var Value:PID_float_t; MinOut0,MinOut,MaxOut:PID_float_t);
+function  PID_Limit(var Value:PID_float_t; MinOut0,MinOut,MaxOut:PID_float_t):PID_float_t;
 begin
-  if (Value=0) then
+  if IsZero(Value,0.01) then
   begin
 	if Value<MinOut0 then Value:=MinOut0 else if Value>MaxOut then Value:=MaxOut; 
   end
@@ -18055,6 +18776,7 @@ begin
   begin
 	if Value<MinOut  then Value:=MinOut  else if Value>MaxOut then Value:=MaxOut; 
   end;
+  PID_Limit:=Value;
 end;
 
 procedure PID_SetPrevInput (var PID_Struct:PID_Struct_t; pval:PID_float_t); begin PID_Struct.PID_ProcessValue:=pval; end;
@@ -18082,13 +18804,109 @@ begin PID_Struct.PID_Integrated:=PID_Struct.PID_IntegratedWindupResetValue; end;
 procedure PID_IntegratedWindupReset(var PID_Struct:PID_Struct_t; WindupResetValue:PID_float_t); 
 begin PID_Struct.PID_IntegratedWindupResetValue:=WindupResetValue; end;
 
-procedure PID_SetMinMaxLimit(var PID_Struct:PID_Struct_t; MinOutput0,MinOutput,MaxOutput:PID_float_t);
+procedure PID_csv_fname(var PID_Struct:PID_Struct_t; csvfilename,fown,fgrp:string);
+begin
+  with PID_Struct do
+  begin
+    PID_csv_fown:=fown;
+    PID_csv_fgrp:=fgrp;
+	if (csvfilename='')
+	  then PID_csv_fn:='PID'+Num2Str(PID_nr,0)+'.csv'
+	  else PID_csv_fn:=csvfilename;
+  end;
+end;
+procedure PID_csv_fname(var PID_Struct:PID_Struct_t; csvfilename:string);
+begin PID_csv_fname(PID_Struct,csvfilename,'',''); end;
+
+procedure PID_csv_SetPointMax(var PID_Struct:PID_Struct_t; spmax:PID_float_t);
+begin 
+  with PID_Struct do
+  begin
+  	PID_csv_SetPointMaximum:=spmax;
+  	
+  	if (PID_KTa[iKp]<>0) 
+  	  then PID_csv_Lims[iKp]:=PID_KTa[iKp]*spmax else PID_csv_Lims[iKp]:=1;
+
+  	if (PID_KTa[iKi]<>0) 
+  	  then PID_csv_Lims[iKi]:=PID_KTa[iKi]*spmax else PID_csv_Lims[iKi]:=1;
+  	  
+  	if (PID_KTa[iKd]<>0) 
+  	  then PID_csv_Lims[iKd]:=PID_KTa[iKd]*spmax else PID_csv_Lims[iKd]:=1;
+  end; // with
+end;
+
+procedure PID_csv_RECtime(var PID_Struct:PID_Struct_t; rectim_ms:word);
+begin PID_Struct.PID_csv_RECtime_ms:=rectim_ms; end;
+
+procedure PID_csv_USE(var PID_Struct:PID_Struct_t; use:boolean);
+begin
+  with PID_Struct do
+  begin
+    if not use then 
+    begin
+      if PID_csv_enable then 
+      begin
+        if (PID_csv_TL.count>0) then
+        begin
+          PID_csv_enable:=false; // prevent further record adds
+          PID_csv_TL.insert(0,'tim,sp,pv,out,d,i,p');//',integrated'); // add csv header
+          LOG_Writeln(LOG_WARNING,'PID_csv_USE: write '+Num2Str(PID_csv_TL.count,0)+' records to '+PID_csv_fn);
+          StringList2TextFile(PID_csv_fn,PID_csv_TL);
+          PID_csv_TL.clear; 
+          LNX_chowngrp(PID_csv_fn,PID_csv_fown,PID_csv_fgrp);
+        end else LOG_Writeln(LOG_ERROR,'PID_csv_USE no data');
+      end;
+    end 
+    else
+    begin
+      LOG_Writeln(LOG_WARNING,'PID_csv_USE: enable and write to '+PID_csv_fn);
+      if assigned(PID_csv_TL) 
+      	then PID_csv_TL.clear
+      	else PID_csv_TL:=TStringList.create;
+    end;
+    PID_csv_enable:=use;   
+  end; // with
+end;
+
+procedure PID_close(var PID_Struct:PID_Struct_t);
+begin
+  PID_csv_USE(PID_Struct,false);
+  with PID_Struct do
+  begin
+  	if assigned(PID_csv_TL) then PID_csv_TL.free;
+  end; // with
+end;
+
+procedure PID_SetMinMaxLimit(var PID_Struct:PID_Struct_t; MinOutput,MaxOutput:PID_float_t);
 begin
   with PID_Struct do 
-  begin 
-	PID_MinOutput0:=MinOutput0; 
+  begin
 	PID_MinOutput:= MinOutput; 
 	PID_MaxOutput:= MaxOutput; 
+	
+	if (PID_KTa[iKp]=0) or IsNaN(PID_MaxOutput)
+	  then PID_Lims[iKp]:=NaN
+	  else PID_Lims[iKp]:=PID_MaxOutput/PID_KTa[iKp];
+	  
+	if (PID_KTa[iKi]=0) or IsNaN(PID_MaxOutput)
+	  then PID_Lims[iKi]:=NaN
+	  else PID_Lims[iKi]:=PID_MaxOutput/PID_KTa[iKi];
+	  
+	if (PID_KTa[iKd]=0) or IsNaN(PID_MaxOutput)
+	  then PID_Lims[iKd]:=NaN
+	  else PID_Lims[iKd]:=PID_MaxOutput/PID_KTa[iKd];
+  end; // with
+end;
+
+procedure PID_SetSampleTime(var PID_Struct:PID_Struct_t; SampleTime_us:int64);
+begin
+  with PID_Struct do 
+  begin
+	if (SampleTime_us<=0) then
+	begin
+	  PID_SampleTime_us:=10000;	// 10ms
+	  LOG_Writeln(LOG_ERROR,'PID_SetSampleTime['+Num2Str(PID_nr,0)+']: adjusted sample time to default '+Num2Str(PID_SampleTime_us,0)+'us');	
+	end else PID_SampleTime_us:=SampleTime_us;  
   end; // with
 end;
 
@@ -18101,54 +18919,58 @@ begin
   end; // with
 end;
   
-procedure PID_Init(var PID_Struct:PID_Struct_t; nr:longint; itermax:longword; enab_twiddle:boolean; MinOutput0,MinOutput,MaxOutput,SampleTime_ms,WindupResetValue:PID_float_t; K,dK,tol:PID_array_t);
+procedure PID_Init(var PID_Struct:PID_Struct_t; nr:longint; itermax:longword; enab_twiddle:boolean; MinOutput,MaxOutput,WindupResetValue:real; SampleTime_us:int64; K,dK,tol:PID_array_t);
 // Initialises the PID engine of "PID_Struct"
 // Ks = Amplification
 // Kp = the "proportional" error multiplier
 // Ki = the "integrated value" error multiplier
 // Kd = the "derivative" error multiplier
-// MinOutput0= the minimal value the output value can have, if switched off
 // MinOutput = the minimal value the output value can have, if switched on
 // MaxOutput = the maximal value the output can have, 		if switched on
+var _pa:PID_array_t;
 begin
-  PID_IntegratedWindupReset	(PID_Struct,WindupResetValue); 
-  PID_Reset				 	(PID_Struct); 	 
-  PID_SetIntImprove		 	(PID_Struct,true); 
-  PID_SetDifImprove			(PID_Struct,true);	
-  PID_SetMinMaxLimit	 	(PID_Struct,MinOutput0,MinOutput,MaxOutput);
-//PID_InitPara			 	(PID_Struct,K);
-  PID_InitTwiddle		 	(PID_Struct.PID_Twiddle,nr,enab_twiddle,itermax,K,dK,tol); // tol=0.00001
-  
   with PID_Struct do
-  begin 
-(*	if (SampleTime_ms<=0) then
-	begin
-	  PID_SampleTime_us:=100000;	// 100ms
-	  LOG_Writeln(LOG_ERROR,'PID_Init: adjusted sample time to default '+Num2Str(PID_SampleTime_us,0));	
-	end else *)
-	PID_SampleTime_us:=round(SampleTime_ms*1000);
-	
-    PID_Twiddle.err:=PID_Vector(0,0,0);
-    PID_nr:=nr;	PID_ControlOut:=0; 
-    PID_K:=K; 	PID_Ksav:=K;
+  begin
+  	PID_nr:=nr;
+  	PID_ovr:=false;
+  	PID_SetSampleTime			(PID_Struct,SampleTime_us);
+  	PID_csv_fname				(PID_Struct,'');
+  	PID_csv_RECtime				(PID_Struct,5000);
+  	PID_IntegratedWindupReset	(PID_Struct,WindupResetValue); 
+  	PID_Reset				 	(PID_Struct); 	 
+  	PID_SetIntImprove		 	(PID_Struct,true); 
+  	PID_SetDifImprove			(PID_Struct,true);
+
+    PID_csv_enable:=false;
+    PID_csc_RECstop:=now;
+    PID_SetPointLast:=0;
+    PID_SetPoint:=0;
+    
+	PID_ControlOut:=0; 
+    PID_Twiddle.err:=	PID_Vector(0,0,0);
+    PID_pid:=		 	PID_Vector(0,0,0);
+    PID_K:=K; 			PID_Ksav:=K;
+
     PID_KTa:=K;
-    PID_KTa[iKi]:=PID_K[iKi] / PID_SampleTime_us;	// precalc Ki * Ta // Ta = SampleTime in seconds
-    PID_KTa[iKd]:=PID_K[iKd] * PID_SampleTime_us;	// precalc Kd / Ta
-     
-(*  PID_K[iKp]:=PID_K[iKp]/PID_Ks;
-    PID_K[iKi]:=PID_K[iKi]/PID_Ks;
-    PID_K[iKd]:=PID_K[iKd]/PID_Ks;	*)
-//	writeln('PID_Init['+Num2Str(nr,0)+'] Ks: ',PID_Ks:0:5,' Kp:',PID_K[iKp]:0:5,' Ki:',PID_K[iKi]:0:5,' Kd:',PID_K[iKd]:0:5,' max:',PID_MaxOutput:0:2,' min:',PID_MinOutput:0:2,' min0:',PID_MinOutput0:0:2);
+    PID_KTa[iKi]:=PID_K[iKi] * (PID_SampleTime_us / 1000000);	// precalc Ki * Ta // Ta = SampleTime in seconds
+    PID_KTa[iKd]:=PID_K[iKd] / (PID_SampleTime_us / 1000000);	// precalc Kd / Ta
+    
+    PID_SetMinMaxLimit	 	(PID_Struct,MinOutput,MaxOutput);
+
+	clock_gettime(CLOCK_REALTIME,@PID_LastTime);
+	if (PID_SampleTime_us>=1000000)
+	  then PID_LastTime.tv_sec:=PID_LastTime.tv_sec - ceil(PID_SampleTime_us/1000000)
+	  else dec(PID_LastTime.tv_sec);
 
 	clock_gettime(CLOCK_REALTIME,@PID_Time);
-	SetTimeOut_us(@PID_Time, @PID_LastTime, -PID_SampleTime_us);
-  end;
+
+	PID_InitTwiddle(PID_Struct.PID_Twiddle,nr,enab_twiddle,itermax,PID_KTa,dK,tol); // tol=0.00001   20211112
+  end; // with
 end;
-procedure PID_Init(var PID_Struct:PID_Struct_t; nr:longint; MinOutput0,MinOutput,MaxOutput,SampleTime_ms,tolerance,saveattol:PID_float_t; K:PID_array_t);
-begin PID_Init(PID_Struct,nr,500,false,MinOutput0,MinOutput,MaxOutput,SampleTime_ms,0,K,PID_Vector((K[iKp]*0.25),(K[iKi]*0.2),(K[iKd]*0.01)),PID_Vector(PID_twiddle_saveattol,PID_twiddle_tolerance,PID_twiddle_tolNOTsav)); end;
 
 // http://rn-wissen.de/wiki/index.php/Regelungstechnik
-function  PID_Calc(var PID_Struct:PID_Struct_t; SetPoint,ProcessValue:PID_float_t; Stoersprung:boolean):PID_float_t;
+// https://rn-wissen.de/wiki/index.php/Regelungstechnik#Dimensionierung_nach_Einstellregeln
+function  xPID_Calc(var PID_Struct:PID_Struct_t; SetPoint,ProcessValue:PID_float_t; Stoersprung:boolean):PID_float_t;
 // To be called at a regular time interval (e.g. every 100 msec)
 // SetPoint: the target value for "ProcessValue" to be reached
 // ProcessValue: the actual value measured in the system
@@ -18157,18 +18979,17 @@ function  PID_Calc(var PID_Struct:PID_Struct_t; SetPoint,ProcessValue:PID_float_
 //   a positive value means "ProcessValue" is too low  (< SetPoint), the process should take action to increase it
 //   a negative value means "ProcessValue" is too high (> SetPoint), the process should take action to decrease it
 // y = Kp * e + Ki * Ta * esum + Kd / Ta * (e – ealt)
-var _p,_i,_d:PID_float_t;
 begin
   with PID_Struct do
   begin
 	clock_gettime(CLOCK_REALTIME, @PID_Time);
-	if (MicroSecondsBetween(PID_Time,PID_LastTime)>=PID_SampleTime_us) then
+	if PID_ovr or (MicroSecondsBetween(PID_Time,PID_LastTime)>=PID_SampleTime_us) then
 	begin
 	  inc(PID_cnt); 
 	  PID_Error:=		SetPoint - ProcessValue;
 
 //	  calc p term
-	  _p:=				PID_K[iKp] * PID_Error;
+	  PID_pid[iKp]:=	PID_K[iKp] * PID_Error;
 	
 //	  calc i term and limit integral windup
 	  if (Stoersprung or
@@ -18176,79 +18997,344 @@ begin
 	  	then PID_Integrated:= PID_IntegratedWindupResetValue;
 	
 	  PID_Integrated:=	PID_Integrated + PID_Error;
-//	  _i:=				PID_KTa[iKi] * PID_Integrated;
-	  _i:=				PID_K[iKi] * PID_Integrated;
-//	  PID_Limit(_i, PID_MinOutput0, PID_MinOutput, PID_MaxOutput);
+//	  PID_pid[iKi]:=	PID_KTa[iKi] * PID_Integrated;
+	  PID_pid[iKi]:=	PID_K[iKi] * PID_Integrated;
+//	  PID_Limit(PID_pid[iKi], PID_MinOutput, PID_MinOutput, PID_MaxOutput);
 	
 //	  calc d term
-	  _d:=				PID_K[iKd] * (PID_Error - PID_LastError);
-//	  _d:=				PID_KTa[iKd] * (PID_Error - PID_LastError);
+	  PID_pid[iKd]:=	PID_K[iKd] * (PID_Error - PID_LastError);
+//	  PID_pid[iKd]:=	PID_KTa[iKd] * (PID_Error - PID_LastError);
 	  if PID_DifImprove and (abs(PID_Error)<abs(PID_LastError)) 
-	  	then _d:= 0.0; 
+	  	then PID_pid[iKd]:= 0.0; 
 
 	  PID_LastError:= 	PID_Error;
-	  PID_ControlOut:=	(_p + _i + _d);
-//	  writeln(pid_cnt:2,' err: ',PID_Error:0:4,' res: ',PID_ControlOut:0:4,' p:',_p:0:4,' i:',_i:0:4,' d:',_d:0:4);
+	  PID_ControlOut:=	(PID_pid[iKp] + PID_pid[iKi] + PID_pid[iKd]);
+//	  writeln(pid_cnt:2,' err: ',PID_Error:0:4,' res: ',PID_ControlOut:0:4,' p:',PID_pid[iKp]:0:4,' i:',PID_pid[iKi]:0:4,' d:',PID_pid[iKd]:0:4);
 
-	  PID_Limit(PID_ControlOut, PID_MinOutput0, PID_MinOutput, PID_MaxOutput);
-	  PID_ExecTwiddle(PID_Twiddle,PID_K,PID_ControlOut,Stoersprung);	
+	  PID_Limit(PID_ControlOut, PID_MinOutput, PID_MinOutput, PID_MaxOutput);
+	  if not Stoersprung
+	  	then PID_ExecTwiddle(PID_Twiddle,PID_K,PID_ControlOut);	
 	
 	  PID_SetPoint:=	SetPoint;
 	  PID_ProcessValue:=ProcessValue;
 	  PID_LastTime:=	PID_Time;
 	end;
 	
-	PID_Calc:=			PID_ControlOut;
+	xPID_Calc:=			PID_ControlOut;
   end; // with
 end;
- 
-function  PID_Calc(var PID_Struct:PID_Struct_t; SetPoint,ProcessValue:PID_float_t):PID_float_t;
+
+// new 20211112
+function  PID_Calc(var PID_Struct:PID_Struct_t; SetPoint,ProcessValue:PID_float_t; Stoersprung:boolean):boolean;
+// To be called at a regular time interval (e.g. every 100 msec)
+// calc time: 9us @ rpi4B
+// SetPoint: the target value for "ProcessValue" to be reached
+// ProcessValue: the actual value measured in the system
+// Stoersprung:	 SetPoint change, used to prevent twiddle adjust during SetPoint change
+// Functionresult: PID function of (SetPoint-ProcessValue) of "PID_Struct",
+//   a positive value means "ProcessValue" is too low  (< SetPoint), the process should take action to increase it
+//   a negative value means "ProcessValue" is too high (> SetPoint), the process should take action to decrease it
+// y = Kp * e + Ki * Ta * esum + Kd / Ta * (e – ealt)
+var _ok:boolean;
+begin
+  with PID_Struct do
+  begin
+	clock_gettime(CLOCK_REALTIME, @PID_Time);
+	_ok:=(MicroSecondsBetween(PID_Time,PID_LastTime)>=PID_SampleTime_us);
+	if _ok or PID_ovr then
+	begin
+	  inc(PID_cnt); 
+	  PID_Error:=		SetPoint - ProcessValue;
+
+//	  calc p term
+	  PID_pid[iKp]:=	PID_KTa[iKp] * PID_Error;
+
+//	  calc i term
+	  if (PID_KTa[iKi]<>0) then
+	  begin
+	    if Stoersprung
+	  	  then PID_Integrated:= PID_IntegratedWindupResetValue;  	
+	  	
+	  	PID_Integrated:=PID_Integrated + PID_Error;
+
+// 		limit integral windup
+		if (PID_IntImprove and (Sign(PID_Error)<>Sign(PID_Integrated)))
+	  	  then Limits(PID_Integrated, -PID_Lims[iKi], PID_Lims[iKi]);
+	  	
+	  	PID_pid[iKi]:=	PID_KTa[iKi] * PID_Integrated;
+	  end else PID_pid[iKi]:=0;
+
+//	  calc d term	
+	  if (PID_KTa[iKd]<>0) then
+	  begin
+	    if  (not PID_DifImprove) or
+	    	(PID_DifImprove and (abs(PID_Error)>abs(PID_LastError))) then
+	  	begin
+	  	  PID_pid[iKd]:=	PID_KTa[iKd] * (PID_Error - PID_LastError);
+	  	end else PID_pid[iKd]:=0.0;
+	  end else PID_pid[iKd]:=0.0;
+
+	  PID_LastError:= 	PID_Error;
+	  PID_ControlOut:=	PID_pid[iKp] + PID_pid[iKi] + PID_pid[iKd];
+
+	  if not (IsNaN(PID_MinOutput) or IsNaN(PID_MaxOutput)) then
+	  	Limits(PID_ControlOut,PID_MinOutput,PID_MaxOutput);
+	  
+	  
+	  if PID_Twiddle.twiddle_on and (not Stoersprung) then
+		PID_ExecTwiddle(PID_Twiddle,PID_KTa,PID_ControlOut);
+	
+	  if (SetPoint<>PID_SetPoint) then PID_SetPointLast:=PID_SetPoint;
+	  PID_SetPoint:=	SetPoint;
+	  PID_ProcessValue:=ProcessValue;
+	  PID_LastTime:=	PID_Time;
+
+//writeln('sp:',PID_SetPoint:0:2,' pv:',PID_ProcessValue:0:5,' p:',PID_pid[iKp]:0:5,' i:',PID_pid[iKi]:0:5,' d:',PID_pid[iKd]:0:5,' out:',PID_ControlOut:0:5);
+
+//if (PID_nr=1) then writeln('pid ',PID_csv_enable,' ',PID_csv_RECtime_ms,' ',PID_csv_fn,CR);
+	  
+	  if PID_csv_enable then
+	  begin	// reporting
+	    if (PID_csv_TL.count=0) then 
+	    begin
+	      SetTimeOut(PID_csc_RECstop,PID_csv_RECtime_ms);
+	      PID_StartTime:=PID_Time;
+	    end;
+	    if (PID_csv_RECtime_ms=0) or (not TimeElapsed(PID_csc_RECstop)) then
+	    begin
+	  	  PID_csv_TL.add(
+	  		Num2Str(MicroSecondsBetween(PID_Time,PID_StartTime),0)+','+
+	  		Num2Str( scale(PID_SetPoint,-PID_csv_SetPointMaximum,PID_csv_SetPointMaximum,-1,1) ,0,2)+','+
+	  		Num2Str( scale(PID_ProcessValue,-PID_csv_SetPointMaximum,PID_csv_SetPointMaximum,-1,1) ,0,5)+','+
+	  		Num2Str( scale(PID_ControlOut,PID_MinOutput,PID_MaxOutput,-1,1) ,0,5)+','+	
+	  		Num2Str( scale(PID_pid[iKd],-PID_csv_Lims[iKd],PID_csv_Lims[iKd],-1,1) ,0,5)+','+
+	  		Num2Str( scale(PID_pid[iKi],-PID_Lims[iKi],PID_Lims[iKi],-1,1) ,0,5)+','+
+	  		Num2Str( scale(PID_pid[iKp],-PID_csv_Lims[iKp],PID_csv_Lims[iKp],-1,1) ,0,5)
+	  	  );
+	  	end;
+	  end;
+	end;
+		
+	PID_Calc:=_ok;
+  end; // with
+end;
+
+function  PID_Calc(var PID_Struct:PID_Struct_t; SetPoint,ProcessValue:PID_float_t):boolean;
 begin PID_Calc:=PID_Calc(PID_Struct,SetPoint,ProcessValue,false); end;
 
-procedure PID_Test;
+procedure PID_Test(csvuse:boolean; csvfn,fusr,fgrp:string);
 //just for demo purposes
 //simulate PID. How the to be adjusted Value approaches a SetPoint value
 const
-  scale_c=48;
-  PID_Max=scale_c div 8; PID_Min=-PID_Max; 	// MaxOutput MinOutput
-  Kp=1.1;  Ki=0.2;  Kd=0.1;					// PID parameter
-  STim_msec=1000;							// sample time 1sec
-  dm_c=8; ntimes_c=16; errind_c=true;
-  PID_SetPoints_c:array[0..(dm_c-1)] of PID_float_t = ( 1, 0, -1, 0, 2, 3, -1, 0 );
-var loop,n,errinject,hwval:integer; pid1:PID_Struct_t; NewVal,SetPoint,delta,erri:PID_float_t;
+  scale_c=50; 
+  PID_Max=scale_c;	PID_Min=-PID_Max; 	// MaxOutput MinOutput
+//Kp=0.4;  Ki=0.2;    Kd=0.0;		// PID parameter
+//Kp=0.6;  Ki=0.15;   Kd=0.0;		// PID parameter PI_CHR_GSA xx
+  Kp=0.59; Ki=0.1475; Kd=0.0;		// PID parameter PI_SAMAL_GSA Test GetPara]: Kp: 0.59000000 Ki: 0.14750000 Kd: 0.00000000 Ti: 4.00000000 Td: Nan
+//Kp=0.35; Ki=0.292;  Kd=0.0;		// PID parameter PI_CHR_GFA Test GetPara]: Kp: 0.35000000 Ki: 0.29166667
+//Kp=0.34; Ki=0.283;  Kd=0.0;		// PID parameter PI_Default  Test GetPara]: Kp: 0.34000000 Ki: 0.28333333 Kd: 0.00000000 Ti: 1.20000000 Td: Nan
+//Kp=0.59; Ki=0.59;   Kd=0.295;		// PID parameter PID_Default Test GetPara]: Kp: 0.59000000 Ki: 0.59000000 Kd: 0.29500000 Ti: 1.00000000 Td: 0.50000000
+  STim_msec=1;						// sample time millisecs
+  delta_ms=20/(1000*STim_msec);		// +- delta on data per second -> (+-20mb/sec) delta_sec
+
+  dm_c=8; ntimes_c=64*dm_c; errind_c=false;
+  PID_SetPoints_c:array[0..(dm_c-1)] of PID_float_t = ( 0, 1, 1, 1, 1, 0, 0, 0 );
+var loop,n,errinject,hwval:integer; bool:boolean; li:longint; dt:TDateTime;
+	pid1:PID_Struct_t; NewVal,SetPoint,delta,erri:PID_float_t;
 begin
-  RPI_HW_Start([InstSignalHandler]);
-  PID_Init(pid1,1,PID_Min,PID_Min,PID_Max,STim_msec,PID_twiddle_tolerance,PID_twiddle_saveattol,PID_Vector(Kp,Ki,Kd));
-  PID_SetIntImprove (pid1,true); PID_SetDifImprove(pid1,true);	// enable improvements
-  writeln('PID_INFO: '+PID_Info(pid1,1));
-  writeln('PID_INFO: '+PID_Info(pid1,3));
-  writeln('PID_INFO: '+PID_Info(pid1,4));
-  NewVal:=0; loop:=0; n:=0; errinject:=0;
-//writeln('PID_Test2 Kp:',Kp:0:2,' Ki:',Ki:0:2,' Kd:',Kd:0:2);
+  RPI_HW_Start([InstSignalHandler]); 
+//  PID_Init(pid1,STim_msec*1000,PID_Vector(Kp,Ki,Kd));
+
+  PID_Init(pid1,0,3,false,
+  	PID_Min,PID_Max,0,STim_msec*1000,
+  	PID_Vector(Kp,Ki,Kd),
+  	PID_Vector(0.25,0.2,0.01),
+  	PID_Vector(PID_twiddleSavAtTolScal_c*PID_twiddle_tolerance,PID_twiddle_tolerance,0));
+  	
+  PID_SetIntImprove(pid1,true); 
+  PID_SetDifImprove(pid1,true);	// enable improvements
+//pid1.PID_ovr:=true;			// no timesync block
+  PID_csv_RECtime(pid1,0);
+  PID_csv_fname	 (pid1,csvfn,fusr,fgrp);
+  PID_csv_SetPointMax(pid1,scale_c);
+  PID_csv_USE	 (pid1,csvuse);
+  PID_EnableTwiddle(pid1.PID_Twiddle,false);
+  writeln('PID_INFO:'+LF+PID_Info(pid1,7));
+  NewVal:=0; loop:=0; n:=0; errinject:=0; delta:=0;
+  li:=10000;	// 10sec
+  writeln('RunTime:',(li/1000):0:1,'sec, keypress will terminate');
+  SetTimeOut(dt,li);  
   repeat
     SetPoint:=PID_SetPoints_c[loop]*scale_c;
-	delta:=PID_Calc(pid1,SetPoint,NewVal,false);
-	{$warnings off} 
+//writeln(loop:3,' sp:',setpoint:0:2);
+    erri:=1;
+	if PID_Calc(pid1,SetPoint,NewVal,false) then 
+	begin
+	  delta:=pid1.PID_ControlOut;
+	  hwval:=round(scale(delta,PID_Min,PID_Max,0,255));
+//	  writeln('PID_Test: SetPoint:',SetPoint:7:2,'  PV:',NewVal:7:2,'   adjVal:',delta:7:2,' e.g. HWval:',hwval:4);
+	  {$warnings off} 
 	  if errind_c then 
 	  begin
 	    inc(errinject);
-	  	if (errinject>7) then 
+	  	if (errinject>5) then
 	  	begin
 	  	  erri:=random;
 		  if (random<0.5) then erri:=-erri;
-	  	  writeln('PID_Test: Error inject ',erri:7:2);
-	  	  delta:=delta*erri;
+		  erri:=5*erri;
+//	  	  writeln('PID_Test: Error inject ',erri:7:2);
 	  	  errinject:=0;
 	  	end; 
 	  end;
-	{$warnings on} 
-	hwval:=round(scale(delta,PID_Min,PID_Max,0,255));
-	writeln('PID_Test: SetPoint:',SetPoint:7:2,'  PV:',NewVal:7:2,'   adjVal:',delta:7:2,' e.g. HWval:',hwval:4);
-//  action according to NewVal, do something in HW to cope with delta
-	NewVal:=NewVal+delta; 
+	  {$warnings on} 
+	  inc(n);
+	  if n>=ntimes_c then 
+	  begin 
+	    n:=0;	inc(loop);
+	    if loop>=dm_c then loop:=0;
+	  end;
+	end;
+	NewVal:=NewVal+delta*delta_ms*erri;
 	delay_msec(STim_msec); 
-	inc(n); if n>=ntimes_c then begin n:=0;	inc(loop); if loop>=dm_c then loop:=0; end;
-  until terminateProg or keypressed;
+  until terminateProg or keypressed or TimeElapsed(dt);
+  PID_close(pid1);
+end;
+
+procedure PID_TestSim;
+var _tl:TStringList; idxa,idxe,avgnumIst,avgnumPInc:longint;
+	timadj,StoerSprung:PID_float_t; K:PID_array_t;
+	pid1:PID_Struct_t; PID_Det:PID_Det_t;
+begin
+  _tl:=TStringList.create; 
+  timadj:=PID_sim(_tl,0); idxa:=0; idxe:=_tl.count-1; ShowStringList(_tl); 
+  PID_DetAvgs(idxa,idxe,avgnumIst,avgnumPInc);     
+  StoerSprung:=1; avgnumIst:=1; avgnumPInc:=1; // demo, no data smoothing.
+  PID_DetPara(LOG_INFO,_tl,idxa,idxe,avgnumIst,avgnumPInc,PID_loctusec,PID_locistval,PID_locsollval,StoerSprung,timadj,PID_Det,true,''); 
+  PID_Det.PIDMethod:=PID_ZiegNich;
+  PID_GetPara(LOG_INFO,PID_Det,K,'');
+  writeln('PID_TestSim Kp:',K[iKp]:0:2,' Ki:',K[iKi]:0:2,' Kd:',K[iKd]:0:2);
+//  Kp:=1.1;  Ki:=0.2;  Kd:=0.1;	// Kp=1.1,Ki=0.2,Kd=0.1; //   Kp:=1; Ki:=0; Kd:=0.5;
+  PID_Init(pid1,1,500,false,-25,25,0,1000000,K,
+  	PID_Vector(-1.25,1.25,1000),
+  	PID_Vector(PID_twiddleSavAtTolScal_c*PID_twiddle_tolerance,PID_twiddle_tolerance,0));
+  PID_SimCSV(_tl,PID_Det,pid1);
+  ShowStringList(_tl); 
+  _tl.free;
+end; 
+
+procedure PID_TestSim2(fil,fusr,fgrp:string);
+// call it: PID_TestSim2('./pid.csv','www-data','www-data');
+// https://www.hs-koblenz.de/maschinenbau/laboratorien/regelungstechnik
+// testing/comparing PID_Calc with simulation Versuch 3 (lab experiment3)
+// result: with same paras, PID_Calc produces exact same output compared to PIDout1 Versuch3
+const dt=0.01; // Zeitschritt 10ms
+	  walt=3.0; wneu=7.0; PT=3;
+	  yoffs=wneu-walt;
+	  myKs=0.75; Tt=2.0; T=4.0; nk=5;
+	  myKp=0.8; myTn=10.0;
+	  useDataSet=3;	// 3: uses pid profile of Versuch3 // 0: auto calc pid profile
+var i,idTt,arrlgt,arrlgt1:longint; Ks,Kp,Tn:PID_Float_t; sh:string;
+	w,y,x,y2,y2d,xh1,xh2,xh3,ap,ai,ad: array of real;
+	smpltim_us:int64;
+	PID_Det:PID_Det_t; K:PID_array_t;
+	pid1:PID_Struct_t;
+	f:text;
+	
+  function gs(n:longint):string;
+  begin
+    gs:=Num2Str(dt*n,0,nk)+','+ Num2Str(w[n],0,nk)+','+
+    	Num2Str(y[n],0,nk)+','+ Num2Str(x[n],0,nk)+','+
+    	Num2Str(y2[n],0,nk)+','+Num2Str(y2d[n]-yoffs,0,nk)+','+
+    	Num2Str(ap[n],0,nk)+','+Num2Str(ai[n],0,nk)+','+Num2Str(ad[n],0,nk);
+  end;
+  
+begin
+  smpltim_us:=round(dt*1000000);	// in microsec (us)
+//determine pid paras
+  if (useDataSet<>3) then
+  begin // try to determine pid paras by PID_GetPara
+  	PID_Det:=PID_DetCreate(PI_Default,myKS,Tt,T,dt,smpltim_us);
+  	PID_GetPara(LOG_WARNING,PID_Det,K,'PID_TestSim');
+//	K:=PID_Vector(K[iKp]/2,K[iKi]/2,K[iKd]); // will produce 50% better result then hard coded pid paras
+  	Ks:=PID_Det.Ks;
+  	Kp:=K[iKp];
+  	Tn:=Kp/K[iKi];
+  end
+  else
+  begin // useDataSet=3 use hard coded pid paras from Versuch3 and adjust to PID_Calc K[iKp/iKi] array
+    Ks:=myKs;
+  	Kp:=myKp;
+  	Tn:=myTn;
+    K:=PID_Vector(Kp,Kp/Tn,0); // K: datastruct to provide PID_Calc Kp and Tn via K[iKp] 
+  end;
+  
+  writeln(PID_VectorStr(K, 0,nk));
+  PID_Init(pid1,smpltim_us,K);
+  pid1.PID_ovr:=true;
+//PID_SetMinMaxLimit(pid1,-10,10);
+
+  iDTt:=round(Tt / dt);
+  arrlgt1:=iDTt; 
+  arrlgt:=80*arrlgt1;
+
+  SetLength(w,  arrlgt); SetLength(y,  arrlgt); SetLength(x,  arrlgt);
+  SetLength(y2, arrlgt); SetLength(y2d,arrlgt);
+  SetLength(xh1,arrlgt); SetLength(xh2,arrlgt); SetLength(xh3,arrlgt); 
+  SetLength(ap, arrlgt); SetLength(ai, arrlgt); SetLength(ad, arrlgt); 
+  
+  assign(f,fil);
+  rewrite(f); // writing result to .csv file, which can be viewed e.g. dygraph...
+  writeln(f,'t,w,y,x,PID_Calc,deltaY,p,i,d');
+   
+  for i:= 0 to (arrlgt-1) do
+  begin
+    if (i<arrlgt1) then w[i]:=walt else w[i]:=wneu;	// Sollwertverlauf
+	x[i]:=  walt; 
+    y[i]:=  walt/Ks; y2[i]:=0; 		y2d[i]:=yoffs;
+	xh1[i]:=walt;    xh2[i]:=walt; 	xh3[i]:=walt;
+	ap[i]:=  0;		 ai[i]:=  0;	ad[i]:=  0;
+	
+	if (i<arrlgt1) then writeln(f,gs(i));
+  end;
+  
+  i:=arrlgt1;
+  while (i<arrlgt-1) do
+  begin
+	y[i]:= y[i-1]+ Kp * ((1 + dt / Tn) * (w[i] - x[i]) - (w[i-1] - x[i-1])); // PIDout1
+	
+    PID_Calc(pid1,w[i],x[i],false);	
+    with pid1 do
+    begin
+      y2[i]:=PID_ControlOut;	// PIDout2, for comparison with PIDout1
+      ap[i]:=PID_pid[iKp];		// p value
+      ai[i]:=PID_pid[iKi];		// i value
+      ad[i]:=PID_pid[iKd];		// d value
+    end;
+    
+    y2d[i]:=y[i]-y2[i];			// compare algos, calc delta between y and y2
+
+	writeln(f,gs(i));
+
+	inc(i);
+    
+//	generate input value (response value) for both PID algos
+	xh1[i]:=xh1[i-1] + dt / T * (Ks * y2[i-idTt] - xh1[i-1]); 	// PT1 + Tt
+	xh2[i]:=xh2[i-1] + dt / T * (xh1[i-1] - xh2[i-1]);			// PT1
+	xh3[i]:=xh3[i-1] + dt / T * (xh2[i-1] - xh3[i-1]);			// PT1
+	
+	case PT of
+	  1:   x[i]:=xh1[i];		// Regelstrecke PT1
+	  else x[i]:=xh3[i];		// Regelstrecke PT3
+	end; // case
+	
+  end; // while
+  
+  close(f); 
+  LNX_chowngrp(fil,fusr,fgrp);
+  
+  SetLength(w,  0); SetLength(y,  0); SetLength(x,  0); SetLength(y2, 0);
+  SetLength(xh1,0); SetLength(xh2,0); SetLength(xh3,0); SetLength(y2d,0);
+  SetLength(ap, 0); SetLength(ai, 0); SetLength(ad, 0); 
 end;
 
 function  CL_Compose(cmdLine:string):string;	
@@ -18686,7 +19772,7 @@ begin
       if (InitHaltOnError 			IN RPI_HW_initpart) then 
 	  begin
 	  	_flgtodo:=_flgtodo-[InitHaltOnError];
-        LOG_Writeln(LOG_ERROR,'RPI_hal: can not initialize MemoryMap.');
+//      LOG_Writeln(LOG_ERROR,'RPI_hal: can not initialize MemoryMap.');
 //	    Halt(1);
       end;
 	end;
@@ -18707,9 +19793,9 @@ begin
 //i:=0; i:=4 div i;
   RPI_ProgramStartTime:=now; 	_OnExitShowRuntime:=false;
   try
-	call_external_prog(LOG_NONE,'uptime -s',sh);	// 2019-07-03 09:05:57
-	if not Str2DateTime(sh,'YYYY-MM-DD hh:mm:ss',RPI_BootTime) 
-	  then RPI_BootTime:=RPI_ProgramStartTime;
+	call_external_prog(LOG_NONE,'uptime -s',sh);	// 2019-07-03 09:05:57 
+	if not Str2DateTime(sh,4,RPI_BootTime)
+	  then RPI_BootTime:=RPI_ProgramStartTime; 
   except
 	RPI_BootTime:=RPI_ProgramStartTime; 
   end;
