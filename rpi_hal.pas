@@ -1,4 +1,4 @@
-unit rpi_hal; // V6.0 // 2022-02-10
+unit rpi_hal; // V6.1 // 2022-03-17
 { RPI_hal:
 * Free Pascal Hardware abstraction library for the Raspberry Pi
 * Copyright (c) 2012-2022 Stefan Fischer
@@ -1788,7 +1788,7 @@ function  RPI_snr :string; 	// 0000000012345678
 function  RPI_hw  :string; 	// BCM2708
 function  RPI_fw  :string; 	// 2018-02-09T14:22:56
 function  RPI_uname:string;	// Linux pump 4.14.18-v7+ #1093 SMP Fri Feb 9 15:33:07 GMT 2018 armv7l GNU/Linux
-function  RPI_machine:string;// armv7l
+function  RPI_machine:string;// armv7l aarch64
 function  RPI_proc:string; 	// ARMv6-compatible processor rev 7 (v6l) 
 function  RPI_mips:string; 	// 697.95 
 function  RPI_feat:string; 	// swp half thumb fastmult vfp edsp java tls 
@@ -11878,9 +11878,10 @@ end;
 
 function  MMAP_start(gpioonly:boolean):integer;
 //Set up a memory mapped region to access peripherals
-var rslt,errno:longint; dev:string; 
-	peri_base:off_t; prot,flags:cint; {$IFDEF LINUX} lw:longword; {$ENDIF}
+var rslt,errno:longint; dev:string; //_p:pointer;
+	peri_base,_pb:off_t; prot,flags:cint; {$IFDEF LINUX} lw:longword; {$ENDIF}
 begin
+//writeln('pointersize:',SizeOf(_p),' ####################################',CR);
   rslt:=-7; errno:=0; restrict2gpio:=gpioonly; GPU_MEM_BASE:=0;
   {$IFDEF LINUX}
     if RPI_run_on_ARM then rslt:=-6 else rslt:=-5; 
@@ -11900,17 +11901,11 @@ begin
 	    prot:=		PROT_READ or PROT_WRITE;
 	    flags:=		MAP_SHARED; //or MAP_LOCKED //or MAP_ANONYMOUS or MAP_NORESERVE	
 
-		mmap_arr:=fpMMap(nil,
-						 BCM270x_PSIZ_Byte,
-		                 prot,
-						 flags,
-						 mem_fd,
-						 (peri_base div PAGE_SIZE)	// mmap2 peripheral base -> offset (pages)
-						);  
-						
-		if (mmap_arr=MAP_FAILED) then 
-		begin // 2nd. try
-		  rslt:=-31;
+//writeln('RPI_machine: ',RPI_machine,CR);
+		if (RPI_machine='aarch64')
+		  then _pb:=peri_base					// mmap: peripheral base -> offset (bytes)
+		  else _pb:=peri_base div PAGE_SIZE;	// mmap2 peripheral base -> offset (pages)
+
 //		  LOG_Writeln(LOG_WARNING,'MMAP_start: mmap2');	
 (* https://www.mail-archive.com/fpc-pascal@lists.freepascal.org/msg53664.html
   offset was in earlier days RPI_get_PERI_BASE div 4096, because it uses mmap2 ?
@@ -11924,23 +11919,23 @@ function fpmmap(addr:pointer;len:size_t;prot:cint;flags:cint;fd:cint;ofs:off_t):
 void *mmap(void *addr, size_t len, int prot, int flags, int fildes, off_t off);
 void *mmap64(void *addr, size_t len, int prot, int flags, int fildes, off64_t off); 
 *)
-		  mmap_arr:=fpMMap(nil,
+		mmap_arr:=fpMMap(nil,
 						 BCM270x_PSIZ_Byte,
 		                 prot,
 						 flags,
 						 mem_fd,
-						 peri_base	// mmap: peripheral base -> offset (bytes)
-						);						
-		end;				
+						 _pb		// mmap2 peripheral base -> offset (pages)
+						);  
 
 		if (mmap_arr=MAP_FAILED) then 
 		begin
 		  errno:=fpgeterrno;
 //		  MMAP_start: PSIZ:0x02000000 Base: 0xFE000000
 		  LOG_Writeln(LOG_ERROR,'RPI_mmap_init, MMAP_start:'+
+		  	' '+RPI_machine+
 		  	' '+dev+
 		  	' PSIZ: 0x'+HexStr(BCM270x_PSIZ_Byte,8)+
-		  	' Base: 0x'+HexStr(peri_base,8)+
+		  	' Base: 0x'+HexStr(_pb,8)+
 		  	' page: 0x'+HexStr(PAGE_SIZE,4)+
 		  	' mmap_arr: 0x'+HexStr(PtrInt(mmap_arr),8));	  
 		end else rslt:=0; 
@@ -11961,9 +11956,8 @@ void *mmap64(void *addr, size_t len, int prot, int flags, int fildes, off64_t of
   {$ENDIF}
   case rslt of
      0:	 Log_writeln(Log_INFO, 'RPI_mmap_init, init successful');
-    -1:	 Log_writeln(Log_ERROR,'RPI_mmap_init, can not open '+dev+' on target CPU '+{$i %FPCTARGETCPU%}+', result: '+Num2Str(rslt,0));
-    -3:	 Log_writeln(Log_ERROR,'RPI_mmap_init, mmap2 '+LNX_ErrDesc(errno)+' on target CPU '+{$i %FPCTARGETCPU%}+', result: '+Num2Str(rslt,0));
-    -31: Log_writeln(Log_ERROR,'RPI_mmap_init, mmap '+LNX_ErrDesc(errno)+' on target CPU '+{$i %FPCTARGETCPU%}+', result: '+Num2Str(rslt,0));
+    -1:	 Log_writeln(Log_ERROR,'RPI_mmap_init, can not open '+dev+' on target CPU '+RPI_machine+'/'+{$i %FPCTARGETCPU%}+', result: '+Num2Str(rslt,0));
+    -3:	 Log_writeln(Log_ERROR,'RPI_mmap_init, mmap2 '+LNX_ErrDesc(errno)+' on target CPU '+RPI_machine+'/'+{$i %FPCTARGETCPU%}+', result: '+Num2Str(rslt,0));
 	-4:	 Log_writeln(Log_ERROR,'RPI_mmap_init, can not read test register APMIRQCLRACK');
 	-5:	 Log_writeln(Log_ERROR,'RPI_mmap_init, not supported rpi platform');
 	-6:  Log_writeln(Log_ERROR,'RPI_mmap_init, mmap already initialized');
